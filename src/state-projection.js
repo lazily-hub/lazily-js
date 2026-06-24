@@ -1,5 +1,8 @@
 import { EventEmitter } from "node:events";
 import { createRequire } from "node:module";
+import { realpathSync } from "node:fs";
+import { resolve } from "node:path";
+import { createHash } from "node:crypto";
 
 /**
  * JS-friendly interface to the lazily / agent-doc state-projection FFI channel.
@@ -24,6 +27,134 @@ import { createRequire } from "node:module";
 const nativeRequire = createRequire(import.meta.url);
 
 /**
+ * Compute the canonical document key used by agent-doc snapshots and editor
+ * state-projection events.
+ *
+ * @param {string} filePath
+ * @returns {string}
+ */
+export function documentHash(filePath) {
+  let canonical;
+  try {
+    canonical = realpathSync(filePath);
+  } catch {
+    canonical = resolve(filePath);
+  }
+  return createHash("sha256").update(canonical, "utf-8").digest("hex");
+}
+
+/**
+ * Build the Rust `StateEvent` JSON shape for a typed fact.
+ *
+ * @param {string} documentHashValue
+ * @param {string} type
+ * @param {Record<string, unknown>} fields
+ * @param {string} eventSuffix
+ * @returns {{ event_id: string, fact: Record<string, unknown> & { type: string, document_hash: string } }}
+ */
+export function buildStateEvent(documentHashValue, type, fields, eventSuffix) {
+  return {
+    event_id: `${documentHashValue}:${eventSuffix}`,
+    fact: {
+      type,
+      document_hash: documentHashValue,
+      ...fields,
+    },
+  };
+}
+
+/**
+ * Reduce a `DocumentStateProjection` JSON object into the compact editor status
+ * shape used by JetBrains and VS Code.
+ *
+ * @param {any} projection
+ * @returns {{ routeReadiness?: string, routePaneId?: string, latestTransportPatchId?: string, latestTransportPhase?: string, proofMarkers: number } | null}
+ */
+export function projectionSummary(projection) {
+  if (!projection || typeof projection !== "object") return null;
+  const route = projection.route ?? {};
+  const transport = projection.transport ?? {};
+  const proof = projection.proof ?? {};
+  const patches = transport.patches && typeof transport.patches === "object"
+    ? Object.entries(transport.patches)
+    : [];
+  const sortedPatches = patches.sort(([a], [b]) => a.localeCompare(b));
+  const latest = sortedPatches.length > 0 ? sortedPatches[sortedPatches.length - 1] : undefined;
+  return {
+    routeReadiness: typeof route.readiness === "string" ? route.readiness : undefined,
+    routePaneId: typeof route.pane_id === "string" ? route.pane_id : undefined,
+    latestTransportPatchId: latest?.[0],
+    latestTransportPhase: typeof latest?.[1]?.phase === "string" ? latest[1].phase : undefined,
+    proofMarkers: proof.markers && typeof proof.markers === "object"
+      ? Object.keys(proof.markers).length
+      : 0,
+  };
+}
+
+/**
+ * Render a compact editor-visible status string for a projection summary.
+ *
+ * @param {{ routeReadiness?: string, routePaneId?: string, latestTransportPatchId?: string, latestTransportPhase?: string, proofMarkers: number }} summary
+ * @returns {string}
+ */
+export function compactProjectionSummary(summary) {
+  return `route=${summary.routeReadiness ?? "unknown"} pane=${summary.routePaneId ?? "-"} `
+    + `transport=${summary.latestTransportPatchId ?? "-"}:${summary.latestTransportPhase ?? "-"} `
+    + `proof_markers=${summary.proofMarkers}`;
+}
+
+/**
+ * Decode and free one `agent_doc_state_projection` pointer.
+ *
+ * @param {any} koffi
+ * @param {any} ptr
+ * @param {(ptr: any) => void} freeString
+ * @returns {string | null}
+ */
+export function decodeStateProjectionPointer(koffi, ptr, freeString) {
+  if (ptr === null || ptr === undefined) return null;
+  const address = typeof koffi.address === "function" ? koffi.address(ptr) : 1n;
+  if (address === 0n || address === 0) return null;
+  try {
+    const json = koffi.decode.string(ptr);
+    return json === "null" || json == null ? null : json;
+  } finally {
+    freeString(ptr);
+  }
+}
+
+/**
+ * Wrap an already-loaded native library with the lazily state-projection FFI
+ * interface. Exported so package and editor parity tests can cover pointer/free
+ * lifecycle without loading a real native library.
+ *
+ * @param {any} koffi
+ * @param {any} lib
+ * @returns {LazilyFFI}
+ */
+export function wrapAgentDocStateProjectionFFI(koffi, lib) {
+  const state_projection = lib.func(
+    "void *agent_doc_state_projection(const char *document_hash)",
+  );
+  const record_state_event = lib.func(
+    "int agent_doc_record_state_event(const char *document_hash, const char *fact_json)",
+  );
+  const free_string = lib.func("void agent_doc_free_string(void *ptr)");
+  return {
+    stateProjection(documentHashValue) {
+      return decodeStateProjectionPointer(
+        koffi,
+        state_projection(documentHashValue),
+        free_string,
+      );
+    },
+    recordStateEvent(documentHashValue, factJson) {
+      return record_state_event(documentHashValue, factJson) === 1;
+    },
+  };
+}
+
+/**
  * Lazily load the `agent_doc` native library and wrap its state-projection C
  * ABI into the {@link LazilyFFI} interface.
  *
@@ -41,33 +172,7 @@ const nativeRequire = createRequire(import.meta.url);
 export function loadAgentDocFFI(libPath) {
   const koffi = nativeRequire("koffi");
   const lib = koffi.load(libPath ?? "agent_doc");
-  // The projection string is returned as a raw `void *` (NOT `char *`) so koffi
-  // hands us the pointer instead of auto-converting to a JS string — we need
-  // the pointer both to read the C string and to free its backing allocation.
-  const state_projection = lib.func(
-    "void *agent_doc_state_projection(const char *document_hash)",
-  );
-  const record_state_event = lib.func(
-    "int agent_doc_record_state_event(const char *document_hash, const char *fact_json)",
-  );
-  const free_string = lib.func("void agent_doc_free_string(void *ptr)");
-  return {
-    stateProjection(documentHash) {
-      const ptr = state_projection(documentHash);
-      if (ptr === null || koffi.address(ptr) === 0n) {
-        return null;
-      }
-      try {
-        const json = koffi.decode.string(ptr);
-        return json === "null" || json == null ? null : json;
-      } finally {
-        free_string(ptr);
-      }
-    },
-    recordStateEvent(documentHash, factJson) {
-      return record_state_event(documentHash, factJson) === 1;
-    },
-  };
+  return wrapAgentDocStateProjectionFFI(koffi, lib);
 }
 
 /**

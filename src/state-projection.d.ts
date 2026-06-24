@@ -18,6 +18,49 @@ export interface LazilyFFI {
   recordStateEvent(documentHash: string, factJson: string): boolean;
 }
 
+export interface ProjectionSummary {
+  routeReadiness?: string;
+  routePaneId?: string;
+  latestTransportPatchId?: string;
+  latestTransportPhase?: string;
+  proofMarkers: number;
+}
+
+export interface StateBackboneEvent {
+  event_id: string;
+  fact: Record<string, unknown> & {
+    type: string;
+    document_hash: string;
+  };
+}
+
+/** Compute the canonical-path SHA-256 document key used by agent-doc. */
+export function documentHash(filePath: string): string;
+
+/** Build the Rust `StateEvent` JSON object for a typed fact. */
+export function buildStateEvent(
+  documentHashValue: string,
+  type: string,
+  fields: Record<string, unknown>,
+  eventSuffix: string,
+): StateBackboneEvent;
+
+/** Reduce a `DocumentStateProjection` JSON object into editor status fields. */
+export function projectionSummary(projection: unknown): ProjectionSummary | null;
+
+/** Render the compact editor-visible state projection summary. */
+export function compactProjectionSummary(summary: ProjectionSummary): string;
+
+/** Decode and free one `agent_doc_state_projection` pointer. */
+export function decodeStateProjectionPointer(
+  koffi: unknown,
+  ptr: unknown,
+  freeString: (ptr: unknown) => void,
+): string | null;
+
+/** Wrap an already-loaded native library with the lazily state-projection FFI. */
+export function wrapAgentDocStateProjectionFFI(koffi: unknown, lib: unknown): LazilyFFI;
+
 /**
  * Lazily load the `agent_doc` native library and wrap its state-projection C
  * ABI into the {@link LazilyFFI} interface. `koffi` is resolved only when
