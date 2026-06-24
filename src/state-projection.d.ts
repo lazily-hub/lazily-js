@@ -20,8 +20,8 @@ export interface LazilyFFI {
 
 /**
  * Lazily load the `agent_doc` native library and wrap its state-projection C
- * ABI into the {@link LazilyFFI} interface. `ffi-napi` / `ref-napi` are resolved
- * only when called, not at module import.
+ * ABI into the {@link LazilyFFI} interface. `koffi` is resolved only when
+ * called, not at module import.
  */
 export function loadAgentDocFFI(libPath?: string): LazilyFFI;
 

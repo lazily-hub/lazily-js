@@ -6,7 +6,7 @@ import { StateProjectionClient } from "../src/state-projection.js";
 /**
  * Tests for StateProjectionClient using a mock FFI.
  *
- * The real FFI requires the `agent_doc` native library (loaded via ffi-napi);
+ * The real FFI requires the `agent_doc` native library (loaded via koffi);
  * these tests verify the client logic (projection holder updates, null
  * handling, event emission, event reporting) without a native dependency —
  * mirroring lazily-kt's StateProjectionClientTest.

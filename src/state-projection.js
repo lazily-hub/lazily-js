@@ -27,38 +27,45 @@ const nativeRequire = createRequire(import.meta.url);
  * Lazily load the `agent_doc` native library and wrap its state-projection C
  * ABI into the {@link LazilyFFI} interface.
  *
- * Uses `createRequire` so `ffi-napi` / `ref-napi` are resolved **only when this
- * function is called**, not when the module is imported — keeping `make check`
- * (pure-JS tests with injected mocks) free of any native build dependency.
+ * Uses `createRequire` so `koffi` is resolved **only when this function is
+ * called**, not when the module is imported — keeping `make check` (pure-JS
+ * tests with injected mocks) free of any native build dependency. koffi ships
+ * prebuilt binaries (no native compile step), so — unlike the previous
+ * ffi-napi/ref-napi loader — it installs cleanly on Node >= 23 (ffi-napi's
+ * `napi_add_finalizer` ABI break made it uninstallable there).
  *
  * @param {string} [libPath] Library name or path (defaults to `agent_doc`,
  *   resolved from the process load path / `LD_LIBRARY_PATH`).
  * @returns {LazilyFFI}
  */
 export function loadAgentDocFFI(libPath) {
-  const ffi = nativeRequire("ffi-napi");
-  const ref = nativeRequire("ref-napi");
-  const charPtr = ref.refType("char");
-  const lib = ffi.Library(libPath ?? "agent_doc", {
-    agent_doc_state_projection: [charPtr, ["string"]],
-    agent_doc_record_state_event: ["int", ["string", "string"]],
-    agent_doc_free_string: ["void", [charPtr]],
-  });
+  const koffi = nativeRequire("koffi");
+  const lib = koffi.load(libPath ?? "agent_doc");
+  // The projection string is returned as a raw `void *` (NOT `char *`) so koffi
+  // hands us the pointer instead of auto-converting to a JS string — we need
+  // the pointer both to read the C string and to free its backing allocation.
+  const state_projection = lib.func(
+    "void *agent_doc_state_projection(const char *document_hash)",
+  );
+  const record_state_event = lib.func(
+    "int agent_doc_record_state_event(const char *document_hash, const char *fact_json)",
+  );
+  const free_string = lib.func("void agent_doc_free_string(void *ptr)");
   return {
     stateProjection(documentHash) {
-      const ptr = lib.agent_doc_state_projection(documentHash);
-      if (ptr.isNull()) {
+      const ptr = state_projection(documentHash);
+      if (ptr === null || koffi.address(ptr) === 0n) {
         return null;
       }
       try {
-        const json = ref.readCString(ptr);
+        const json = koffi.decode.string(ptr);
         return json === "null" || json == null ? null : json;
       } finally {
-        lib.agent_doc_free_string(ptr);
+        free_string(ptr);
       }
     },
     recordStateEvent(documentHash, factJson) {
-      return lib.agent_doc_record_state_event(documentHash, factJson) === 1;
+      return record_state_event(documentHash, factJson) === 1;
     },
   };
 }
