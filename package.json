@@ -1,7 +1,7 @@
 {
   "name": "@lazily/js",
   "version": "0.1.0",
-  "description": "JavaScript lazily IPC protocol helpers plus future FFI state-projection bindings. NOT a reactive-core port.",
+  "description": "JavaScript lazily IPC protocol helpers plus FFI state-projection consumer bindings. NOT a reactive-core port.",
   "type": "module",
   "main": "src/index.js",
   "types": "src/index.d.ts",
@@ -9,14 +9,19 @@
     ".": {
       "types": "./src/index.d.ts",
       "default": "./src/index.js"
+    },
+    "./state-projection": {
+      "types": "./src/state-projection.d.ts",
+      "default": "./src/state-projection.js"
     }
   },
   "scripts": {
-    "build": "node --check src/index.js",
+    "build": "node --check src/index.js && node --check src/state-projection.js",
     "test": "node --test test/*.test.js"
   },
   "dependencies": {
-    "ffi-napi": "^4.0.3"
+    "ffi-napi": "^4.0.3",
+    "ref-napi": "^3.0.0"
   },
   "devDependencies": {
     "typescript": "^5.6.0",
