@@ -1,0 +1,21 @@
+{
+  "name": "@lazily/js",
+  "version": "0.1.0",
+  "description": "FFI-consumer package for lazily state-projection (VSCode/editor plugins). NOT a reactive-core port.",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "node --test --import tsx test/"
+  },
+  "dependencies": {
+    "ffi-napi": "^4.0.3"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "tsx": "^4.19.0",
+    "@types/node": "^22.0.0",
+    "@types/ffi-napi": "^4.0.10"
+  }
+}
