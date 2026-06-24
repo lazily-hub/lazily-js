@@ -1,0 +1,4 @@
+.tsift/
+coverage/
+dist/
+node_modules/
