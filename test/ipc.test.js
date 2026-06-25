@@ -48,6 +48,96 @@ function assertRoundTripJson(message, fixture) {
   assert.deepEqual(IpcMessage.decodeJson(message.encodeJson()), message);
 }
 
+function nodeStateKind(state) {
+  if (state instanceof NodeStatePayload) return "Payload";
+  if (state instanceof NodeStateSharedBlob) return "SharedBlob";
+  if (state instanceof NodeStateOpaque) return "Opaque";
+  throw new Error(`unknown NodeState class: ${state?.constructor?.name}`);
+}
+
+function deltaOpKind(op) {
+  return Object.keys(op.toWire())[0];
+}
+
+function firstSharedBlob(snapshot) {
+  const state = snapshot.nodes[0]?.state;
+  return state instanceof NodeStateSharedBlob ? state.blob : null;
+}
+
+const ALL_OP_KINDS = Object.freeze([
+  "CellSet",
+  "SlotValue",
+  "Invalidate",
+  "NodeAdd",
+  "NodeRemove",
+  "EdgeAdd",
+  "EdgeRemove",
+]);
+
+/**
+ * Generic conformance-assertion validator (parity with lazily-kt #lzktconf):
+ * cross-check every `assertions` metadata field on the fixture against the
+ * parsed message so silent drift between `wire` and `assertions` is caught.
+ * An unknown assertion key throws so new metadata can never be ignored.
+ */
+function assertFixtureAssertions(message, fixture) {
+  const a = fixture.assertions;
+  assert.ok(a, `fixture ${fixture.description ?? ""} missing "assertions" metadata`);
+
+  if (message.isSnapshot) {
+    const snap = message.snapshot;
+    for (const [key, expected] of Object.entries(a)) {
+      let actual;
+      switch (key) {
+        case "epoch": actual = snap.epoch; break;
+        case "node_count": actual = snap.nodes.length; break;
+        case "edge_count": actual = snap.edges.length; break;
+        case "root_count": actual = snap.roots.length; break;
+        case "first_node_type_tag": actual = snap.nodes[0].typeTag; break;
+        case "first_node_state_kind": actual = nodeStateKind(snap.nodes[0].state); break;
+        case "has_opaque_node":
+          actual = snap.nodes.some((n) => n.state instanceof NodeStateOpaque);
+          break;
+        case "opaque_node_id":
+          actual = snap.nodes.find((n) => n.state instanceof NodeStateOpaque)?.node;
+          break;
+        case "blob_offset": actual = firstSharedBlob(snap)?.offset; break;
+        case "blob_len": actual = firstSharedBlob(snap)?.len; break;
+        case "blob_epoch": actual = firstSharedBlob(snap)?.epoch; break;
+        default: throw new Error(`unknown snapshot assertion key: ${key}`);
+      }
+      assert.equal(actual, expected, `snapshot assertion "${key}"`);
+    }
+  } else if (message.isDelta) {
+    const delta = message.delta;
+    for (const [key, expected] of Object.entries(a)) {
+      let actual;
+      switch (key) {
+        case "base_epoch": actual = delta.baseEpoch; break;
+        case "epoch": actual = delta.epoch; break;
+        case "is_sequential": actual = delta.isNextAfter(delta.baseEpoch); break;
+        case "op_count": actual = delta.ops.length; break;
+        case "has_all_op_variants": {
+          const kinds = new Set(delta.ops.map((op) => deltaOpKind(op)));
+          actual = ALL_OP_KINDS.every((k) => kinds.has(k));
+          break;
+        }
+        case "resync_after_epoch_10":
+          actual = delta.applyStatus(10).isResyncRequired;
+          break;
+        case "first_op_kind": actual = deltaOpKind(delta.ops[0]); break;
+        case "first_op_payload_kind":
+          actual = Object.keys(delta.ops[0].payload.toWire())[0];
+          break;
+        default: throw new Error(`unknown delta assertion key: ${key}`);
+      }
+      assert.equal(actual, expected, `delta assertion "${key}"`);
+    }
+  } else {
+    assert.fail(`unknown message kind for fixture ${fixture.description ?? ""}`);
+  }
+}
+
 test("snapshot round trips through JSON bytes", () => {
   const snapshot = new Snapshot({
     epoch: 7,
@@ -292,6 +382,31 @@ test("all fixtures round trip", () => {
   ]) {
     const fixture = loadFixture(name);
     const message = IpcMessage.fromWire(fixture.wire);
+    assertFixtureAssertions(message, fixture);
     assertRoundTripJson(message, fixture);
   }
+});
+
+test("assertFixtureAssertions catches wire/assertions drift", () => {
+  const fixture = loadFixture("snapshot_minimal.json");
+  const message = IpcMessage.fromWire(fixture.wire);
+
+  // Correct assertions pass.
+  assertFixtureAssertions(message, fixture);
+
+  // A drifted metadata field must fail loudly instead of passing silently.
+  const drifted = structuredClone(fixture);
+  drifted.assertions.node_count = fixture.assertions.node_count + 999;
+  assert.throws(
+    () => assertFixtureAssertions(message, drifted),
+    /snapshot assertion "node_count"/,
+  );
+
+  // An unknown assertion key must also fail (new metadata can't be ignored).
+  const unknown = structuredClone(fixture);
+  unknown.assertions.unexpected_field = true;
+  assert.throws(
+    () => assertFixtureAssertions(message, unknown),
+    /unknown snapshot assertion key/,
+  );
 });
