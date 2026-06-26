@@ -1,5 +1,5 @@
 {
-  "name": "@lazily/js",
+  "name": "@lazily-hub/js",
   "version": "0.1.0",
   "description": "JavaScript lazily IPC protocol helpers plus FFI state-projection consumer bindings. NOT a reactive-core port.",
   "type": "module",

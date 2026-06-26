@@ -190,7 +190,7 @@ export function loadAgentDocFFI(libPath) {
  * event-reporter, NOT a reactive-core port (FFI-first rule).
  *
  * @example
- * import { StateProjectionClient, loadAgentDocFFI } from "@lazily/js/state-projection";
+ * import { StateProjectionClient, loadAgentDocFFI } from "@lazily-hub/js/state-projection";
  * const ffi = loadAgentDocFFI();
  * const client = new StateProjectionClient(documentHash, ffi);
  * client.on("projection", (json) => renderStatus(json));
