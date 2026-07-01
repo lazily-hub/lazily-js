@@ -13,10 +13,14 @@
     "./state-projection": {
       "types": "./src/state-projection.d.ts",
       "default": "./src/state-projection.js"
+    },
+    "./statechart": {
+      "types": "./src/statechart.d.ts",
+      "default": "./src/statechart.js"
     }
   },
   "scripts": {
-    "build": "node --check src/index.js && node --check src/state-projection.js",
+    "build": "node --check src/index.js && node --check src/state-projection.js && node --check src/statechart.js",
     "test": "node --test test/*.test.js"
   },
   "dependencies": {
