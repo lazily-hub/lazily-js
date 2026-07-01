@@ -43,6 +43,36 @@ function bytesOf(value) {
   return bytesFromWire(value);
 }
 
+// NodeKey: optional wire-stable "/"-joined keyed address (protocol.md § NodeKey).
+// JSON omits the field when absent; a missing field decodes to null.
+const NODE_KEY_MAX_BYTES = 1024;
+const NODE_KEY_MAX_SEGMENTS = 32;
+
+function normalizeNodeKey(key) {
+  if (key === undefined || key === null) {
+    return null;
+  }
+  if (typeof key !== "string") {
+    throw new TypeError("NodeKey must be a string");
+  }
+  if (key === "") {
+    throw new TypeError("NodeKey must not be empty");
+  }
+  if (textEncoder.encode(key).length > NODE_KEY_MAX_BYTES) {
+    throw new TypeError(`NodeKey must be <= ${NODE_KEY_MAX_BYTES} bytes`);
+  }
+  const segments = key.split("/");
+  if (segments.length > NODE_KEY_MAX_SEGMENTS) {
+    throw new TypeError(`NodeKey must have <= ${NODE_KEY_MAX_SEGMENTS} segments`);
+  }
+  if (segments.some((segment) => segment === "")) {
+    throw new TypeError(
+      "NodeKey must not contain empty segments (leading/trailing/double '/')",
+    );
+  }
+  return key;
+}
+
 export class ShmBlobRef {
   constructor({ offset, len, generation, epoch, checksum }) {
     this.offset = assertInteger(offset, "offset");
@@ -187,31 +217,36 @@ export const IpcValue = Object.freeze({
 });
 
 export class NodeSnapshot {
-  constructor(node, typeTag, state) {
+  constructor(node, typeTag, state, key = null) {
     this.node = assertInteger(node, "node");
     this.typeTag = String(typeTag);
     this.state = state;
+    this.key = normalizeNodeKey(key);
     Object.freeze(this);
   }
 
   toWire() {
-    return {
+    const wire = {
       node: this.node,
       type_tag: this.typeTag,
       state: this.state.toWire(),
     };
+    if (this.key !== null) {
+      wire.key = this.key;
+    }
+    return wire;
   }
 
-  static payload(node, typeTag, bytes) {
-    return new NodeSnapshot(node, typeTag, NodeState.payload(bytes));
+  static payload(node, typeTag, bytes, key) {
+    return new NodeSnapshot(node, typeTag, NodeState.payload(bytes), key);
   }
 
-  static sharedBlob(node, typeTag, blob) {
-    return new NodeSnapshot(node, typeTag, NodeState.sharedBlob(blob));
+  static sharedBlob(node, typeTag, blob, key) {
+    return new NodeSnapshot(node, typeTag, NodeState.sharedBlob(blob), key);
   }
 
-  static opaque(node, typeTag) {
-    return new NodeSnapshot(node, typeTag, NodeState.opaque());
+  static opaque(node, typeTag, key) {
+    return new NodeSnapshot(node, typeTag, NodeState.opaque(), key);
   }
 
   static fromWire(value) {
@@ -220,6 +255,7 @@ export class NodeSnapshot {
       object.node,
       object.type_tag,
       NodeState.fromWire(object.state),
+      object.key ?? null,
     );
   }
 }
@@ -346,22 +382,25 @@ export class DeltaOpInvalidate extends DeltaOpBase {
 }
 
 export class DeltaOpNodeAdd extends DeltaOpBase {
-  constructor(node, typeTag, state) {
+  constructor(node, typeTag, state, key = null) {
     super();
     this.node = assertInteger(node, "node");
     this.typeTag = String(typeTag);
     this.state = state;
+    this.key = normalizeNodeKey(key);
     Object.freeze(this);
   }
 
   toWire() {
-    return {
-      NodeAdd: {
-        node: this.node,
-        type_tag: this.typeTag,
-        state: this.state.toWire(),
-      },
+    const wire = {
+      node: this.node,
+      type_tag: this.typeTag,
+      state: this.state.toWire(),
     };
+    if (this.key !== null) {
+      wire.key = this.key;
+    }
+    return { NodeAdd: wire };
   }
 
   targetReadable(permissions, peer) {
@@ -437,8 +476,8 @@ export const DeltaOp = Object.freeze({
   invalidate(node) {
     return new DeltaOpInvalidate(node);
   },
-  nodeAdd(node, typeTag, state) {
-    return new DeltaOpNodeAdd(node, typeTag, state);
+  nodeAdd(node, typeTag, state, key) {
+    return new DeltaOpNodeAdd(node, typeTag, state, key);
   },
   nodeRemove(node) {
     return new DeltaOpNodeRemove(node);
@@ -464,6 +503,7 @@ export const DeltaOp = Object.freeze({
           object.node,
           object.type_tag,
           NodeState.fromWire(object.state),
+          object.key ?? null,
         );
       case "NodeRemove":
         return new DeltaOpNodeRemove(object.node);

@@ -77,18 +77,20 @@ export const IpcValue: {
 };
 
 export class NodeSnapshot {
-  constructor(node: NodeId, typeTag: string, state: NodeStateValue);
+  constructor(node: NodeId, typeTag: string, state: NodeStateValue, key?: string | null);
   readonly node: NodeId;
   readonly typeTag: string;
   readonly state: NodeStateValue;
+  readonly key: string | null;
   toWire(): unknown;
-  static payload(node: NodeId, typeTag: string, bytes: WireBytes): NodeSnapshot;
+  static payload(node: NodeId, typeTag: string, bytes: WireBytes, key?: string | null): NodeSnapshot;
   static sharedBlob(
     node: NodeId,
     typeTag: string,
     blob: ShmBlobRef | ShmBlobRefWire,
+    key?: string | null,
   ): NodeSnapshot;
-  static opaque(node: NodeId, typeTag: string): NodeSnapshot;
+  static opaque(node: NodeId, typeTag: string, key?: string | null): NodeSnapshot;
   static fromWire(value: unknown): NodeSnapshot;
 }
 
@@ -150,10 +152,11 @@ export class DeltaOpInvalidate {
 }
 
 export class DeltaOpNodeAdd {
-  constructor(node: NodeId, typeTag: string, state: NodeStateValue);
+  constructor(node: NodeId, typeTag: string, state: NodeStateValue, key?: string | null);
   readonly node: NodeId;
   readonly typeTag: string;
   readonly state: NodeStateValue;
+  readonly key: string | null;
   toWire(): unknown;
   targetReadable(permissions: PeerPermissions, peer: PeerId): boolean;
 }
@@ -185,7 +188,7 @@ export const DeltaOp: {
   cellSet(node: NodeId, payload: IpcValueValue | ShmBlobRef | WireBytes): DeltaOpCellSet;
   slotValue(node: NodeId, payload: IpcValueValue | ShmBlobRef | WireBytes): DeltaOpSlotValue;
   invalidate(node: NodeId): DeltaOpInvalidate;
-  nodeAdd(node: NodeId, typeTag: string, state: NodeStateValue): DeltaOpNodeAdd;
+  nodeAdd(node: NodeId, typeTag: string, state: NodeStateValue, key?: string | null): DeltaOpNodeAdd;
   nodeRemove(node: NodeId): DeltaOpNodeRemove;
   edgeAdd(dependent: NodeId, dependency: NodeId): DeltaOpEdgeAdd;
   edgeRemove(dependent: NodeId, dependency: NodeId): DeltaOpEdgeRemove;

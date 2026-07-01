@@ -80,6 +80,12 @@ perms.canRead(7, 1); // false
 `ShmBlobRef` carrying the shared-memory blob descriptor (`offset`, `len`,
 `generation`, `epoch`, `checksum`).
 
+`NodeSnapshot` and the `NodeAdd` op carry an optional wire-stable **`NodeKey`**
+(`key`), the `"/"`-joined keyed address from [the spec][spec] § NodeKey. It is
+omitted from JSON when absent and decodes to `null` when missing, so pre-`key`
+fixtures round-trip unchanged. Construction enforces the spec bounds: path
+≤ 1024 bytes, ≤ 32 segments, no empty segments (leading/trailing/double `"/"`).
+
 ## State chart
 
 `statechart.js` is the native JavaScript counterpart of
@@ -151,9 +157,17 @@ transport** — the IPC and state-chart modules work without any native binary.
 lazily-js replays the shared [`lazily-spec`][spec] conformance fixtures:
 
 - IPC fixtures in `test/conformance/` round-trip through `IpcMessage.fromWire` /
-  `toWire` (`test/ipc.test.js`).
+  `toWire` (`test/ipc.test.js`). This includes the `agent-doc/` snapshot + delta
+  pair, whose `type_tag` vocabulary is checked against
+  [`schemas/agent-doc-state.json`][spec] and whose phase assertions decode the
+  inline serde_json payload bytes.
 - The state-chart interpreter is validated against the same Harel fixtures every
   binding uses (`test/statechart.test.js`).
+
+The `arena_blob.json` fixture is intentionally **not** replayed here: it is
+`kind: "Arena"`, explicitly not a wire type, and scopes the in-process
+`ShmBlobArena` host contract to the reactive cores (lazily-rs / -py / -zig).
+lazily-js is a state-projection consumer with no arena host of its own.
 
 ## Development
 

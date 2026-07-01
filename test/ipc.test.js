@@ -18,6 +18,7 @@ import {
   EdgeSnapshot,
   IpcMessage,
   IpcValue,
+  IpcValueInline,
   IpcValueSharedBlob,
   NodeSnapshot,
   NodeState,
@@ -33,7 +34,8 @@ import {
 
 const here = dirname(fileURLToPath(import.meta.url));
 const localFixtures = join(here, "conformance");
-const specFixtures = join(here, "..", "..", "lazily-spec", "conformance");
+const specRoot = join(here, "..", "..", "lazily-spec");
+const specFixtures = join(specRoot, "conformance");
 
 function loadFixture(name) {
   const specPath = join(specFixtures, name);
@@ -41,6 +43,50 @@ function loadFixture(name) {
   const fixture = JSON.parse(readFileSync(path, "utf8"));
   assert.equal(fixture.protocol_version, 1);
   return fixture;
+}
+
+// agent-doc-state type_tag vocabulary (schemas/agent-doc-state.json § TypeTag).
+// Lazy so non-agent-doc test runs never touch the schema file.
+let agentDocTypeTags = null;
+function loadAgentDocVocabulary() {
+  if (agentDocTypeTags !== null) {
+    return agentDocTypeTags;
+  }
+  const path = join(specRoot, "schemas", "agent-doc-state.json");
+  const schema = JSON.parse(readFileSync(path, "utf8"));
+  agentDocTypeTags = new Set(schema?.$defs?.TypeTag?.enum ?? []);
+  return agentDocTypeTags;
+}
+
+function decodePayloadJson(bytes) {
+  return JSON.parse(new TextDecoder().decode(Uint8Array.from(bytes)));
+}
+
+// Inline JSON carried by a snapshot node state (null for SharedBlob / Opaque).
+function nodePayloadJson(node) {
+  return node.state instanceof NodeStatePayload
+    ? decodePayloadJson(node.state.bytes)
+    : null;
+}
+
+// Inline JSON carried by a delta CellSet/SlotValue op payload (null for SharedBlob).
+function valueOpPayloadJson(op) {
+  return op.payload instanceof IpcValueInline
+    ? decodePayloadJson(op.payload.bytes)
+    : null;
+}
+
+// Find the `.phase` of the decoded payload object that carries `markerField`
+// (e.g. "cycle_id" -> CloseoutProjection, "backlog_id" -> QueueHeadProjection),
+// so phase assertions need no out-of-band node-id mapping. Requires `phase` to
+// be present too, so a struct that merely references the marker (e.g. the
+// baseline projection carries cycle_id but has no phase) is not a false hit.
+function phaseByMarker(objects, markerField) {
+  const found = objects.find(
+    (obj) =>
+      obj && typeof obj === "object" && markerField in obj && "phase" in obj,
+  );
+  return found?.phase;
 }
 
 function assertRoundTripJson(message, fixture) {
@@ -104,9 +150,27 @@ function assertFixtureAssertions(message, fixture) {
         case "blob_offset": actual = firstSharedBlob(snap)?.offset; break;
         case "blob_len": actual = firstSharedBlob(snap)?.len; break;
         case "blob_epoch": actual = firstSharedBlob(snap)?.epoch; break;
+        case "type_tags":
+          actual = snap.nodes.map((n) => n.typeTag);
+          break;
+        case "cycle_phase": {
+          const objs = snap.nodes.map(nodePayloadJson);
+          actual = phaseByMarker(objs, "cycle_id");
+          break;
+        }
+        case "queue_head_phase": {
+          const objs = snap.nodes.map(nodePayloadJson);
+          actual = phaseByMarker(objs, "backlog_id");
+          break;
+        }
+        case "all_type_tags_in_vocabulary": {
+          const vocab = loadAgentDocVocabulary();
+          actual = snap.nodes.map((n) => n.typeTag).every((t) => vocab.has(t));
+          break;
+        }
         default: throw new Error(`unknown snapshot assertion key: ${key}`);
       }
-      assert.equal(actual, expected, `snapshot assertion "${key}"`);
+      assert.deepEqual(actual, expected, `snapshot assertion "${key}"`);
     }
   } else if (message.isDelta) {
     const delta = message.delta;
@@ -129,9 +193,36 @@ function assertFixtureAssertions(message, fixture) {
         case "first_op_payload_kind":
           actual = Object.keys(delta.ops[0].payload.toWire())[0];
           break;
+        case "added_type_tags":
+          actual = delta.ops
+            .filter((op) => op instanceof DeltaOpNodeAdd)
+            .map((op) => op.typeTag);
+          break;
+        case "cycle_phase_after": {
+          const objs = delta.ops
+            .filter((op) => op instanceof DeltaOpCellSet || op instanceof DeltaOpSlotValue)
+            .map(valueOpPayloadJson);
+          actual = phaseByMarker(objs, "cycle_id");
+          break;
+        }
+        case "queue_head_phase_after": {
+          const objs = delta.ops
+            .filter((op) => op instanceof DeltaOpCellSet || op instanceof DeltaOpSlotValue)
+            .map(valueOpPayloadJson);
+          actual = phaseByMarker(objs, "backlog_id");
+          break;
+        }
+        case "all_type_tags_in_vocabulary": {
+          const vocab = loadAgentDocVocabulary();
+          actual = delta.ops
+            .filter((op) => op instanceof DeltaOpNodeAdd)
+            .map((op) => op.typeTag)
+            .every((t) => vocab.has(t));
+          break;
+        }
         default: throw new Error(`unknown delta assertion key: ${key}`);
       }
-      assert.equal(actual, expected, `delta assertion "${key}"`);
+      assert.deepEqual(actual, expected, `delta assertion "${key}"`);
     }
   } else {
     assert.fail(`unknown message kind for fixture ${fixture.description ?? ""}`);
@@ -263,6 +354,78 @@ test("permissions gate operation kinds independently", () => {
   assert.equal(permissions.isAllowed(1, RemoteOp.write(10)), false);
 });
 
+test("NodeSnapshot omits key when absent and emits it when set", () => {
+  assert.deepEqual(
+    NodeSnapshot.payload(1, "i32", Uint8Array.of(1)).toWire(),
+    { node: 1, type_tag: "i32", state: { Payload: [1] } },
+  );
+
+  const keyed = NodeSnapshot.payload(1, "i32", Uint8Array.of(1), "scores/alice");
+  assert.equal(keyed.key, "scores/alice");
+  assert.deepEqual(keyed.toWire(), {
+    node: 1,
+    type_tag: "i32",
+    state: { Payload: [1] },
+    key: "scores/alice",
+  });
+});
+
+test("NodeSnapshot.fromWire treats a missing key as null and reads a present key", () => {
+  assert.equal(
+    NodeSnapshot.fromWire({ node: 1, type_tag: "i32", state: { Payload: [1] } }).key,
+    null,
+  );
+  const keyed = NodeSnapshot.fromWire({
+    node: 2,
+    type_tag: "i32",
+    state: { Payload: [2] },
+    key: "outer/k1/inner/k2",
+  });
+  assert.equal(keyed.key, "outer/k1/inner/k2");
+});
+
+test("NodeAdd delta op carries an optional key through wire round-trip", () => {
+  const op = DeltaOp.nodeAdd(4, "u64", NodeState.payload(Uint8Array.of(64)), "cell/family/x");
+  assert.equal(op.key, "cell/family/x");
+  assert.deepEqual(op.toWire(), {
+    NodeAdd: {
+      node: 4,
+      type_tag: "u64",
+      state: { Payload: [64] },
+      key: "cell/family/x",
+    },
+  });
+
+  const message = IpcMessage.delta(Delta.next(1, [op]));
+  const decoded = IpcMessage.decodeJson(message.encodeJson());
+  assert.deepEqual(decoded.delta.ops[0], op);
+  assert.equal(decoded.delta.ops[0].key, "cell/family/x");
+
+  assert.equal(DeltaOp.fromWire(op.toWire()).key, "cell/family/x");
+});
+
+test("NodeKey validation rejects malformed paths", () => {
+  const rejection = (matcher, ...args) =>
+    assert.throws(() => NodeSnapshot.payload(1, "t", Uint8Array.of(0), ...args), matcher);
+
+  // empty path
+  rejection(TypeError, "");
+  // empty segments: leading, trailing, and double '/'
+  rejection(TypeError, "/leading");
+  rejection(TypeError, "trailing/");
+  rejection(TypeError, "double//slash");
+  // non-string
+  rejection(TypeError, 7);
+  // > 32 segments
+  rejection(TypeError, Array.from({ length: 33 }, (_, i) => `s${i}`).join("/"));
+});
+
+test("NodeKey accepts the boundary sizes (31 segments, 1024 bytes)", () => {
+  const thirtyOne = Array.from({ length: 31 }, (_, i) => `s${i}`).join("/");
+  const snap = NodeSnapshot.payload(1, "t", Uint8Array.of(0), thirtyOne);
+  assert.equal(snap.key, thirtyOne);
+});
+
 test("conformance snapshot minimal", () => {
   const fixture = loadFixture("snapshot_minimal.json");
   const message = IpcMessage.fromWire(fixture.wire);
@@ -371,6 +534,51 @@ test("conformance delta shared blob", () => {
   assertRoundTripJson(message, fixture);
 });
 
+test("conformance agent-doc snapshot", () => {
+  const fixture = loadFixture("agent-doc/snapshot_agent_doc_state.json");
+  const message = IpcMessage.fromWire(fixture.wire);
+  const snap = message.snapshot;
+
+  assert.equal(snap.epoch, 3);
+  assert.equal(snap.nodes.length, 3);
+  assert.equal(snap.edges.length, 2);
+  assert.equal(snap.roots.length, 1);
+  assert.deepEqual(
+    snap.nodes.map((n) => n.typeTag),
+    [
+      "agent_doc.document.baseline",
+      "agent_doc.closeout.cycle",
+      "agent_doc.queue.head",
+    ],
+  );
+  // every node carries its serde_json(struct) payload inline as bytes
+  assert.ok(snap.nodes.every((n) => n.state instanceof NodeStatePayload));
+
+  assertRoundTripJson(message, fixture);
+});
+
+test("conformance agent-doc delta", () => {
+  const fixture = loadFixture("agent-doc/delta_agent_doc_state.json");
+  const message = IpcMessage.fromWire(fixture.wire);
+  const delta = message.delta;
+
+  assert.equal(delta.baseEpoch, 3);
+  assert.equal(delta.epoch, 6);
+  assert.equal(delta.ops.length, 4);
+  assert.deepEqual(
+    delta.ops
+      .filter((op) => op instanceof DeltaOpNodeAdd)
+      .map((op) => op.typeTag),
+    ["agent_doc.transport.patch"],
+  );
+  assert.deepEqual(
+    delta.ops.map((op) => op.constructor),
+    [DeltaOpCellSet, DeltaOpCellSet, DeltaOpNodeAdd, DeltaOpEdgeAdd],
+  );
+
+  assertRoundTripJson(message, fixture);
+});
+
 test("all fixtures round trip", () => {
   for (const name of [
     "snapshot_minimal.json",
@@ -379,6 +587,8 @@ test("all fixtures round trip", () => {
     "delta_sequential.json",
     "delta_non_sequential.json",
     "delta_shared_blob.json",
+    "agent-doc/snapshot_agent_doc_state.json",
+    "agent-doc/delta_agent_doc_state.json",
   ]) {
     const fixture = loadFixture(name);
     const message = IpcMessage.fromWire(fixture.wire);
