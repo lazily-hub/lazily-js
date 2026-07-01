@@ -228,16 +228,70 @@ export class Delta {
   static fromWire(value: unknown): Delta;
 }
 
+export class WireStamp {
+  constructor(fields: { wallTime: number; logical: number; peer: number });
+  readonly wallTime: number;
+  readonly logical: number;
+  readonly peer: number;
+  toWire(): WireStampWire;
+  static fromWire(value: WireStampWire): WireStamp;
+}
+
+export type WireStampWire = {
+  wall_time: number;
+  logical: number;
+  peer: number;
+};
+
+export type FrontierEntry = { peer: NodeId; stamp: WireStamp };
+
+export class CrdtOp {
+  constructor(
+    node: NodeId,
+    stamp: WireStamp | WireStampWire,
+    state: IpcValueValue | ShmBlobRef | WireBytes,
+    key?: string | null,
+  );
+  readonly node: NodeId;
+  readonly stamp: WireStamp;
+  readonly state: IpcValueValue;
+  readonly key: string | null;
+  toWire(): unknown;
+  targetReadable(permissions: PeerPermissions, peer: PeerId): boolean;
+  static keyed(
+    node: NodeId,
+    key: string | null,
+    stamp: WireStamp | WireStampWire,
+    state: IpcValueValue | ShmBlobRef | WireBytes,
+  ): CrdtOp;
+  static fromWire(value: unknown): CrdtOp;
+}
+
+export class CrdtSync {
+  constructor(fields: {
+    frontier?: ReadonlyArray<FrontierEntry | [NodeId, WireStamp | WireStampWire]>;
+    ops?: ReadonlyArray<CrdtOp>;
+  });
+  readonly frontier: ReadonlyArray<FrontierEntry>;
+  readonly ops: ReadonlyArray<CrdtOp>;
+  filterReadable(permissions: PeerPermissions, peer: PeerId): CrdtSync;
+  toWire(): unknown;
+  static fromWire(value: unknown): CrdtSync;
+}
+
 export class IpcMessage {
-  readonly kind: "Snapshot" | "Delta";
+  readonly kind: "Snapshot" | "Delta" | "CrdtSync";
   readonly snapshot?: Snapshot;
   readonly delta?: Delta;
+  readonly crdtSync?: CrdtSync;
   readonly isSnapshot: boolean;
   readonly isDelta: boolean;
+  readonly isCrdtSync: boolean;
   toWire(): unknown;
   encodeJson(): Uint8Array;
   static snapshot(snapshot: Snapshot): IpcMessage;
   static delta(delta: Delta): IpcMessage;
+  static crdtSync(crdtSync: CrdtSync): IpcMessage;
   static fromWire(value: unknown): IpcMessage;
   static decodeJson(data: Uint8Array | string): IpcMessage;
 }

@@ -5,6 +5,8 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 import {
+  CrdtOp,
+  CrdtSync,
   Delta,
   DeltaApplyStatusKind,
   DeltaOp,
@@ -30,6 +32,7 @@ import {
   RemoteOp,
   ShmBlobRef,
   Snapshot,
+  WireStamp,
 } from "../src/index.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -424,6 +427,109 @@ test("NodeKey accepts the boundary sizes (31 segments, 1024 bytes)", () => {
   const thirtyOne = Array.from({ length: 31 }, (_, i) => `s${i}`).join("/");
   const snap = NodeSnapshot.payload(1, "t", Uint8Array.of(0), thirtyOne);
   assert.equal(snap.key, thirtyOne);
+});
+
+// Canonical CrdtSync JSON captured from lazily-rs's
+// `crdt_sync_round_trips_through_serde` (serde_json::to_string). Pinning it keeps
+// lazily-js byte-compatible with the Rust serde shape, including the subtlety
+// that a keyless CrdtOp serializes `key: null` (CrdtOp uses derived serde with
+// no skip_serializing_if, unlike NodeSnapshot/NodeAdd which omit the field).
+const CRDT_CANONICAL_JSON =
+  '{"CrdtSync":{"frontier":[[1,{"wall_time":200,"logical":0,"peer":1}],' +
+  '[2,{"wall_time":180,"logical":3,"peer":2}]],' +
+  '"ops":[{"node":1,"key":null,"stamp":{"wall_time":200,"logical":0,"peer":1},"state":{"Inline":[10,20]}},' +
+  '{"node":2,"key":"scores/alice","stamp":{"wall_time":180,"logical":3,"peer":2},"state":{"Inline":[30]}}]}}';
+
+const CRDT_CANONICAL_WIRE = {
+  CrdtSync: {
+    frontier: [
+      [1, { wall_time: 200, logical: 0, peer: 1 }],
+      [2, { wall_time: 180, logical: 3, peer: 2 }],
+    ],
+    ops: [
+      {
+        node: 1,
+        key: null,
+        stamp: { wall_time: 200, logical: 0, peer: 1 },
+        state: { Inline: [10, 20] },
+      },
+      {
+        node: 2,
+        key: "scores/alice",
+        stamp: { wall_time: 180, logical: 3, peer: 2 },
+        state: { Inline: [30] },
+      },
+    ],
+  },
+};
+
+function canonicalCrdtSync() {
+  return new CrdtSync({
+    frontier: [
+      { peer: 1, stamp: new WireStamp({ wallTime: 200, logical: 0, peer: 1 }) },
+      { peer: 2, stamp: new WireStamp({ wallTime: 180, logical: 3, peer: 2 }) },
+    ],
+    ops: [
+      new CrdtOp(
+        1,
+        new WireStamp({ wallTime: 200, logical: 0, peer: 1 }),
+        Uint8Array.of(10, 20),
+      ),
+      CrdtOp.keyed(
+        2,
+        "scores/alice",
+        new WireStamp({ wallTime: 180, logical: 3, peer: 2 }),
+        Uint8Array.of(30),
+      ),
+    ],
+  });
+}
+
+test("CrdtSync round-trips the canonical lazily-rs serde JSON byte-for-byte", () => {
+  const message = IpcMessage.crdtSync(canonicalCrdtSync());
+
+  assert.deepEqual(message.toWire(), CRDT_CANONICAL_WIRE);
+  assert.deepEqual(
+    message.encodeJson(),
+    new TextEncoder().encode(CRDT_CANONICAL_JSON),
+  );
+
+  const decoded = IpcMessage.decodeJson(message.encodeJson());
+  assert.equal(decoded.isCrdtSync, true);
+  assert.deepEqual(decoded, message);
+});
+
+test("a keyless CrdtOp serializes key: null (derived serde, not omitted)", () => {
+  const op = new CrdtOp(
+    9,
+    new WireStamp({ wallTime: 5, logical: 1, peer: 7 }),
+    Uint8Array.of(1),
+  );
+  assert.equal(op.key, null);
+  assert.deepEqual(op.toWire(), {
+    node: 9,
+    key: null,
+    stamp: { wall_time: 5, logical: 1, peer: 7 },
+    state: { Inline: [1] },
+  });
+});
+
+test("CrdtSync.filterReadable omits non-readable ops but keeps the frontier", () => {
+  const permissions = new PeerPermissions();
+  permissions.allowMany(1, OpKind.Read, [1]);
+
+  const filtered = canonicalCrdtSync().filterReadable(permissions, 1);
+
+  assert.deepEqual(
+    filtered.ops.map((op) => op.node),
+    [1],
+  );
+  // frontier is metadata (peers + stamps, no node content), retained in full.
+  assert.equal(filtered.frontier.length, 2);
+  assert.deepEqual(
+    filtered.frontier.map((entry) => entry.peer),
+    [1, 2],
+  );
 });
 
 test("conformance snapshot minimal", () => {

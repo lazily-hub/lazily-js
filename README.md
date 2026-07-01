@@ -86,6 +86,38 @@ omitted from JSON when absent and decodes to `null` when missing, so pre-`key`
 fixtures round-trip unchanged. Construction enforces the spec bounds: path
 ≤ 1024 bytes, ≤ 32 segments, no empty segments (leading/trailing/double `"/"`).
 
+`IpcMessage` is the externally-tagged frame: `Snapshot` / `Delta` / `CrdtSync`.
+The third variant carries the multi-writer **CRDT anti-entropy plane**
+([the spec][spec] § Distributed): a `CrdtSync` frame advertises a per-peer stamp
+`frontier` and ships a batch of `CrdtOp`s. lazily-js is a consumer, so it
+decodes/encodes and filters these frames rather than producing CRDT edits — but
+it no longer throws when the third variant arrives on the shared transport.
+
+```js
+import { CrdtSync, CrdtOp, WireStamp, IpcMessage, PeerPermissions, OpKind } from "@lazily-hub/js";
+
+const sync = new CrdtSync({
+  frontier: [{ peer: 1, stamp: new WireStamp({ wallTime: 200, logical: 0, peer: 1 }) }],
+  ops: [
+    CrdtOp.keyed(2, "scores/alice",
+      new WireStamp({ wallTime: 180, logical: 3, peer: 2 }),
+      Uint8Array.of(30)),
+  ],
+});
+
+const msg = IpcMessage.crdtSync(sync);
+msg.encodeJson();          // byte-compatible with lazily-rs serde_json
+
+const perms = new PeerPermissions();
+perms.allowMany(1, OpKind.Read, [2]);
+sync.filterReadable(perms, 1);  // omits non-readable ops, keeps the full frontier
+```
+
+`CrdtOp` mirrors lazily-rs's derived serde: a keyless op serializes `key: null`
+(not omitted — unlike `NodeSnapshot`/`NodeAdd`, which omit the field). The
+`frontier` is the `(peer, WireStamp)` tuple array, emitted as `[peer, stamp]`
+pairs.
+
 ## State chart
 
 `statechart.js` is the native JavaScript counterpart of

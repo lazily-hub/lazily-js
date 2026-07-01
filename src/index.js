@@ -599,15 +599,147 @@ export class Delta {
   }
 }
 
+// A frontier entry is the (peer, WireStamp) tuple lazily-rs carries as
+// Vec<(u64, WireStamp)>; serde emits it as a 2-element JSON array [peer, stamp].
+function frontierEntryFromWire(value) {
+  if (!Array.isArray(value) || value.length !== 2) {
+    throw new TypeError("frontier entry must be a [peer, WireStamp] pair");
+  }
+  return Object.freeze({
+    peer: assertInteger(value[0], "frontier peer"),
+    stamp: WireStamp.fromWire(value[1]),
+  });
+}
+
+function frontierEntryOf(entry) {
+  if (entry && typeof entry === "object" && !Array.isArray(entry)) {
+    if ("peer" in entry) {
+      return Object.freeze({
+        peer: assertInteger(entry.peer, "frontier peer"),
+        stamp:
+          entry.stamp instanceof WireStamp
+            ? entry.stamp
+            : WireStamp.fromWire(entry.stamp),
+      });
+    }
+  }
+  return frontierEntryFromWire(entry);
+}
+
+export class WireStamp {
+  constructor({ wallTime, logical, peer }) {
+    this.wallTime = assertInteger(wallTime, "wallTime");
+    this.logical = assertInteger(logical, "logical");
+    this.peer = assertInteger(peer, "peer");
+    Object.freeze(this);
+  }
+
+  toWire() {
+    return {
+      wall_time: this.wallTime,
+      logical: this.logical,
+      peer: this.peer,
+    };
+  }
+
+  static fromWire(value) {
+    const object = assertObject(value, "WireStamp");
+    return new WireStamp({
+      wallTime: object.wall_time,
+      logical: object.logical,
+      peer: object.peer,
+    });
+  }
+}
+
+export class CrdtOp {
+  constructor(node, stamp, state, key = null) {
+    this.node = assertInteger(node, "node");
+    this.stamp = stamp instanceof WireStamp ? stamp : WireStamp.fromWire(stamp);
+    this.state = IpcValue.of(state);
+    // CrdtOp mirrors lazily-rs's derived serde (no skip_serializing_if), so a
+    // keyless op serializes `key: null` — unlike NodeSnapshot/NodeAdd, which
+    // omit the field. normalizeNodeKey still enforces bounds when a key is set.
+    this.key = normalizeNodeKey(key);
+    Object.freeze(this);
+  }
+
+  toWire() {
+    return {
+      node: this.node,
+      key: this.key,
+      stamp: this.stamp.toWire(),
+      state: this.state.toWire(),
+    };
+  }
+
+  targetReadable(permissions, peer) {
+    return permissions.canRead(peer, this.node);
+  }
+
+  static keyed(node, key, stamp, state) {
+    return new CrdtOp(node, stamp, state, key);
+  }
+
+  static fromWire(value) {
+    const object = assertObject(value, "CrdtOp");
+    return new CrdtOp(
+      object.node,
+      WireStamp.fromWire(object.stamp),
+      IpcValue.fromWire(object.state),
+      object.key ?? null,
+    );
+  }
+}
+
+export class CrdtSync {
+  constructor({ frontier = [], ops = [] }) {
+    this.frontier = Object.freeze(frontier.map(frontierEntryOf));
+    this.ops = Object.freeze([...ops]);
+    Object.freeze(this);
+  }
+
+  filterReadable(permissions, peer) {
+    // The frontier advertisement names peers and stamps, not node content, and
+    // the receiver needs the whole frontier to compute a sound watermark — so
+    // it is retained in full while ops are omitted (not redacted), like Delta.
+    return new CrdtSync({
+      frontier: this.frontier,
+      ops: this.ops.filter((op) => op.targetReadable(permissions, peer)),
+    });
+  }
+
+  toWire() {
+    return {
+      frontier: this.frontier.map((entry) => [
+        entry.peer,
+        entry.stamp.toWire(),
+      ]),
+      ops: this.ops.map((op) => op.toWire()),
+    };
+  }
+
+  static fromWire(value) {
+    const object = assertObject(value, "CrdtSync");
+    return new CrdtSync({
+      frontier: (object.frontier ?? []).map(frontierEntryFromWire),
+      ops: (object.ops ?? []).map((op) => CrdtOp.fromWire(op)),
+    });
+  }
+}
+
 export class IpcMessage {
   constructor(kind, value) {
     this.kind = kind;
+    this.snapshot = undefined;
+    this.delta = undefined;
+    this.crdtSync = undefined;
     if (kind === "Snapshot") {
       this.snapshot = value;
-      this.delta = undefined;
     } else if (kind === "Delta") {
-      this.snapshot = undefined;
       this.delta = value;
+    } else if (kind === "CrdtSync") {
+      this.crdtSync = value;
     } else {
       throw new TypeError(`unknown IpcMessage kind: ${kind}`);
     }
@@ -622,11 +754,18 @@ export class IpcMessage {
     return this.kind === "Delta";
   }
 
+  get isCrdtSync() {
+    return this.kind === "CrdtSync";
+  }
+
   toWire() {
     if (this.kind === "Snapshot") {
       return { Snapshot: this.snapshot.toWire() };
     }
-    return { Delta: this.delta.toWire() };
+    if (this.kind === "Delta") {
+      return { Delta: this.delta.toWire() };
+    }
+    return { CrdtSync: this.crdtSync.toWire() };
   }
 
   encodeJson() {
@@ -641,6 +780,10 @@ export class IpcMessage {
     return new IpcMessage("Delta", delta);
   }
 
+  static crdtSync(crdtSync) {
+    return new IpcMessage("CrdtSync", crdtSync);
+  }
+
   static fromWire(value) {
     const [tag, body] = assertTagged(value, "IpcMessage");
     switch (tag) {
@@ -648,6 +791,8 @@ export class IpcMessage {
         return IpcMessage.snapshot(Snapshot.fromWire(body));
       case "Delta":
         return IpcMessage.delta(Delta.fromWire(body));
+      case "CrdtSync":
+        return IpcMessage.crdtSync(CrdtSync.fromWire(body));
       default:
         throw new TypeError(`unknown IpcMessage variant: ${tag}`);
     }
