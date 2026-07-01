@@ -1,6 +1,6 @@
 {
   "name": "@lazily-hub/js",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "JavaScript lazily IPC protocol helpers plus FFI state-projection consumer bindings. NOT a reactive-core port.",
   "type": "module",
   "main": "src/index.js",
