@@ -157,6 +157,21 @@ export class ChartDef {
       states.set(id, parseState(id, raw));
     }
 
+    return ChartDef.fromStates(states, order);
+  }
+
+  /**
+   * Assemble a validated {@link ChartDef} from parsed states plus their document
+   * order. Shared by {@link ChartDef.fromChart} and the {@link ChartBuilder}, so
+   * both definition paths derive parent→children, the single parent-less root,
+   * and per-node depth identically. `order` maps each state id to the position
+   * that fixes deterministic parallel-region descent.
+   *
+   * @param {Map<string, any>} states id → parsed state def (each carrying `id`)
+   * @param {Map<string, number>} order id → document position
+   * @returns {ChartDef}
+   */
+  static fromStates(states, order) {
     // Derived structure: children, root.
     const children = new Map();
     let root = null;
@@ -498,5 +513,166 @@ function restoreViaHistory(def, history, hist, region, enter) {
     enterSubtree(def, child, enter, null);
   } else {
     for (const s of recording.set) enter.add(s);
+  }
+}
+
+// -- Typed builder ------------------------------------------------------------
+// Define a ChartDef in typed JS instead of (or alongside) the declarative JSON
+// form. Both paths funnel through ChartDef.fromStates, so a built chart is
+// behaviourally identical to the same chart parsed via ChartDef.fromChart.
+
+/** A single transition, built in JS. Equivalent to a JSON transition object. */
+export class TransitionBuilder {
+  /** @param {string} target external transition target */
+  constructor(target) {
+    this._t = { target, guard: null, action: [], internal: false };
+  }
+
+  /** An external transition to `target` with no guard or actions. */
+  static to(target) {
+    return new TransitionBuilder(target);
+  }
+
+  /** Attach a named boolean guard (resolved at send time; absent → false). */
+  guard(name) {
+    this._t.guard = name;
+    return this;
+  }
+
+  /** Append a transition action name. */
+  action(name) {
+    this._t.action.push(name);
+    return this;
+  }
+
+  /** Mark this transition internal (no exit/re-entry when target is source or a descendant). */
+  internal() {
+    this._t.internal = true;
+    return this;
+  }
+}
+
+/** A single chart state, built in JS. Mirrors the JSON state object. */
+export class StateBuilder {
+  constructor(id, kind, { initial = null, history = null } = {}) {
+    this.id = id;
+    this._def = {
+      id,
+      parent: null,
+      kind,
+      history,
+      initial,
+      default: null,
+      transitions: new Map(),
+      entry: [],
+      exit: [],
+    };
+  }
+
+  /** An atomic leaf state. */
+  static atomic(id) {
+    return new StateBuilder(id, "atomic");
+  }
+
+  /** A compound state with the given initial child. */
+  static compound(id, initial) {
+    return new StateBuilder(id, "compound", { initial });
+  }
+
+  /** A parallel (orthogonal) state; all child regions are entered together. */
+  static parallel(id) {
+    return new StateBuilder(id, "parallel");
+  }
+
+  /** A final leaf state (accepted as a leaf; raises no completion event). */
+  static final(id) {
+    return new StateBuilder(id, "final");
+  }
+
+  /** A shallow-history pseudostate for its parent region. */
+  static historyShallow(id) {
+    return new StateBuilder(id, "history", { history: "shallow" });
+  }
+
+  /** A deep-history pseudostate for its parent region. */
+  static historyDeep(id) {
+    return new StateBuilder(id, "history", { history: "deep" });
+  }
+
+  /** Set the parent state id. Omit only for the single chart root. */
+  parent(parent) {
+    this._def.parent = parent;
+    return this;
+  }
+
+  /** Set the default target used on a history pseudostate's first entry. */
+  defaultChild(target) {
+    this._def.default = target;
+    return this;
+  }
+
+  /** Append an entry action name. */
+  entry(action) {
+    this._def.entry.push(action);
+    return this;
+  }
+
+  /** Append an exit action name. */
+  exit(action) {
+    this._def.exit.push(action);
+    return this;
+  }
+
+  /** Add an unguarded external transition on `event` to `target`. */
+  on(event, target) {
+    return this.onTransition(event, TransitionBuilder.to(target));
+  }
+
+  /** Add a guarded external transition on `event` to `target`. */
+  onGuarded(event, target, guard) {
+    return this.onTransition(event, TransitionBuilder.to(target).guard(guard));
+  }
+
+  /** Add a fully-specified transition on `event`. */
+  onTransition(event, transitionBuilder) {
+    this._def.transitions.set(event, transitionBuilder._t);
+    return this;
+  }
+}
+
+/**
+ * Fluent builder assembling a {@link ChartDef} from typed JS states — the
+ * definition path parallel to {@link ChartDef.fromChart}. State insertion order
+ * fixes deterministic parallel-region descent, exactly as JSON key order does.
+ */
+export class ChartBuilder {
+  constructor() {
+    this._states = [];
+  }
+
+  /** Add a state. The first parent-less state added becomes the root. */
+  state(stateBuilder) {
+    this._states.push(stateBuilder);
+    return this;
+  }
+
+  /**
+   * Validate and assemble the {@link ChartDef}. Throws on a duplicate state id,
+   * or on zero / more than one parent-less root, matching the JSON path.
+   * @returns {ChartDef}
+   */
+  build() {
+    const states = new Map();
+    const order = new Map();
+    let idx = 0;
+    for (const sb of this._states) {
+      if (states.has(sb.id)) {
+        throw new TypeError(`duplicate state id \`${sb.id}\``);
+      }
+      order.set(sb.id, idx);
+      idx += 1;
+      states.set(sb.id, sb._def);
+    }
+    return ChartDef.fromStates(states, order);
   }
 }

@@ -90,3 +90,65 @@ export class StateChart {
    *  `false` if rejected (configuration unchanged, no actions fired). */
   send(event: string, guards?: GuardMap): boolean;
 }
+
+/**
+ * A single transition, built in TypeScript. Equivalent to a JSON transition
+ * object; the typed builder path parallel to the declarative form.
+ */
+export class TransitionBuilder {
+  private constructor();
+  /** An external transition to `target` with no guard or actions. */
+  static to(target: string): TransitionBuilder;
+  /** Attach a named boolean guard (resolved at send time; absent → false). */
+  guard(name: string): TransitionBuilder;
+  /** Append a transition action name. */
+  action(name: string): TransitionBuilder;
+  /** Mark this transition internal (no exit/re-entry when target is the source
+   *  or a proper descendant). */
+  internal(): TransitionBuilder;
+}
+
+/** A single chart state, built in TypeScript. Mirrors the JSON state object. */
+export class StateBuilder {
+  private constructor();
+  /** An atomic leaf state. */
+  static atomic(id: string): StateBuilder;
+  /** A compound state with the given initial child. */
+  static compound(id: string, initial: string): StateBuilder;
+  /** A parallel (orthogonal) state; all child regions entered together. */
+  static parallel(id: string): StateBuilder;
+  /** A final leaf state (raises no completion event). */
+  static final(id: string): StateBuilder;
+  /** A shallow-history pseudostate for its parent region. */
+  static historyShallow(id: string): StateBuilder;
+  /** A deep-history pseudostate for its parent region. */
+  static historyDeep(id: string): StateBuilder;
+  /** Set the parent state id (omit only for the single chart root). */
+  parent(parent: string): StateBuilder;
+  /** Default target used on a history pseudostate's first entry. */
+  defaultChild(target: string): StateBuilder;
+  /** Append an entry action name. */
+  entry(action: string): StateBuilder;
+  /** Append an exit action name. */
+  exit(action: string): StateBuilder;
+  /** Add an unguarded external transition on `event` to `target`. */
+  on(event: string, target: string): StateBuilder;
+  /** Add a guarded external transition on `event` to `target`. */
+  onGuarded(event: string, target: string, guard: string): StateBuilder;
+  /** Add a fully-specified transition on `event`. */
+  onTransition(event: string, transition: TransitionBuilder): StateBuilder;
+}
+
+/**
+ * Fluent builder assembling a {@link ChartDef} from typed TS states — the
+ * definition path parallel to {@link ChartDef.fromChart}. State insertion order
+ * fixes deterministic parallel-region descent, exactly as JSON key order does.
+ */
+export class ChartBuilder {
+  constructor();
+  /** Add a state. The first parent-less state added becomes the root. */
+  state(state: StateBuilder): ChartBuilder;
+  /** Validate and assemble the {@link ChartDef}. Throws on a duplicate state id
+   *  or on zero / more than one parent-less root. */
+  build(): ChartDef;
+}
