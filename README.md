@@ -10,8 +10,9 @@ full-Harel state-chart interpreter, capability negotiation, and an FFI
 state-projection consumer.
 
 > **Reactive core.** Unlike earlier `@lazily-hub/js` releases (which were a
-> state-projection *consumer* with no reactive graph), `lazily-js` is a full
-> reactive binding. `@lazily-hub/js` is deprecated; migrate to `lazily-js`.
+> state-projection *consumer* with no reactive graph), `@lazily-hub/lazily-js`
+> is a full reactive binding. `@lazily-hub/js` is deprecated; migrate to
+> `@lazily-hub/lazily-js`.
 
 Pure ES modules, zero runtime dependencies for the reactive, IPC, collections,
 CRDT, and state-chart modules (`koffi` is loaded lazily, only when the FFI
@@ -23,16 +24,16 @@ lazily-js ships these entry points:
 
 | Import | What it is |
 |--------|-----------|
-| `lazily-js` | [`lazily-spec`][spec] IPC wire types — `Snapshot`, `Delta`, `DeltaOp`, `IpcMessage` (incl. `CrdtSync`), `NodeState`, `IpcValue`, `PeerPermissions`, capability negotiation (`SessionHandshake`, `BINDING_CAPABILITIES`) |
-| `lazily-js/reactive` | Reactive dependency graph — `Context`, `Cell`/`Slot`/`Signal`/`Effect` |
-| `lazily-js/state-machine` | Flat finite-state-machine kernel (Cell-backed) |
-| `lazily-js/statechart` | Full Harel/SCXML state-chart interpreter |
-| `lazily-js/collections` | `CellMap` + `CellTree` keyed collections and LIS keyed reconciliation |
-| `lazily-js/sem-tree` | Memoized semantic tree (incremental ancestor-chain fold) |
-| `lazily-js/seq-crdt` | Move-aware sequence CRDT (fractional-index + LWW) |
-| `lazily-js/text-crdt` | Fugue/RGA character CRDT |
-| `lazily-js/stable-id` | Manufactured text identity (anchors / content hashes / similarity) |
-| `lazily-js/state-projection` | koffi FFI consumer of the agent-doc `DocumentStateProjection` |
+| `@lazily-hub/lazily-js` | [`lazily-spec`][spec] IPC wire types — `Snapshot`, `Delta`, `DeltaOp`, `IpcMessage` (incl. `CrdtSync`), `NodeState`, `IpcValue`, `PeerPermissions`, capability negotiation (`SessionHandshake`, `BINDING_CAPABILITIES`) |
+| `@lazily-hub/lazily-js/reactive` | Reactive dependency graph — `Context`, `Cell`/`Slot`/`Signal`/`Effect` |
+| `@lazily-hub/lazily-js/state-machine` | Flat finite-state-machine kernel (Cell-backed) |
+| `@lazily-hub/lazily-js/statechart` | Full Harel/SCXML state-chart interpreter |
+| `@lazily-hub/lazily-js/collections` | `CellMap` + `CellTree` keyed collections and LIS keyed reconciliation |
+| `@lazily-hub/lazily-js/sem-tree` | Memoized semantic tree (incremental ancestor-chain fold) |
+| `@lazily-hub/lazily-js/seq-crdt` | Move-aware sequence CRDT (fractional-index + LWW) |
+| `@lazily-hub/lazily-js/text-crdt` | Fugue/RGA character CRDT |
+| `@lazily-hub/lazily-js/stable-id` | Manufactured text identity (anchors / content hashes / similarity) |
+| `@lazily-hub/lazily-js/state-projection` | koffi FFI consumer of the agent-doc `DocumentStateProjection` |
 
 ## Reactive graph
 
@@ -43,7 +44,7 @@ and glitch-free; a `==` (PartialEq) guard suppresses no-op updates; `batch`
 coalesces invalidations; cycles throw.
 
 ```js
-import { Context } from "lazily-js/reactive";
+import { Context } from "@lazily-hub/lazily-js/reactive";
 
 const ctx = new Context();
 const a = ctx.cell(2);
@@ -68,8 +69,8 @@ states, orthogonal regions, shallow + deep history, entry/exit/transition
 actions, named guards). Both compose with the reactive graph.
 
 ```js
-import { Context } from "lazily-js/reactive";
-import { StateMachine } from "lazily-js/state-machine";
+import { Context } from "@lazily-hub/lazily-js/reactive";
+import { StateMachine } from "@lazily-hub/lazily-js/state-machine";
 
 const ctx = new Context();
 const m = new StateMachine(ctx, "Red", (s, e) =>
@@ -90,9 +91,9 @@ recomputes only its ancestor chain, and a node edit that doesn't change the
 folded result is suppressed by the memo guard.
 
 ```js
-import { CellMap, CellTree, reconcileCollections } from "lazily-js/collections";
-import { Context } from "lazily-js/reactive";
-import { SemTree } from "lazily-js/sem-tree";
+import { CellMap, CellTree, reconcileCollections } from "@lazily-hub/lazily-js/collections";
+import { Context } from "@lazily-hub/lazily-js/reactive";
+import { SemTree } from "@lazily-hub/lazily-js/sem-tree";
 
 const ctx = new Context();
 const tree = new SemTree(ctx, rootSpec, (v, kids) => v + kids.reduce((a, b) => a + b, 0));
@@ -111,8 +112,8 @@ idempotent. Both GC tombstones under a caller-supplied causal-stability
 watermark.
 
 ```js
-import { SeqCrdt } from "lazily-js/seq-crdt";
-import { TextCrdt } from "lazily-js/text-crdt";
+import { SeqCrdt } from "@lazily-hub/lazily-js/seq-crdt";
+import { TextCrdt } from "@lazily-hub/lazily-js/text-crdt";
 
 const seq = new SeqCrdt(1);
 seq.insertBack("a", 0, 1);
