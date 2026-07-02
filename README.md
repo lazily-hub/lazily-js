@@ -21,8 +21,9 @@ lazily-js ships three entry points:
 
 | Import | What it is |
 |--------|-----------|
-| `@lazily-hub/js` | [`lazily-spec`][spec] IPC wire types — `Snapshot`, `Delta`, `DeltaOp`, `IpcMessage`, `NodeState`, `IpcValue`, `PeerPermissions` |
+| `@lazily-hub/js` | [`lazily-spec`][spec] IPC wire types — `Snapshot`, `Delta`, `DeltaOp`, `IpcMessage` (incl. `CrdtSync`), `NodeState`, `IpcValue`, `PeerPermissions` |
 | `@lazily-hub/js/statechart` | Full Harel/SCXML state-chart interpreter (compute, not protocol) |
+| `@lazily-hub/js/collections` | `CellMap` keyed collection + LIS keyed reconciliation (compute, not protocol) |
 | `@lazily-hub/js/state-projection` | koffi FFI consumer of the agent-doc `DocumentStateProjection` |
 
 ## IPC wire types
@@ -195,6 +196,12 @@ lazily-js replays the shared [`lazily-spec`][spec] conformance fixtures:
   inline serde_json payload bytes.
 - The state-chart interpreter is validated against the same Harel fixtures every
   binding uses (`test/statechart.test.js`).
+- The `CellMap` collection + LIS reconciliation replay the
+  `conformance/collections/` fixtures (`test/collections.test.js`).
+- lazily-js-generated `Snapshot` / `Delta` / `CrdtSync` wire is validated against
+  the canonical [JSON Schemas][spec] (`test/schema-conformance.test.js`), and the
+  stale `slot_id` / base64 / `type`-discriminant form is rejected — the on-binding
+  mirror of the spec's drift-prevention suite.
 
 The `arena_blob.json` fixture is intentionally **not** replayed here: it is
 `kind: "Arena"`, explicitly not a wire type, and scopes the in-process
@@ -207,7 +214,7 @@ lazily-js is a state-projection consumer with no arena host of its own.
 make check   # == npm run build && npm test
 ```
 
-- `npm run build` — `node --check` syntax validation of the three modules.
+- `npm run build` — `node --check` syntax validation of the four modules.
 - `npm test` — `node --test test/*.test.js`.
 
 ## See also
