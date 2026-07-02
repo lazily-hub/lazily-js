@@ -327,3 +327,90 @@ export class PeerPermissions {
   filterReadable(peer: PeerId, nodes: Iterable<NodeId>): NodeId[];
   peerCount(): number;
 }
+
+// Capability negotiation (protocol.md § Capability Negotiation).
+export const PROTOCOL_ID: "lazily-ipc";
+export const PROTOCOL_MAJOR_VERSION: 1;
+
+export const Codec: {
+  readonly Json: "json";
+  readonly Bincode: "bincode";
+  readonly Postcard: "postcard";
+};
+
+export const LazilyFfiMessageKind: {
+  readonly Unknown: 0;
+  readonly Snapshot: 1;
+  readonly Delta: 2;
+  readonly CrdtSync: 3;
+};
+
+export const LazilyFfiStatus: {
+  readonly Ok: 0;
+  readonly Empty: 1;
+  readonly NullPointer: 2;
+  readonly InvalidMessage: 3;
+  readonly EncodeFailed: 4;
+  readonly Panic: 5;
+};
+
+export type HandshakeWire = {
+  protocol_id: string;
+  protocol_major_version: number;
+  codec: string;
+  max_frame_size: number;
+  fragmentation_supported: boolean;
+  ordered_reliable: boolean;
+  peer_id: NodeId;
+  session_id: string;
+  features?: string[];
+};
+
+export type CompatibilityResult =
+  | { ok: true }
+  | { ok: false; field: string; reason: string };
+
+export class SessionHandshake {
+  constructor(fields: HandshakeWire);
+  readonly protocolId: string;
+  readonly protocolMajorVersion: number;
+  readonly codec: string;
+  readonly maxFrameSize: number;
+  readonly fragmentationSupported: boolean;
+  readonly orderedReliable: boolean;
+  readonly peerId: NodeId;
+  readonly sessionId: string;
+  readonly features: readonly string[];
+  toWire(): HandshakeWire;
+  encodeJson(): Uint8Array;
+  checkCompatible(other: SessionHandshake, requiredFeatures?: string[]): CompatibilityResult;
+  static fromWire(value: unknown): SessionHandshake;
+  static decodeJson(data: Uint8Array | string): SessionHandshake;
+}
+
+export const FfiCapability: {
+  readonly Host: "host";
+  readonly None: "none";
+};
+
+export type BindingCapabilities = {
+  readonly binding: string;
+  readonly ffi: "host" | "none";
+  readonly reactive_core: boolean;
+  readonly async_context: boolean;
+  readonly ipc: boolean;
+  readonly crdt: boolean;
+  readonly collections: { cellmap: boolean; celltree: boolean; reconcile: boolean };
+  readonly sem_tree: boolean;
+  readonly seq_crdt: boolean;
+  readonly text_crdt: boolean;
+  readonly stable_id: boolean;
+  readonly state_machine: boolean;
+  readonly state_charts: boolean;
+  readonly permissions: boolean;
+  readonly capability_negotiation: boolean;
+  readonly signaling: boolean;
+  readonly webrtc: boolean;
+};
+
+export const BINDING_CAPABILITIES: BindingCapabilities;

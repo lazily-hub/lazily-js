@@ -262,3 +262,152 @@ export function reconcileCollections(prior, target) {
     stable_keys_not_invalidated: stableKeysNotInvalidated,
   };
 }
+
+// Ordered keyed tree (cell-model.md § Ordered keyed tree). A `CellTree` is a
+// further **composition**: each node is `(stable id, value, ordered keyed child
+// collection)` — the child collection is a `CellMap` whose values are child
+// tree nodes. Per-node value reactivity, per-level membership/order
+// reactivity, and the atomic-move guarantee are all inherited from the per-cell
+// model: editing a node touches only that node's value; adding/removing/reordering
+// siblings touches only that parent's child level; a child reorder keeps the
+// entry's stable handle and bumps order once (never remove + re-mint).
+//
+// Like `CellMap`, this is pure logic with no reactive graph. Each mutating op
+// returns an invalidation report scoped to the **affected path only** — a
+// reader at any other path observes no change, which is what makes the
+// per-level independence invariant observable.
+function buildNode(spec) {
+  const rawChildren = (spec && spec.children) || {};
+  const order = Array.isArray(rawChildren.order) ? [...rawChildren.order] : [];
+  const childSpecs = rawChildren.values ?? {};
+  const childNodes = {};
+  for (const key of order) {
+    childNodes[key] = buildNode(childSpecs[key]);
+  }
+  return new TreeNode(spec && spec.id, spec && spec.value, new CellMap({ order, values: childNodes }));
+}
+
+export class TreeNode {
+  constructor(id, value, children) {
+    this.id = id;
+    this.value = value;
+    this.children = children;
+  }
+
+  snapshot() {
+    const childOrder = this.children.order;
+    const childValues = {};
+    for (const key of childOrder) {
+      childValues[key] = this.children.get(key).snapshot();
+    }
+    return { id: this.id, value: this.value, children: { order: [...childOrder], values: childValues } };
+  }
+}
+
+export class CellTree {
+  constructor(rootSpec) {
+    this.root = rootSpec instanceof TreeNode ? rootSpec : buildNode(rootSpec);
+    Object.freeze(this);
+  }
+
+  static from(rootSpec) {
+    return new CellTree(rootSpec);
+  }
+
+  // Resolve a path (array of child keys from the root) to a node, or undefined.
+  nodeAt(path) {
+    const keys = Array.isArray(path) ? path : [path];
+    let node = this.root;
+    for (const key of keys) {
+      const child = node.children.get(key);
+      if (child === undefined) {
+        return undefined;
+      }
+      node = child;
+    }
+    return node;
+  }
+
+  #nodeAtOrThrow(path) {
+    const node = this.nodeAt(path);
+    if (node === undefined) {
+      throw new RangeError(`CellTree path not present: ${JSON.stringify(path)}`);
+    }
+    return node;
+  }
+
+  #parentAndKey(path) {
+    const keys = Array.isArray(path) ? path : [path];
+    if (keys.length === 0) {
+      throw new RangeError("CellTree path must have at least one key");
+    }
+    const parentPath = keys.slice(0, -1);
+    const key = keys[keys.length - 1];
+    const parent = parentPath.length === 0 ? this.root : this.#nodeAtOrThrow(parentPath);
+    return { parent, key, parentPath };
+  }
+
+  getValue(path) {
+    return this.#nodeAtOrThrow(path).value;
+  }
+
+  setValue(path, value) {
+    const { parent, key } = this.#parentAndKey(path);
+    const node = parent.children.get(key);
+    if (node === undefined) {
+      throw new RangeError(`CellTree key not present: ${String(key)}`);
+    }
+    const changed = !deepEqual(node.value, value);
+    if (changed) {
+      node.value = value;
+    }
+    return { path: Array.isArray(path) ? path : [path], value: changed ? [key] : [], membership: false, order: false };
+  }
+
+  hasChild(path, key) {
+    return this.#nodeAtOrThrow(path).children.has(key);
+  }
+
+  childKeys(path) {
+    return this.#nodeAtOrThrow(path).children.keys();
+  }
+
+  childHandle(path, key) {
+    return this.#nodeAtOrThrow(path).children.handle(key);
+  }
+
+  insertChild(path, key, childSpec, at = "end") {
+    const parent = this.#nodeAtOrThrow(path);
+    const node = childSpec instanceof TreeNode ? childSpec : buildNode(childSpec);
+    parent.children.insert(key, node, at);
+    return { path: Array.isArray(path) ? path : [path], value: [], membership: true, order: true };
+  }
+
+  removeChild(path, key) {
+    const parent = this.#nodeAtOrThrow(path);
+    parent.children.remove(key);
+    return { path: Array.isArray(path) ? path : [path], value: [], membership: true, order: true };
+  }
+
+  moveChildTo(path, key, index) {
+    const parent = this.#nodeAtOrThrow(path);
+    parent.children.moveTo(key, index);
+    return { path: Array.isArray(path) ? path : [path], value: [], membership: false, order: true };
+  }
+
+  moveChildBefore(path, key, beforeKey) {
+    const parent = this.#nodeAtOrThrow(path);
+    parent.children.moveBefore(key, beforeKey);
+    return { path: Array.isArray(path) ? path : [path], value: [], membership: false, order: true };
+  }
+
+  moveChildAfter(path, key, afterKey) {
+    const parent = this.#nodeAtOrThrow(path);
+    parent.children.moveAfter(key, afterKey);
+    return { path: Array.isArray(path) ? path : [path], value: [], membership: false, order: true };
+  }
+
+  snapshot() {
+    return this.root.snapshot();
+  }
+}

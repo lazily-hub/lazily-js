@@ -1,212 +1,151 @@
-# @lazily-hub/js
+# lazily-js
 
-JavaScript helpers for the **lazily** reactive-signals family: the
-[`lazily-spec`][spec] IPC wire types, a full-Harel state-chart interpreter, and
-an FFI state-projection consumer for the agent-doc binary.
+Native JavaScript port of the **lazily** reactive core — a first-class reactive
+binding alongside [`lazily-rs`][rs], [`lazily-py`][py], [`lazily-zig`][zig], and
+[`lazily-kt`][kt]. Ships a full reactive graph (Cell / Slot / Signal / Effect),
+the [`lazily-spec`][spec] IPC wire types, keyed cell collections + LIS
+reconciliation, the memoized semantic tree, the move-aware sequence CRDT, the
+Fugue/RGA text CRDT, manufactured text identity, a flat state machine, a
+full-Harel state-chart interpreter, capability negotiation, and an FFI
+state-projection consumer.
 
-> **Not a reactive-core port.** lazily-js is a state-projection **consumer** with
-> no reactive graph of its own — the same role [`lazily-kt`][kt] plays on the
-> JVM. The reactive cores live in [`lazily-rs`][rs], [`lazily-py`][py], and
-> [`lazily-zig`][zig]; when a chart's state must be authoritative or shared, it
-> runs in lazily-rs and lazily-js observes it via the snapshot/delta projection.
-> A state chart or any other compute runs natively here as pure logic — never
-> over FFI (routing it to a Rust `Context` would be circular).
+> **Reactive core.** Unlike earlier `@lazily-hub/js` releases (which were a
+> state-projection *consumer* with no reactive graph), `lazily-js` is a full
+> reactive binding. `@lazily-hub/js` is deprecated; migrate to `lazily-js`.
 
-Pure ES modules, zero runtime dependencies for the IPC and state-chart modules
-(`koffi` is loaded lazily, only when the FFI projection transport is used).
+Pure ES modules, zero runtime dependencies for the reactive, IPC, collections,
+CRDT, and state-chart modules (`koffi` is loaded lazily, only when the FFI
+projection transport is used).
 
 ## Packages
 
-lazily-js ships three entry points:
+lazily-js ships these entry points:
 
 | Import | What it is |
 |--------|-----------|
-| `@lazily-hub/js` | [`lazily-spec`][spec] IPC wire types — `Snapshot`, `Delta`, `DeltaOp`, `IpcMessage` (incl. `CrdtSync`), `NodeState`, `IpcValue`, `PeerPermissions` |
-| `@lazily-hub/js/statechart` | Full Harel/SCXML state-chart interpreter (compute, not protocol) |
-| `@lazily-hub/js/collections` | `CellMap` keyed collection + LIS keyed reconciliation (compute, not protocol) |
-| `@lazily-hub/js/state-projection` | koffi FFI consumer of the agent-doc `DocumentStateProjection` |
+| `lazily-js` | [`lazily-spec`][spec] IPC wire types — `Snapshot`, `Delta`, `DeltaOp`, `IpcMessage` (incl. `CrdtSync`), `NodeState`, `IpcValue`, `PeerPermissions`, capability negotiation (`SessionHandshake`, `BINDING_CAPABILITIES`) |
+| `lazily-js/reactive` | Reactive dependency graph — `Context`, `Cell`/`Slot`/`Signal`/`Effect` |
+| `lazily-js/state-machine` | Flat finite-state-machine kernel (Cell-backed) |
+| `lazily-js/statechart` | Full Harel/SCXML state-chart interpreter |
+| `lazily-js/collections` | `CellMap` + `CellTree` keyed collections and LIS keyed reconciliation |
+| `lazily-js/sem-tree` | Memoized semantic tree (incremental ancestor-chain fold) |
+| `lazily-js/seq-crdt` | Move-aware sequence CRDT (fractional-index + LWW) |
+| `lazily-js/text-crdt` | Fugue/RGA character CRDT |
+| `lazily-js/stable-id` | Manufactured text identity (anchors / content hashes / similarity) |
+| `lazily-js/state-projection` | koffi FFI consumer of the agent-doc `DocumentStateProjection` |
 
-## IPC wire types
+## Reactive graph
 
-Every wire value is a frozen, immutable object that round-trips the canonical
-externally-tagged JSON shape via `toWire()` / `fromWire()`. `IpcMessage` adds
-`encodeJson()` / `decodeJson()` for direct transport.
-
-```js
-import {
-  Snapshot,
-  NodeSnapshot,
-  Delta,
-  DeltaOp,
-  IpcMessage,
-} from "@lazily-hub/js";
-
-const snapshot = new Snapshot({
-  epoch: 1,
-  nodes: [NodeSnapshot.payload(0, "cell", new Uint8Array([1, 2, 3]))],
-});
-
-const msg = IpcMessage.snapshot(snapshot);
-const bytes = msg.encodeJson();        // Uint8Array of externally-tagged JSON
-const back = IpcMessage.decodeJson(bytes); // round-trips losslessly
-```
-
-Deltas are sequential by epoch; a non-contiguous `base_epoch` is the resync
-signal:
+`Context` mirrors lazily-rs `Context` semantics (single-threaded). The reactive
+family is **Slot** (lazy memoized derived) → **Cell** (mutable source) →
+**Signal** (eager derived), plus **Effect** (side-effecting observer). Pull-based
+and glitch-free; a `==` (PartialEq) guard suppresses no-op updates; `batch`
+coalesces invalidations; cycles throw.
 
 ```js
-const delta = Delta.next(1, [DeltaOp.cellSet(0, new Uint8Array([9]))]);
-delta.isNextAfter(1);   // true
-delta.applyStatus(1);   // { kind: "apply" }
-delta.applyStatus(0);   // { kind: "resync_required", lastEpoch: 0, baseEpoch: 1, epoch: 2 }
+import { Context } from "lazily-js/reactive";
+
+const ctx = new Context();
+const a = ctx.cell(2);
+const b = ctx.cell(3);
+
+const sum = ctx.slot(() => ctx.getCell(a) + ctx.getCell(b)); // lazy
+ctx.get(sum); // 5
+
+ctx.setCell(a, 10);
+ctx.get(sum); // 13
+
+const parity = ctx.signal(() => (ctx.getCell(a) % 2 === 0 ? "even" : "odd")); // eager
+ctx.setCell(a, 11);
+ctx.getSignal(parity); // "odd" — already materialized
 ```
 
-`PeerPermissions` is the per-peer capability ACL (`read` / `write` /
-`trigger_effect` over node ids); `Snapshot` and `Delta` expose
-`filterReadable(permissions, peer)` so a producer never leaks a node a peer may
-not read:
+## State machine + state charts
+
+`StateMachine` is a Cell-backed reactive FSM — the kernel a single-region chart
+compiles down to. `StateChart` is the full Harel/SCXML interpreter (compound
+states, orthogonal regions, shallow + deep history, entry/exit/transition
+actions, named guards). Both compose with the reactive graph.
 
 ```js
-import { PeerPermissions, RemoteOp } from "@lazily-hub/js";
+import { Context } from "lazily-js/reactive";
+import { StateMachine } from "lazily-js/state-machine";
 
-const perms = new PeerPermissions();
-perms.allow(7, RemoteOp.read(0));
-perms.canRead(7, 0); // true
-perms.canRead(7, 1); // false
+const ctx = new Context();
+const m = new StateMachine(ctx, "Red", (s, e) =>
+  e === "advance" ? { Red: "Green", Green: "Yellow", Yellow: "Red" }[s] : null,
+);
+m.send("advance"); // true
+m.state;           // "Green"
 ```
 
-`DeltaOp` covers all seven variants — `CellSet`, `SlotValue`, `Invalidate`,
-`NodeAdd`, `NodeRemove`, `EdgeAdd`, `EdgeRemove`. `NodeState` is
-`Payload` / `SharedBlob` / `Opaque`; `IpcValue` is `Inline` / `SharedBlob`, with
-`ShmBlobRef` carrying the shared-memory blob descriptor (`offset`, `len`,
-`generation`, `epoch`, `checksum`).
+## Keyed collections + semantic tree
 
-`NodeSnapshot` and the `NodeAdd` op carry an optional wire-stable **`NodeKey`**
-(`key`), the `"/"`-joined keyed address from [the spec][spec] § NodeKey. It is
-omitted from JSON when absent and decodes to `null` when missing, so pre-`key`
-fixtures round-trip unchanged. Construction enforces the spec bounds: path
-≤ 1024 bytes, ≤ 32 segments, no empty segments (leading/trailing/double `"/"`).
-
-`IpcMessage` is the externally-tagged frame: `Snapshot` / `Delta` / `CrdtSync`.
-The third variant carries the multi-writer **CRDT anti-entropy plane**
-([the spec][spec] § Distributed): a `CrdtSync` frame advertises a per-peer stamp
-`frontier` and ships a batch of `CrdtOp`s. lazily-js is a consumer, so it
-decodes/encodes and filters these frames rather than producing CRDT edits — but
-it no longer throws when the third variant arrives on the shared transport.
+`CellMap` / `CellTree` implement the keyed cell collections layer (value /
+membership / order reactivity independence, stable handles, atomic move).
+`reconcileCollections` emits the LIS move-minimized `{insert, remove, move,
+update}` op set. `SemTree` layers memoized derived values over a tree: one memo
+slot per node folding `(node value, child derived values)`; editing one node
+recomputes only its ancestor chain, and a node edit that doesn't change the
+folded result is suppressed by the memo guard.
 
 ```js
-import { CrdtSync, CrdtOp, WireStamp, IpcMessage, PeerPermissions, OpKind } from "@lazily-hub/js";
+import { CellMap, CellTree, reconcileCollections } from "lazily-js/collections";
+import { Context } from "lazily-js/reactive";
+import { SemTree } from "lazily-js/sem-tree";
 
-const sync = new CrdtSync({
-  frontier: [{ peer: 1, stamp: new WireStamp({ wallTime: 200, logical: 0, peer: 1 }) }],
-  ops: [
-    CrdtOp.keyed(2, "scores/alice",
-      new WireStamp({ wallTime: 180, logical: 3, peer: 2 }),
-      Uint8Array.of(30)),
-  ],
-});
-
-const msg = IpcMessage.crdtSync(sync);
-msg.encodeJson();          // byte-compatible with lazily-rs serde_json
-
-const perms = new PeerPermissions();
-perms.allowMany(1, OpKind.Read, [2]);
-sync.filterReadable(perms, 1);  // omits non-readable ops, keeps the full frontier
+const ctx = new Context();
+const tree = new SemTree(ctx, rootSpec, (v, kids) => v + kids.reduce((a, b) => a + b, 0));
+tree.value();          // folded root
+tree.setValue("leaf", 99); // recomputes only the ancestor chain
 ```
 
-`CrdtOp` mirrors lazily-rs's derived serde: a keyless op serializes `key: null`
-(not omitted — unlike `NodeSnapshot`/`NodeAdd`, which omit the field). The
-`frontier` is the `(peer, WireStamp)` tuple array, emitted as `[peer, stamp]`
-pairs.
+## CRDTs
 
-## State chart
-
-`statechart.js` is the native JavaScript counterpart of
-[`lazily-formal`][formal]'s `LazilyFormal.StateChart` and `lazily-rs`'s
-`src/statechart.rs`. Because lazily-js has no reactive graph, the active
-configuration is a plain `Set` (not a `Cell`) — the transition is pure logic
-with zero system dependencies, exactly as the spec requires for lazily-js /
-lazily-kt.
-
-Implemented subset (per the spec's implementation-status note): compound states,
-orthogonal (parallel) regions, shallow + deep history (record-on-exit /
-restore-on-enter), entry/exit/transition actions (exit innermost-first →
-transition → entry outermost-first), named guards (fail-closed), and external +
-internal transitions. `run` actions, `{"expr": …}` context guards, and
-`final`/completion (`done`) are rejected explicitly.
+`SeqCrdt` is the move-aware sequence CRDT: each element is three independent LWW
+registers (value, position, deleted); a move is a single LWW reassignment (not
+delete + reinsert), so concurrent moves converge without duplication.
+`TextCrdt` is the Fugue/RGA character CRDT: concurrent same-point inserts keep
+both, deletes are sticky tombstones, and merge is commutative / associative /
+idempotent. Both GC tombstones under a caller-supplied causal-stability
+watermark.
 
 ```js
-import { ChartDef, StateChart } from "@lazily-hub/js/statechart";
+import { SeqCrdt } from "lazily-js/seq-crdt";
+import { TextCrdt } from "lazily-js/text-crdt";
 
-const def = ChartDef.fromChart(chartJson);
-const chart = new StateChart(def);
+const seq = new SeqCrdt(1);
+seq.insertBack("a", 0, 1);
+seq.moveAfter("a", "b", 10); // single LWW reassignment
 
-chart.activeLeaves();          // initial leaves, sorted
-chart.send("TICK", {});        // true if any transition was taken
-chart.matches("playing");      // hierarchical "state-in" predicate
-chart.configuration();         // full active configuration (leaves + ancestors)
-chart.lastActions();           // exit → transition → entry actions from the last send
+const text = TextCrdt.fromStr(1, "hi");
+const peer = text.fork(2);
+peer.insert(2, "!");
+text.merge(peer); // converges
 ```
 
-`send` is deterministic by construction — a total function of
-`(chart, configuration, history, event, guards)`, mirroring the Lean
-`StateChart.send`. Named guards resolve via the `guards` map passed to `send`
-(absent / unknown name → fail-closed `false`).
+## IPC wire types + capability negotiation
 
-## State-projection consumer (FFI)
-
-`state-projection.js` wraps the agent-doc binary's C-ABI state-projection
-surface via [`koffi`][koffi]. `koffi` is resolved lazily — importing the module
-does not load the native library; only `loadAgentDocFFI()` does.
-
-```js
-import {
-  loadAgentDocFFI,
-  StateProjectionClient,
-  documentHash,
-  buildStateEvent,
-  projectionSummary,
-} from "@lazily-hub/js/state-projection";
-
-const ffi = loadAgentDocFFI("/path/to/libagent_doc.so");
-const doc = documentHash("plan.md");
-const client = new StateProjectionClient(doc, ffi);
-
-client.on("projection", (json) => {
-  console.log(projectionSummary(json));
-});
-
-client.refresh();              // pull the latest DocumentStateProjection
-client.recordStateEvent(JSON.stringify(buildStateEvent(doc, "editor.save", {}, "1")));
-```
-
-`StateProjectionClient` is an `EventEmitter` that emits `"projection"` on each
-`refresh()`; `projectionSummary` / `compactProjectionSummary` reduce the raw
-projection JSON into editor-visible status fields. This is an **optional
-transport** — the IPC and state-chart modules work without any native binary.
+Every wire value round-trips the canonical externally-tagged JSON shape via
+`toWire()` / `fromWire()`; `IpcMessage` adds `encodeJson()` / `decodeJson()`.
+`CrdtSync` carries the multi-writer CRDT anti-entropy plane. `PeerPermissions`
+is the per-peer capability ACL. `SessionHandshake` is the fail-closed
+compatibility handshake; `BINDING_CAPABILITIES` advertises this binding's
+conformance (shipped surfaces + the `ffi = none` carve-out for browser/Worker JS).
 
 ## Conformance
 
-lazily-js replays the shared [`lazily-spec`][spec] conformance fixtures:
+lazily-js conforms to the [`lazily-spec`][spec] Binding Conformance Matrix.
+Every `MUST` layer is shipped; the only advertised omission is the C-ABI FFI
+carve-out (`ffi = none` — browser/Worker JS has no shared in-process address
+space; the full state plane, incl. `CrdtSync`, is still exposed over
+IPC/WebSocket/WebRTC). Async is optional (async.md: a binding MAY omit it).
 
-- IPC fixtures in `test/conformance/` round-trip through `IpcMessage.fromWire` /
-  `toWire` (`test/ipc.test.js`). This includes the `agent-doc/` snapshot + delta
-  pair, whose `type_tag` vocabulary is checked against
-  [`schemas/agent-doc-state.json`][spec] and whose phase assertions decode the
-  inline serde_json payload bytes.
-- The state-chart interpreter is validated against the same Harel fixtures every
-  binding uses (`test/statechart.test.js`).
-- The `CellMap` collection + LIS reconciliation replay the
-  `conformance/collections/` fixtures (`test/collections.test.js`).
-- lazily-js-generated `Snapshot` / `Delta` / `CrdtSync` wire is validated against
-  the canonical [JSON Schemas][spec] (`test/schema-conformance.test.js`), and the
-  stale `slot_id` / base64 / `type`-discriminant form is rejected — the on-binding
-  mirror of the spec's drift-prevention suite.
-
-The `arena_blob.json` fixture is intentionally **not** replayed here: it is
-`kind: "Arena"`, explicitly not a wire type, and scopes the in-process
-`ShmBlobArena` host contract to the reactive cores (lazily-rs / -py / -zig).
-lazily-js is a state-projection consumer with no arena host of its own.
+lazily-js replays every shared conformance fixture — IPC, agent-doc state,
+keyed collections (`CellMap` / `CellTree` / LIS reconciliation), the semantic
+tree, the sequence + text CRDTs, manufactured text identity, and the Harel
+state charts — and validates its generated wire against the canonical JSON
+Schemas.
 
 ## Development
 
@@ -214,21 +153,17 @@ lazily-js is a state-projection consumer with no arena host of its own.
 make check   # == npm run build && npm test
 ```
 
-- `npm run build` — `node --check` syntax validation of the four modules.
+- `npm run build` — `node --check` syntax validation of all modules.
 - `npm test` — `node --test test/*.test.js`.
 
 ## See also
 
-- [`lazily-spec`][spec] — language-agnostic wire protocol + the conformance
-  fixtures (IPC and state-chart) every binding replays.
-- [`lazily-formal`][formal] — Lean 4 formal model (shared primitives, flat FSM
-  kernel, full Harel `StateChart`); the executable reference behind the
-  state-chart fixtures and the deterministic `send` lazily-js inherits.
-- [`lazily-kt`][kt] — the JVM analogue of this consumer role.
-- [`lazily-rs`][rs] / [`lazily-py`][py] / [`lazily-zig`][zig] — the reactive
-  cores.
+- [`lazily-spec`][spec] — language-agnostic wire protocol + conformance fixtures.
+- [`lazily-formal`][formal] — Lean 4 formal model (shared primitives, flat FSM,
+  full Harel `StateChart`).
+- [`lazily-rs`][rs] / [`lazily-py`][py] / [`lazily-zig`][zig] / [`lazily-kt`][kt]
+  — sibling reactive cores.
 
-[koffi]: https://github.com/Koromix/koffi
 [rs]: https://github.com/lazily-hub/lazily-rs
 [py]: https://github.com/lazily-hub/lazily-py
 [zig]: https://github.com/lazily-hub/lazily-zig

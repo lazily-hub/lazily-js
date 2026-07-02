@@ -805,6 +805,196 @@ export class IpcMessage {
   }
 }
 
+// Capability negotiation (protocol.md § Capability Negotiation). Every
+// non-local session starts with this compatibility handshake, exchanged before
+// any `Snapshot` or `Delta` flows. If peers disagree on `protocol_major_version`,
+// `codec`, `ordered_reliable`, or required features, they fail closed.
+export const PROTOCOL_ID = "lazily-ipc";
+export const PROTOCOL_MAJOR_VERSION = 1;
+
+export const Codec = Object.freeze({
+  Json: "json",
+  Bincode: "bincode",
+  Postcard: "postcard",
+});
+
+// FFI message-kind discriminant (schemas/ffi.json § LazilyFfiMessageKind). The
+// JSON representation is normative; CrdtSync = 3 is required of the discriminant.
+export const LazilyFfiMessageKind = Object.freeze({
+  Unknown: 0,
+  Snapshot: 1,
+  Delta: 2,
+  CrdtSync: 3,
+});
+
+// The FFI status codes mirror schemas/ffi.json § LazilyFfiStatus.
+export const LazilyFfiStatus = Object.freeze({
+  Ok: 0,
+  Empty: 1,
+  NullPointer: 2,
+  InvalidMessage: 3,
+  EncodeFailed: 4,
+  Panic: 5,
+});
+
+function assertString(value, name) {
+  if (typeof value !== "string") {
+    throw new TypeError(`${name} must be a string`);
+  }
+  return value;
+}
+
+function assertBoolean(value, name) {
+  if (typeof value !== "boolean") {
+    throw new TypeError(`${name} must be a boolean`);
+  }
+  return value;
+}
+
+function assertStringArray(value, name) {
+  if (!Array.isArray(value)) {
+    throw new TypeError(`${name} must be an array of strings`);
+  }
+  return value.map((item, index) => {
+    if (typeof item !== "string") {
+      throw new TypeError(`${name}[${index}] must be a string`);
+    }
+    return item;
+  });
+}
+
+export class SessionHandshake {
+  constructor(fields) {
+    const obj = assertObject(fields, "SessionHandshake");
+    this.protocolId = assertString(obj.protocol_id, "protocol_id");
+    this.protocolMajorVersion = assertInteger(
+      obj.protocol_major_version,
+      "protocol_major_version",
+    );
+    this.codec = assertString(obj.codec, "codec");
+    this.maxFrameSize = assertInteger(obj.max_frame_size, "max_frame_size");
+    this.fragmentationSupported = assertBoolean(
+      obj.fragmentation_supported,
+      "fragmentation_supported",
+    );
+    this.orderedReliable = assertBoolean(obj.ordered_reliable, "ordered_reliable");
+    this.peerId = assertInteger(obj.peer_id, "peer_id");
+    this.sessionId = assertString(obj.session_id, "session_id");
+    this.features = Object.freeze(assertStringArray(obj.features ?? [], "features"));
+    Object.freeze(this);
+  }
+
+  toWire() {
+    return {
+      protocol_id: this.protocolId,
+      protocol_major_version: this.protocolMajorVersion,
+      codec: this.codec,
+      max_frame_size: this.maxFrameSize,
+      fragmentation_supported: this.fragmentationSupported,
+      ordered_reliable: this.orderedReliable,
+      peer_id: this.peerId,
+      session_id: this.sessionId,
+      features: [...this.features],
+    };
+  }
+
+  encodeJson() {
+    return textEncoder.encode(JSON.stringify(this.toWire()));
+  }
+
+  // Fail-closed compatibility check (protocol.md § Capability Negotiation).
+  // Peers are compatible only when they agree on `protocol_id`,
+  // `protocol_major_version`, `codec`, and `ordered_reliable`, and `other`
+  // offers every feature this side requires.
+  checkCompatible(other, requiredFeatures = []) {
+    if (this.protocolId !== PROTOCOL_ID) {
+      return { ok: false, field: "protocol_id", reason: `expected "${PROTOCOL_ID}"` };
+    }
+    if (other.protocolId !== PROTOCOL_ID) {
+      return { ok: false, field: "protocol_id", reason: `peer is not ${PROTOCOL_ID}` };
+    }
+    if (this.protocolMajorVersion !== other.protocolMajorVersion) {
+      return {
+        ok: false,
+        field: "protocol_major_version",
+        reason: `${this.protocolMajorVersion} != ${other.protocolMajorVersion}`,
+      };
+    }
+    if (this.codec !== other.codec) {
+      return { ok: false, field: "codec", reason: `${this.codec} != ${other.codec}` };
+    }
+    if (this.orderedReliable !== other.orderedReliable) {
+      return {
+        ok: false,
+        field: "ordered_reliable",
+        reason: `${this.orderedReliable} != ${other.orderedReliable}`,
+      };
+    }
+    const offered = new Set(other.features);
+    for (const required of requiredFeatures) {
+      if (!offered.has(required)) {
+        return {
+          ok: false,
+          field: "features",
+          reason: `peer does not offer required feature "${required}"`,
+        };
+      }
+    }
+    return { ok: true };
+  }
+
+  static fromWire(value) {
+    return new SessionHandshake(assertObject(value, "SessionHandshake"));
+  }
+
+  static decodeJson(data) {
+    const text =
+      data instanceof Uint8Array ? textDecoder.decode(data) : String(data);
+    return SessionHandshake.fromWire(JSON.parse(text));
+  }
+}
+
+// lazily-js binding-level conformance declaration. The conformance matrix lists
+// each layer as MUST; a binding that structurally cannot host a layer MUST
+// advertise the omission (capability negotiation / fail-closed) rather than stay
+// silent. lazily-js runs on browser/Worker JS — a platform with no shared
+// in-process address space — so it declares the C-ABI FFI carve-out
+// (`ffi = none`) per protocol.md § "C-ABI FFI is required". Every other MUST
+// layer is shipped: the reactive core, keyed collections, the semantic tree,
+// the sequence + text CRDTs, IPC, state machine, state charts, permissions, and
+// capability negotiation.
+export const FfiCapability = Object.freeze({
+  Host: "host",
+  None: "none",
+});
+
+export const BINDING_CAPABILITIES = Object.freeze({
+  binding: "lazily-js",
+  // C-ABI FFI: carve-out — browser/Worker JS cannot host a native in-process ABI.
+  // Must NOT be advertised as embeddable; still exposes the full state plane
+  // (incl. CrdtSync) over IPC/WebSocket/WebRTC.
+  ffi: FfiCapability.None,
+  // Reactive core (Cell/Slot/Effect/Signal): shipped.
+  reactive_core: true,
+  // Async reactive context: optional (async.md: "A binding MAY omit it entirely").
+  async_context: false,
+  // Shipped MUST surfaces:
+  ipc: true,
+  crdt: true,
+  collections: { cellmap: true, celltree: true, reconcile: true },
+  sem_tree: true,
+  seq_crdt: true,
+  text_crdt: true,
+  stable_id: true,
+  state_machine: true,
+  state_charts: true,
+  permissions: true,
+  capability_negotiation: true,
+  // Optional (MAY) transports — not bridged by this binding:
+  signaling: false,
+  webrtc: false,
+});
+
 export const OpKind = Object.freeze({
   Read: "read",
   Write: "write",

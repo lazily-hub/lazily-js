@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
-import { CellMap, reconcileCollections } from "../src/collections.js";
+import { CellMap, CellTree, reconcileCollections } from "../src/collections.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const specCollections = join(here, "..", "..", "lazily-spec", "conformance", "collections");
@@ -124,4 +124,111 @@ test("reconcileCollections leaves an already-ordered target move-free", () => {
   );
   assert.deepEqual(result.ops, []);
   assert.deepEqual(result.stable_keys_not_invalidated, ["a", "b", "c"]);
+});
+
+// CellTree (ordered keyed tree) — cell-model.md § Ordered keyed tree.
+// A node is (stable id, value, ordered keyed child collection). Per-node value
+// reactivity, per-level membership/order reactivity, and the atomic-move
+// guarantee are all inherited from the per-cell model.
+
+function playerTree() {
+  return new CellTree({
+    id: "root",
+    value: null,
+    children: {
+      order: ["alice", "bob"],
+      values: {
+        alice: { id: "alice", value: 10, children: { order: ["a1"], values: { a1: { id: "a1", value: 1 } } } },
+        bob: { id: "bob", value: 20 },
+      },
+    },
+  });
+}
+
+test("CellTree navigates by path and reads values", () => {
+  const tree = playerTree();
+  assert.equal(tree.getValue(["alice"]), 10);
+  assert.equal(tree.getValue(["alice", "a1"]), 1);
+  assert.equal(tree.getValue(["bob"]), 20);
+  assert.equal(tree.nodeAt(["nope"]), undefined);
+});
+
+test("CellTree per-node value reactivity: editing a node touches only value, never membership/order", () => {
+  const tree = playerTree();
+  const report = tree.setValue(["alice"], 11);
+  assert.deepEqual(report, { path: ["alice"], value: ["alice"], membership: false, order: false });
+  assert.equal(tree.getValue(["alice"]), 11);
+  // An unchanged value invalidates nothing (PartialEq guard).
+  assert.deepEqual(tree.setValue(["alice"], 11), {
+    path: ["alice"],
+    value: [],
+    membership: false,
+    order: false,
+  });
+});
+
+test("CellTree value edit does not leak into another level's child readers", () => {
+  const tree = playerTree();
+  const aliceReport = tree.setValue(["alice"], 99);
+  const bobReport = tree.setValue(["bob"], 99);
+  // Each report is scoped to its own path only — a sibling is untouched.
+  assert.deepEqual(aliceReport.path, ["alice"]);
+  assert.deepEqual(bobReport.path, ["bob"]);
+  assert.equal(aliceReport.membership, false);
+  assert.equal(aliceReport.order, false);
+});
+
+test("CellTree insert/remove at one level touches only that parent's membership + order", () => {
+  const tree = playerTree();
+  const report = tree.insertChild([], "carol", { id: "carol", value: 30 });
+  assert.deepEqual(report, { path: [], value: [], membership: true, order: true });
+  assert.deepEqual(tree.childKeys([]), ["alice", "bob", "carol"]);
+
+  const removeReport = tree.removeChild([], "bob");
+  assert.deepEqual(removeReport, { path: [], value: [], membership: true, order: true });
+  assert.deepEqual(tree.childKeys([]), ["alice", "carol"]);
+});
+
+test("CellTree atomic move keeps the child handle stable and bumps order once", () => {
+  const tree = playerTree();
+  const handleAlice = tree.childHandle([], "alice");
+  const report = tree.moveChildTo([], "alice", 1);
+  assert.deepEqual(report, { path: [], value: [], membership: false, order: true });
+  // Atomic move: same handle (never remove + re-mint), only order changed.
+  assert.equal(tree.childHandle([], "alice"), handleAlice);
+  assert.deepEqual(tree.childKeys([]), ["bob", "alice"]);
+});
+
+test("CellTree moveBefore / moveAfter reorder within a level", () => {
+  const tree = playerTree();
+  tree.moveChildAfter([], "alice", "bob"); // alice moves after bob
+  assert.deepEqual(tree.childKeys([]), ["bob", "alice"]);
+  tree.moveChildBefore([], "alice", "bob"); // alice moves before bob again
+  assert.deepEqual(tree.childKeys([]), ["alice", "bob"]);
+});
+
+test("CellTree descendant edit does not invalidate an unrelated sibling's child level", () => {
+  const tree = playerTree();
+  // Edit a grandchild under alice; bob's level (and root level) must be untouched.
+  const report = tree.setValue(["alice", "a1"], 7);
+  assert.deepEqual(report, { path: ["alice", "a1"], value: ["a1"], membership: false, order: false });
+  assert.equal(tree.getValue(["alice", "a1"]), 7);
+  // Root child level and bob are observationally unchanged.
+  assert.deepEqual(tree.childKeys([]), ["alice", "bob"]);
+  assert.equal(tree.getValue(["bob"]), 20);
+});
+
+test("CellTree snapshot round-trips the nested structure", () => {
+  const tree = playerTree();
+  tree.setValue(["alice"], 11);
+  const rebuilt = new CellTree(tree.snapshot());
+  assert.deepEqual(rebuilt.snapshot(), tree.snapshot());
+  assert.equal(rebuilt.getValue(["alice", "a1"]), 1);
+});
+
+test("CellTree removes a subtree", () => {
+  const tree = playerTree();
+  tree.removeChild([], "alice");
+  assert.equal(tree.nodeAt(["alice", "a1"]), undefined);
+  assert.deepEqual(tree.childKeys([]), ["bob"]);
 });

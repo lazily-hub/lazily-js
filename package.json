@@ -1,7 +1,7 @@
 {
-  "name": "@lazily-hub/js",
-  "version": "0.3.0",
-  "description": "JavaScript lazily IPC protocol helpers plus FFI state-projection consumer bindings. NOT a reactive-core port.",
+  "name": "lazily-js",
+  "version": "1.0.0",
+  "description": "Native JavaScript port of the lazily reactive core: a full reactive graph (Cell/Slot/Signal/Effect), the lazily-spec IPC wire types, keyed cell collections + LIS reconciliation, the memoized semantic tree, the move-aware sequence CRDT, the Fugue/RGA text CRDT, manufactured text identity, full-Harel state charts, and an FFI state-projection consumer.",
   "type": "module",
   "main": "src/index.js",
   "types": "src/index.d.ts",
@@ -10,9 +10,13 @@
       "types": "./src/index.d.ts",
       "default": "./src/index.js"
     },
-    "./state-projection": {
-      "types": "./src/state-projection.d.ts",
-      "default": "./src/state-projection.js"
+    "./reactive": {
+      "types": "./src/reactive.d.ts",
+      "default": "./src/reactive.js"
+    },
+    "./state-machine": {
+      "types": "./src/state-machine.d.ts",
+      "default": "./src/state-machine.js"
     },
     "./statechart": {
       "types": "./src/statechart.d.ts",
@@ -21,10 +25,30 @@
     "./collections": {
       "types": "./src/collections.d.ts",
       "default": "./src/collections.js"
+    },
+    "./sem-tree": {
+      "types": "./src/sem-tree.d.ts",
+      "default": "./src/sem-tree.js"
+    },
+    "./stable-id": {
+      "types": "./src/stable-id.d.ts",
+      "default": "./src/stable-id.js"
+    },
+    "./seq-crdt": {
+      "types": "./src/seq-crdt.d.ts",
+      "default": "./src/seq-crdt.js"
+    },
+    "./text-crdt": {
+      "types": "./src/text-crdt.d.ts",
+      "default": "./src/text-crdt.js"
+    },
+    "./state-projection": {
+      "types": "./src/state-projection.d.ts",
+      "default": "./src/state-projection.js"
     }
   },
   "scripts": {
-    "build": "node --check src/index.js && node --check src/state-projection.js && node --check src/statechart.js && node --check src/collections.js",
+    "build": "node --check src/index.js && node --check src/reactive.js && node --check src/state-machine.js && node --check src/statechart.js && node --check src/collections.js && node --check src/sem-tree.js && node --check src/stable-id.js && node --check src/seq-crdt.js && node --check src/text-crdt.js && node --check src/state-projection.js",
     "test": "node --test test/*.test.js"
   },
   "dependencies": {

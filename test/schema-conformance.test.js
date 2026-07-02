@@ -13,6 +13,8 @@ import {
   DeltaOp,
   EdgeSnapshot,
   IpcMessage,
+  LazilyFfiMessageKind,
+  LazilyFfiStatus,
   NodeSnapshot,
   NodeState,
   ShmBlobRef,
@@ -151,4 +153,27 @@ test("schema rejects the stale base64 payload form", () => {
 test("schema rejects the stale type-discriminant envelope", () => {
   const stale = { type: "snapshot", epoch: 1, nodes: [], edges: [], roots: [] };
   assert.ok(validator("snapshot")(stale) === false, "type-discriminant must be rejected");
+});
+
+// FFI discriminants: the lazily-js constants MUST stay in lock-step with
+// schemas/ffi.json (protocol.md: "the FFI message kind discriminant MUST
+// include CrdtSync = 3").
+
+test("lazily-js LazilyFfiMessageKind validates against schemas/ffi.json", () => {
+  const schema = loadSchema("ffi");
+  const kindSchema = schema.$defs.LazilyFfiMessageKind;
+  const allowed = kindSchema.enum;
+  // Every binding-declared kind is an allowed schema value, and CrdtSync = 3 is present.
+  for (const value of Object.values(LazilyFfiMessageKind)) {
+    assert.ok(allowed.includes(value), `LazilyFfiMessageKind ${value} missing from schema enum`);
+  }
+  assert.equal(LazilyFfiMessageKind.CrdtSync, 3);
+});
+
+test("lazily-js LazilyFfiStatus validates against schemas/ffi.json", () => {
+  const schema = loadSchema("ffi");
+  const allowed = schema.$defs.LazilyFfiStatus.enum;
+  for (const value of Object.values(LazilyFfiStatus)) {
+    assert.ok(allowed.includes(value), `LazilyFfiStatus ${value} missing from schema enum`);
+  }
 });
