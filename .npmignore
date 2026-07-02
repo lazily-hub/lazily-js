@@ -1,4 +1,6 @@
 AGENTS.md
 Makefile
+.env
+.env.*
 test/
 .tsift/
