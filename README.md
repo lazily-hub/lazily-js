@@ -147,6 +147,17 @@ tree, the sequence + text CRDTs, manufactured text identity, and the Harel
 state charts — and validates its generated wire against the canonical JSON
 Schemas.
 
+### Formal model verification
+
+`npm test` also builds the [`lazily-formal`][formal] Lean 4 model — the
+executable reference behind the state-chart / reactive / collection / tree /
+reconciliation / async-slot theorems that `test/state-machine.test.js` and
+`test/statechart-properties.test.js` mirror in JS. If a Lean proof breaks, the
+test suite fails. The build is invoked through `scripts/formal-check.mjs`,
+which **skips gracefully** (exit 0) when the `lazily-formal` submodule or the
+`lake` toolchain is absent — so npm-tarball consumers and shallow clones are
+not broken; a full repo checkout (CI) verifies the proofs for real.
+
 ## Development
 
 ```bash
@@ -154,7 +165,8 @@ make check   # == npm run build && npm test
 ```
 
 - `npm run build` — `node --check` syntax validation of all modules.
-- `npm test` — `node --test test/*.test.js`.
+- `npm run test:formal` — build `lazily-formal` (Lean proofs); skip if absent.
+- `npm test` — `test:formal` then `node --test test/*.test.js`.
 
 ## See also
 

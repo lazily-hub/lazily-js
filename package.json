@@ -1,6 +1,6 @@
 {
   "name": "lazily-js",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Native JavaScript port of the lazily reactive core: a full reactive graph (Cell/Slot/Signal/Effect), the lazily-spec IPC wire types, keyed cell collections + LIS reconciliation, the memoized semantic tree, the move-aware sequence CRDT, the Fugue/RGA text CRDT, manufactured text identity, full-Harel state charts, and an FFI state-projection consumer.",
   "type": "module",
   "main": "src/index.js",
@@ -49,7 +49,8 @@
   },
   "scripts": {
     "build": "node --check src/index.js && node --check src/reactive.js && node --check src/state-machine.js && node --check src/statechart.js && node --check src/collections.js && node --check src/sem-tree.js && node --check src/stable-id.js && node --check src/seq-crdt.js && node --check src/text-crdt.js && node --check src/state-projection.js",
-    "test": "node --test test/*.test.js"
+    "test:formal": "node scripts/formal-check.mjs",
+    "test": "npm run test:formal && node --test test/*.test.js"
   },
   "dependencies": {
     "koffi": "^3.0.2"

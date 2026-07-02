@@ -3,4 +3,5 @@ Makefile
 .env
 .env.*
 test/
+scripts/
 .tsift/
