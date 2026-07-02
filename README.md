@@ -151,13 +151,30 @@ Schemas.
 ### Formal model verification
 
 `npm test` also builds the [`lazily-formal`][formal] Lean 4 model — the
-executable reference behind the state-chart / reactive / collection / tree /
-reconciliation / async-slot theorems that `test/state-machine.test.js` and
-`test/statechart-properties.test.js` mirror in JS. If a Lean proof breaks, the
-test suite fails. The build is invoked through `scripts/formal-check.mjs`,
-which **skips gracefully** (exit 0) when the `lazily-formal` submodule or the
-`lake` toolchain is absent — so npm-tarball consumers and shallow clones are
-not broken; a full repo checkout (CI) verifies the proofs for real.
+executable reference behind every formal guarantee lazily-js inherits. If a Lean
+proof breaks, the test suite fails. The build is invoked through
+`scripts/formal-check.mjs`, which **skips gracefully** (exit 0) when the
+`lazily-formal` submodule or the `lake` toolchain is absent — so npm-tarball
+consumers and shallow clones are not broken; a full repo checkout (CI) verifies
+the proofs for real.
+
+Each lazily-formal module that has a JS counterpart has a matching
+`*-properties.test.js` file that names the Lean theorems it mirrors and
+exercises the JS implementation against the theorem's statement — the universal
+guarantees no finite fixture suite can establish:
+
+| lazily-formal module | JS test file | Mirrored theorems |
+|----------------------|--------------|-------------------|
+| `StateMachine` | `state-machine.test.js` | `guard_rejection_preserves_state`, `accepted_transition_advances_state`, `send_preserves_transition` |
+| `StateChart` | `statechart-properties.test.js` | `enabled_empty_rejects`, `parallel_region_confluence`, `single_region_refines_flat_machine`, `single_region_enabled_at_most_one`, `recordHistory_idempotent`, `send_actions_empty_when_rejected`, `send_preserves_chart`, determinism-by-construction |
+| `Reactive` | `reactive-properties.test.js` | `setCell_equal_preserves_graph`, `setCell_different_invalidates_dependents`, `recomputeSlot_equal_preserves_dependents`, `recomputeSlot_different_invalidates_dependents`, `signal_materialized_after_recompute` |
+| `Collection` | `collection-properties.test.js` | `setEntryValue_preserves_{membership,order,siblings}`, `moveKey_preserves_{membership,values}`, `moveKey_advances_order`, `addKey_advances_membership_and_order`, `Family.get_idempotent_after_first` |
+| `Tree` | `tree-properties.test.js` | `setNodeValue_preserves_{other_nodes,node_signals}`, `moveChild_preserves_{non_parent,parent_value}`, `moveChild_advances_order_signal_only` |
+| `Reconciliation` | `reconciliation-properties.test.js` | `lisBy_longest`, `reconcile_move_minimized`, `reconcile_stable_not_invalidated` |
+
+`AsyncSlotState` / `AsyncEffect` / `ThreadSafe` are not mirrored because async
+is optional (`lazily-spec/docs/async.md`: a binding MAY omit it) and lazily-js
+ships no async surface.
 
 ## Development
 
