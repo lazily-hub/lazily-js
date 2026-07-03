@@ -57,4 +57,13 @@ jobs:
       # v1.x releases are removed.
       - name: Publish
         working-directory: lazily-js
-        run: npm publish --access public --tag prev
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          if npm publish --access public --tag prev; then
+            echo "published @lazily-hub/lazily-js@${version}"
+          elif npm view "@lazily-hub/lazily-js@${version}" version >/dev/null 2>&1; then
+            echo "@lazily-hub/lazily-js@${version} already published — idempotent no-op"
+          else
+            echo "publish failed for a reason other than already-published" >&2
+            exit 1
+          fi
