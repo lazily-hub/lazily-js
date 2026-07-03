@@ -976,8 +976,9 @@ export const BINDING_CAPABILITIES = Object.freeze({
   ffi: FfiCapability.None,
   // Reactive core (Cell/Slot/Effect/Signal): shipped.
   reactive_core: true,
-  // Async reactive context: optional (async.md: "A binding MAY omit it entirely").
-  async_context: false,
+  // Async reactive context: shipped (./reactive-async — Promise-driven derivations
+  // with revision-guarded stale-completion discard, in-flight dedup, cancellation).
+  async_context: true,
   // Shipped MUST surfaces:
   ipc: true,
   crdt: true,
@@ -990,9 +991,12 @@ export const BINDING_CAPABILITIES = Object.freeze({
   state_charts: true,
   permissions: true,
   capability_negotiation: true,
-  // Optional (MAY) transports — not bridged by this binding:
-  signaling: false,
-  webrtc: false,
+  // Optional (MAY) transports — bridged by this binding (./signaling,
+  // ./distributed): the kebab-tagged signaling wire protocol + room routing and
+  // the WebRTC DataChannel IPC transport + CRDT anti-entropy runtime. Real
+  // WebRTC is reached through a browser platform adapter (no npm dependency).
+  signaling: true,
+  webrtc: true,
 });
 
 export const OpKind = Object.freeze({

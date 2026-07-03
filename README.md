@@ -6,6 +6,9 @@ is the JavaScript/TypeScript binding alongside [`lazily-rs`][rs],
 [`lazily-dart`][dart]. It ships:
 
 - a full reactive graph (`Context`, `Cell`, `Slot`, `Signal`, `Effect`);
+- an async reactive graph (`AsyncContext`) for Promise-driven derivations, with
+  revision-guarded stale-completion discard, in-flight deduplication, and
+  cancellation;
 - the [`lazily-spec`][spec] IPC wire types (`Snapshot`, `Delta`, `CrdtSync`,
   capability negotiation, and default-deny peer permissions);
 - keyed cell collections, move-minimized reconciliation, and a memoized
@@ -13,6 +16,9 @@ is the JavaScript/TypeScript binding alongside [`lazily-rs`][rs],
 - move-aware sequence CRDT, Fugue/RGA text CRDT, and manufactured text identity;
 - a Cell-backed flat state machine plus a full Harel/SCXML state-chart
   interpreter with the typed `ChartBuilder` API;
+- the distributed plane — the WebSocket signaling protocol + client, a
+  `DataChannel` transport seam with permission-filtering sink/source, a browser
+  `RTCPeerConnection` adapter, and the `CrdtPlaneRuntime` anti-entropy engine;
 - a koffi-backed state-projection consumer for agent-doc host projections.
 
 > **Package note.** Earlier `@lazily-hub/js` releases were only a state-projection
@@ -24,26 +30,34 @@ the FFI projection transport is used.
 
 ## Feature Set
 
-The full `lazily` capability set and its cross-language coverage (`lazily-rs`,
-`lazily-kt`, `lazily-js`). `✅` shipped, `~` partial, `—` not applicable/absent.
+The full `lazily` capability set across every binding. Legend: ✅ shipped ·
+`~` partial · `—` absent or not applicable. The canonical matrix with per-cell
+notes and platform carve-outs lives in
+[`lazily-spec` § Cross-Language Coverage](../lazily-spec/docs/coverage.md).
 
-| Feature | Rust | Kotlin | JS |
-|---------|:----:|:------:|:--:|
-| Reactive graph — `Context`, `Slot`, `Cell`, `memo`, `Signal` (eager), `Effect`, `batch` | ✅ | ✅ | ✅ |
-| Thread-safe `Context` (`Send + Sync`, lock-backed) | ✅ | ✅ | — |
-| Async reactive `Context` | ✅ | ✅ | — |
-| Statechart (Harel) + state machine | ✅ | ✅ | ✅ |
-| Keyed cell collections + `reconcile` + `SemTree` (keyed tree) | ✅ | ✅ | ✅ |
-| Stable-id alignment (manufactured identity) | ✅ | ✅ | ✅ |
-| Free-text character CRDT (`TextCrdt`) | ✅ | ✅ | ✅ |
-| **`TextCrdt` delta sync — `version_vector` / `delta_since` / `apply_delta` (`#lztextsync`)** | ✅ | ✅ | ✅ |
-| Move-aware sequence CRDT (`SeqCrdt`) | ✅ | ✅ | ✅ |
-| Registers (LWW / MV), `PnCounter`, `CellCrdt` | ✅ | ✅ | ✅ |
-| IPC wire — `Snapshot` + `Delta` + `CrdtSync` + shared-memory blobs | ✅ | ✅ | ~ |
-| State projection / mirror | ✅ | ✅ | ✅ |
-| FFI boundary | ✅ | ✅ | n/a |
-| Distributed plane (WebRTC transport + signaling) | ✅ | — | — |
-| Instrumentation / benchmarks | ✅ | — | — |
+| Feature | Rust | Python | Kotlin | JS | Dart | Zig |
+|---------|:----:|:------:|:------:|:--:|:----:|:---:|
+| Reactive graph — `Cell` / `Slot` / `Signal` / `Effect` / memo / batch | ✅ | ~ | ✅ | ✅ | ~ | ~ |
+| Thread-safe context (lock-backed) | ✅ | ✅ | ✅ | — | — | ✅ |
+| Async reactive context | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| Flat state machine | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Harel state charts | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Keyed cell collections (`CellMap` / `CellTree`) + reconcile | ✅ | ✅ | ✅ | ✅ | ✅ | ~ |
+| Memoized semantic tree (`SemTree`) | ✅ | — | ✅ | ✅ | — | — |
+| Stable-id alignment (manufactured identity) | ✅ | — | ✅ | ✅ | — | — |
+| Free-text character CRDT (`TextCrdt`) | ✅ | — | ✅ | ✅ | — | — |
+| `TextCrdt` delta sync (`version_vector` / `delta_since` / `apply_delta`) | ✅ | — | ✅ | ✅ | — | — |
+| Move-aware sequence CRDT (`SeqCrdt`) | ✅ | — | ✅ | ✅ | — | — |
+| Registers (LWW / MV) + `PnCounter` + `CellCrdt` | ✅ | — | ✅ | ✅ | — | — |
+| IPC wire — `Snapshot` + `Delta` + `CrdtSync` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Shared-memory blob path (`ShmBlobArena`) | ✅ | ✅ | ✅ | ~ | ~ | ✅ |
+| Distributed CRDT plane (`CrdtPlaneRuntime` / anti-entropy) | ✅ | — | ✅ | ✅ | ~ | — |
+| Distributed plane — WebRTC transport + signaling | ✅ | — | ✅ | ✅ | — | — |
+| State projection / mirror | ✅ | — | ✅ | ✅ | — | — |
+| C-ABI FFI boundary | ✅ | ✅ | ✅ | — | ✅ | ✅ |
+| Permission boundary (`PeerPermissions` / `RemoteOp`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Capability negotiation (`SessionHandshake`) | ✅ | — | ✅ | ✅ | ✅ | ✅ |
+| Instrumentation / benchmarks | ✅ | — | — | — | — | — |
 
 CRDT convergence and the wire protocol are pinned by the shared conformance fixtures
 and JSON Schemas in `lazily-spec` and the Lean models in `lazily-formal`.
@@ -53,6 +67,7 @@ and JSON Schemas in `lazily-spec` and the Lean models in `lazily-formal`.
 |--------|------------|
 | `@lazily-hub/lazily-js` | `lazily-spec` IPC wire types: `Snapshot`, `Delta`, `DeltaOp`, `IpcMessage` (`Snapshot` / `Delta` / `CrdtSync`), `NodeState`, `IpcValue`, `PeerPermissions`, `SessionHandshake`, `BINDING_CAPABILITIES` |
 | `@lazily-hub/lazily-js/reactive` | Reactive dependency graph: `Context`, `Cell`, `Slot`, `Signal`, `Effect` |
+| `@lazily-hub/lazily-js/reactive-async` | Async reactive graph: `AsyncContext` — Promise-driven slots/effects with revision-guarded stale-completion discard, in-flight dedup, and cancellation |
 | `@lazily-hub/lazily-js/state-machine` | Flat finite-state-machine kernel backed by a reactive `Cell` |
 | `@lazily-hub/lazily-js/statechart` | Harel/SCXML chart interpreter plus `ChartBuilder`, `StateBuilder`, `TransitionBuilder` |
 | `@lazily-hub/lazily-js/collections` | `CellMap`, `CellTree`, keyed reconciliation, and LIS move minimization |
@@ -60,6 +75,8 @@ and JSON Schemas in `lazily-spec` and the Lean models in `lazily-formal`.
 | `@lazily-hub/lazily-js/seq-crdt` | Move-aware sequence CRDT using independent LWW value / position / deletion registers |
 | `@lazily-hub/lazily-js/text-crdt` | Fugue/RGA character CRDT |
 | `@lazily-hub/lazily-js/stable-id` | Manufactured text identity: anchors, content hashes, similarity alignment |
+| `@lazily-hub/lazily-js/signaling` | WebSocket signaling protocol: `ClientMessage` / `ServerMessage`, `SignalingClient`, `SignalingRoom` routing (anti-spoof, roster), `SignalingPermissions` |
+| `@lazily-hub/lazily-js/distributed` | Distributed plane: `DataChannel` seam + `InMemoryDataChannel`, `WebRtcSink` / `WebRtcSource`, `CrdtPlaneRuntime` anti-entropy, and the browser `RTCPeerConnection` adapter |
 | `@lazily-hub/lazily-js/state-projection` | koffi FFI consumer for agent-doc `DocumentStateProjection` |
 
 ## Reactive graph
@@ -94,6 +111,40 @@ ctx.get(sum); // 13, recomputed lazily on read
 const parity = ctx.signal(() => (ctx.getCell(a) % 2 === 0 ? "even" : "odd"));
 ctx.setCell(a, 11);
 ctx.getSignal(parity); // "odd", already materialized
+```
+
+## Async reactive context
+
+`AsyncContext` (from `@lazily-hub/lazily-js/reactive-async`) is a **separate**
+reactive surface for derivations whose values are produced by `async` functions.
+It is not an overload of the synchronous `Context`: futures introduce in-flight
+state, stale completion, cancellation, and dependency tracking across `await`
+that the synchronous graph does not have. Cells remain the synchronous input
+layer; computed slots, memos, and effects are async.
+
+Each async slot runs an `Empty → Computing → Resolved/Error` state machine with
+**revision-guarded publish** (a completion is published only if the slot's
+revision is still current, so a stale result is discarded), **in-flight
+deduplication** (concurrent `getAsync` callers share one compute), and
+cooperative cancellation. Async effects serialize reruns and always run the
+previous cleanup before the next body.
+
+```js
+import { AsyncContext } from "@lazily-hub/lazily-js/reactive-async";
+
+const ctx = new AsyncContext();
+const userId = ctx.cell(1);
+
+const profile = ctx.computedAsync(async (cctx) => {
+  const id = cctx.getCell(userId); // dependency registered before the await
+  return await fetchProfile(id);
+});
+
+await ctx.getAsync(profile); // spawns the compute, awaits the value
+ctx.get(profile); // synchronous cached read once resolved (undefined while pending)
+
+ctx.setCell(userId, 2); // supersedes any in-flight compute; slot re-resolves
+await ctx.getAsync(profile); // the profile for user 2
 ```
 
 ## State machine and state charts
@@ -280,18 +331,54 @@ snapshot.filterReadable(permissions, 11).nodes.length; // 0
 
 `BINDING_CAPABILITIES` advertises the JS binding truthfully: reactive core,
 IPC, CRDT, keyed collections, semantic tree, sequence/text CRDT, stable-id,
-state machine, state charts, permissions, and capability negotiation are
-shipped; C-ABI FFI is `none` because browser/Worker JS cannot host a native
-in-process ABI; async context, signaling, and WebRTC transports are not shipped
-by this package. The same payload types can still be carried by any transport a
-host application owns.
+state machine, state charts, permissions, capability negotiation, async context,
+signaling, and the WebRTC transport are shipped; C-ABI FFI is `none` because
+browser/Worker JS cannot host a native in-process ABI. The same payload types
+can still be carried by any transport a host application owns.
+
+## Distributed plane
+
+The `@lazily-hub/lazily-js/signaling` and `@lazily-hub/lazily-js/distributed`
+entry points ship the distributed plane. Signaling is the kebab-tagged discovery
+wire protocol (`ClientMessage` / `ServerMessage`), a transport-agnostic
+`SignalingRoom` that enforces the anti-spoof forwarded-`from` invariant, and a
+`SignalingClient` over a pluggable socket seam. The distributed module is the
+WebRTC DataChannel IPC transport (`WebRtcSink` / `WebRtcSource` with outbound
+permission filtering, over any `DataChannel`) plus `CrdtPlaneRuntime`, the CRDT
+anti-entropy runtime. Both are koffi-free and testable over an in-memory loopback
+with zero network; "real" WebRTC is reached through a browser platform adapter
+(`RtcPeerChannel` / `RtcPeerConnector`) that wraps the `RTCDataChannel` /
+`RTCPeerConnection` globals with no npm dependency.
+
+```js
+import { CrdtPlaneRuntime, InMemoryDataChannel, WebRtcSink, WebRtcSource } from "@lazily-hub/lazily-js/distributed";
+import { SignalingRoom, ClientMessage } from "@lazily-hub/lazily-js/signaling";
+import { IpcMessage, IpcValue, PeerPermissions, OpKind, Snapshot, NodeSnapshot } from "@lazily-hub/lazily-js";
+
+// Route a signaling handshake with server-stamped `from` (anti-spoof).
+const room = new SignalingRoom();
+room.receive("a", ClientMessage.join(1));
+room.receive("b", ClientMessage.join(2));
+room.receive("a", ClientMessage.offer(2, "SDP-A")); // -> { to: "b", message: offer{ from: 1, sdp: "SDP-A" } }
+
+// Two replicas converge over an anti-entropy exchange.
+const alice = new CrdtPlaneRuntime(1);
+const bob = new CrdtPlaneRuntime(2);
+alice.register(1, "doc/title");
+bob.register(1, "doc/title");
+const op = alice.localUpdate(1, Date.now() * 1000, IpcValue.inline([66]));
+bob.ingest(alice.syncFrame(), Date.now() * 1000); // 1 op applied; re-ingest applies 0
+```
 
 ## Conformance
 
 lazily-js replays the shared `lazily-spec` fixtures for IPC, agent-doc state,
 keyed collections (`CellMap`, `CellTree`, LIS reconciliation), semantic tree,
-sequence and text CRDTs, manufactured text identity, and Harel state charts.
-It also validates generated wire values against the canonical JSON Schemas.
+sequence and text CRDTs, manufactured text identity, Harel state charts, the
+signaling protocol (`signaling/frames.json`, `signaling/anti_spoof_session.json`),
+and the distributed CRDT plane (`distributed/crdt_sync_frames.json`,
+`distributed/anti_entropy_converge.json`). It also validates generated wire
+values against the canonical JSON Schemas.
 
 `npm test` builds the [`lazily-formal`][formal] Lean 4 model when that sibling
 checkout and the `lake` toolchain are present. The script exits successfully
@@ -309,9 +396,15 @@ names the Lean theorems it mirrors:
 | `Collection` | `collection-properties.test.js` | `setEntryValue_preserves_{membership,order,siblings}`, `moveKey_preserves_{membership,values}`, `moveKey_advances_order`, `addKey_advances_membership_and_order`, `Family.get_idempotent_after_first` |
 | `Tree` | `tree-properties.test.js` | `setNodeValue_preserves_{other_nodes,node_signals}`, `moveChild_preserves_{non_parent,parent_value}`, `moveChild_advances_order_signal_only` |
 | `Reconciliation` | `reconciliation-properties.test.js` | `lisBy_longest`, `reconcile_move_minimized`, `reconcile_stable_not_invalidated` |
+| `AsyncSlotState` | `reactive-async.test.js` | `stale_completeOk_discarded`, `current_completeOk_publishes`, `current_completeErr_to_error` |
+| `AsyncEffect` | `reactive-async.test.js` | `fire_blocked_during_cleanup`, `invalidate_from_idle_schedules`, `cleanupDone_resumes_deferred`, `dispose_absorbing`, `disposed_terminal` |
 
-`AsyncSlotState`, `AsyncEffect`, and thread-safe context theorems are not mirrored
-because lazily-js does not ship async or thread-safe context surfaces.
+Thread-safe context theorems are not mirrored because JavaScript is
+single-threaded (one event loop): a lock-backed context has no meaning on this
+runtime — the concurrency-layer platform carve-out. The `Signaling` /
+`SignalingRoster` formal models are exercised through the `SignalingRoom`
+fixture replay (`signaling/anti_spoof_session.json`) rather than a named-theorem
+property test.
 
 ## The lazily family
 
@@ -319,7 +412,7 @@ because lazily-js does not ship async or thread-safe context surfaces.
 |---------|----------|----------------|
 | [`lazily-rs`][rs] | Rust | `lazily` on crates.io; single-threaded, thread-safe, and async context layers |
 | [`lazily-py`][py] | Python | `lazily` on PyPI; dict-backed context plus IPC/shared-blob host types |
-| **`lazily-js`** | JavaScript / TypeScript | `@lazily-hub/lazily-js`; reactive core, spec wire types, state charts, CRDTs |
+| **`lazily-js`** | JavaScript / TypeScript | `@lazily-hub/lazily-js`; reactive core + async context, spec wire types, state charts, CRDTs, distributed plane (signaling + WebRTC) |
 | [`lazily-zig`][zig] | Zig | Zig library / FFI-oriented embedding surface |
 | [`lazily-kt`][kt] | Kotlin/JVM | Kotlin reactive core plus typed state charts |
 | [`lazily-dart`][dart] | Dart | Dart binding with statechart conformance |
