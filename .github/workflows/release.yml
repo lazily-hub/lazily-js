@@ -1,0 +1,48 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish-npm:
+    name: Publish to npm (OIDC trusted publishing)
+    runs-on: ubuntu-latest
+    # OIDC trusted publishing: no long-lived NPM_TOKEN. The package must already
+    # exist on npm (npm has no "pending publisher"), then configure the Trusted
+    # Publisher on the package: user/org = lazily-hub, repo = lazily-js,
+    # workflow = release.yml, action = "npm publish".
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      # Trusted publishing needs npm CLI >= 11.5.1; Node 24's bundled npm may lag.
+      - name: Upgrade npm for OIDC trusted publishing
+        run: npm install -g npm@latest
+
+      - name: Install dependencies
+        run: npm ci || npm install
+
+      - name: Test
+        run: npm test --if-present
+
+      # Published under the `prev` dist-tag so this v0.x line does not steal
+      # `latest` from a higher already-published version; move `latest` explicitly
+      # (`npm dist-tag add @lazily-hub/lazily-js@<v> latest`) once the accidental
+      # v1.x releases are removed.
+      - name: Publish
+        run: npm publish --access public --tag prev
