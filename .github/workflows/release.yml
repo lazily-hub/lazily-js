@@ -24,6 +24,15 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          path: lazily-js
+
+      # The conformance / schema tests replay fixtures from the lazily-spec sibling
+      # (../lazily-spec). Check it out alongside so `npm test` passes in CI.
+      - uses: actions/checkout@v4
+        with:
+          repository: lazily-hub/lazily-spec
+          path: lazily-spec
 
       - uses: actions/setup-node@v4
         with:
@@ -35,9 +44,11 @@ jobs:
         run: npm install -g npm@latest
 
       - name: Install dependencies
+        working-directory: lazily-js
         run: npm ci || npm install
 
       - name: Test
+        working-directory: lazily-js
         run: npm test --if-present
 
       # Published under the `prev` dist-tag so this v0.x line does not steal
@@ -45,4 +56,5 @@ jobs:
       # (`npm dist-tag add @lazily-hub/lazily-js@<v> latest`) once the accidental
       # v1.x releases are removed.
       - name: Publish
+        working-directory: lazily-js
         run: npm publish --access public --tag prev
