@@ -24,6 +24,45 @@ test("local insert and delete", () => {
   assert.equal(c.len(), 5);
 });
 
+test("delta sync converges two replicas (#lztextsync)", () => {
+  const base = TextCrdt.fromStr(0, "hello\n");
+  const a = base.fork(1);
+  a.insertStr(a.len(), "world\n");
+  const b = base.fork(2);
+  b.delete(0);
+
+  const aDelta = a.deltaSince(b.versionVector());
+  const bDelta = b.deltaSince(a.versionVector());
+  assert.equal(a.applyDelta(bDelta), true);
+  b.applyDelta(aDelta);
+
+  assert.equal(a.text(), b.text(), "replicas converge after delta exchange");
+  assert.equal(a.text(), "ello\nworld\n");
+});
+
+test("full-snapshot delta reconstructs a mergeable replica (#lztextsync)", () => {
+  const canonical = TextCrdt.fromStr(1, "base\n");
+  const snapshot = canonical.deltaSince({});
+  const member = new TextCrdt(2);
+  member.applyDelta(snapshot);
+  assert.equal(member.text(), "base\n");
+
+  canonical.insertStr(canonical.len(), "A\n");
+  member.insertStr(member.len(), "B\n");
+  canonical.applyDelta(member.deltaSince(canonical.versionVector()));
+  member.applyDelta(canonical.deltaSince(member.versionVector()));
+  assert.equal(canonical.text(), member.text(), "shared-identity convergence");
+});
+
+test("delta apply is idempotent (#lztextsync)", () => {
+  const a = TextCrdt.fromStr(1, "abc\n");
+  const b = new TextCrdt(2);
+  const delta = a.deltaSince({});
+  assert.equal(b.applyDelta(delta), true);
+  assert.equal(b.applyDelta(delta), false, "re-applying a delta is a no-op");
+  assert.equal(b.text(), a.text());
+});
+
 test("concurrent inserts at same spot converge deterministically", () => {
   const a = TextCrdt.fromStr(1, "XY");
   const b = a.fork(2);

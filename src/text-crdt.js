@@ -243,4 +243,75 @@ export class TextCrdt {
     }
     return removed;
   }
+
+  // --- Delta sync (#lztextsync) ---
+
+  // Version vector: {peer -> greatest counter seen} over inserts + deletes. The
+  // compact frontier a replica sends so a partner can compute the ops it lacks.
+  versionVector() {
+    const vv = {};
+    const bump = (id) => {
+      vv[id.peer] = Math.max(vv[id.peer] ?? 0, id.counter);
+    };
+    for (const [key, elem] of this.#elems) {
+      bump(this.#idFromKey(key));
+      if (elem.deleted) {
+        bump(elem.deleted);
+      }
+    }
+    return vv;
+  }
+
+  // The ops `theirVv` has not observed — new inserts + newly-observed tombstones.
+  // Each TextOp is a plain {id, ch, origin, deleted} of {counter, peer} ids. A
+  // whole-state snapshot is `deltaSince({})`.
+  deltaSince(theirVv) {
+    const seen = (id) => id.counter <= (theirVv[id.peer] ?? 0);
+    const wire = (id) => (id ? { counter: id.counter, peer: id.peer } : null);
+    const out = [];
+    for (const [key, elem] of this.#elems) {
+      const id = this.#idFromKey(key);
+      const insertNew = !seen(id);
+      const deleteNew = elem.deleted !== null && !seen(elem.deleted);
+      if (insertNew || deleteNew) {
+        out.push({
+          id: wire(id),
+          ch: elem.ch,
+          origin: wire(elem.origin),
+          deleted: wire(elem.deleted),
+        });
+      }
+    }
+    return out;
+  }
+
+  // Apply a delta op list (from `deltaSince`). Commutative, associative,
+  // idempotent — the same convergence contract as `merge`, from the transport
+  // form. Rebuilding a replica via `applyDelta` preserves OpId identity so later
+  // concurrent edits merge without duplication. Returns whether text changed.
+  applyDelta(ops) {
+    const before = this.text();
+    for (const op of ops) {
+      const id = new OpId(op.id.counter, op.id.peer);
+      const origin = op.origin ? new OpId(op.origin.counter, op.origin.peer) : null;
+      const deleted = op.deleted ? new OpId(op.deleted.counter, op.deleted.peer) : null;
+      this.#counter = Math.max(this.#counter, id.counter);
+      if (deleted) {
+        this.#counter = Math.max(this.#counter, deleted.counter);
+      }
+      const key = this.#key(id);
+      const existing = this.#elems.get(key);
+      if (existing) {
+        if (existing.deleted && deleted) {
+          existing.deleted =
+            existing.deleted.compareTo(deleted) <= 0 ? existing.deleted : deleted;
+        } else if (deleted) {
+          existing.deleted = deleted;
+        }
+      } else {
+        this.#elems.set(key, new Elem(op.ch, origin, deleted));
+      }
+    }
+    return this.text() !== before;
+  }
 }
