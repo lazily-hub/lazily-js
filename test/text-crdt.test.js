@@ -125,7 +125,25 @@ test("gc keeps referenced tombstone then collects bottom-up", () => {
 
 // -- conformance fixture replay ----------------------------------------------
 
+function applyTextCrdtOp(target, step, label) {
+  if (step.op === "insert") {
+    target.insert(step.index, step.ch);
+  } else if (step.op === "insert_str") {
+    target.insertStr(step.index, step.str);
+  } else if (step.op === "delete") {
+    target.delete(step.index);
+  } else if (step.op === "gc") {
+    const n = target.gcWith(() => step.stable);
+    if (step.expect_collected !== undefined) {
+      assert.equal(n, step.expect_collected, `${label}: gc collected`);
+    }
+  } else {
+    throw new Error(`${label}: unknown textcrdt op ${step.op}`);
+  }
+}
+
 function runTextCrdtScenario(scenario) {
+  const label = scenario.name ?? "scenario";
   const replicas = new Map();
   const peer = scenario.replica?.peer ?? scenario.seed?.peer ?? 1;
   const seedText = typeof scenario.seed === "string" ? scenario.seed : scenario.seed?.text;
@@ -143,38 +161,70 @@ function runTextCrdtScenario(scenario) {
       replicas.set(step.clone, replicas.get(step.from).clone());
     } else if (step.merge) {
       replicas.get(step.merge.into).merge(replicas.get(step.merge.from));
-    } else if (step.op) {
-      const target = replicas.get(step.on ?? "a");
-      if (step.op === "insert") target.insert(step.index, step.ch);
-      else if (step.op === "delete") target.delete(step.index);
-      else if (step.op === "gc") {
-        const n = target.gcWith(() => step.stable);
-        if (step.expect_collected !== undefined) {
-          assert.equal(n, step.expect_collected, `${scenario.name}: gc collected`);
-        }
+    } else if (step.new) {
+      replicas.set(step.new, new TextCrdt(step.peer));
+    } else if (step.delta) {
+      const { into, from } = step.delta;
+      const ops = replicas.get(from).deltaSince(replicas.get(into).versionVector());
+      const changed = replicas.get(into).applyDelta(ops);
+      if (step.expect_changed !== undefined) {
+        assert.equal(changed, step.expect_changed, `${label}: delta ${from}->${into}`);
       }
+    } else if (step.snapshot) {
+      const { from, into, peer: snapPeer } = step.snapshot;
+      const ops = replicas.get(from).deltaSince({});
+      const replica = new TextCrdt(snapPeer);
+      const changed = replica.applyDelta(ops);
+      replicas.set(into, replica);
+      if (step.expect_changed !== undefined) {
+        assert.equal(changed, step.expect_changed, `${label}: snapshot ${from}->${into}`);
+      }
+    } else if (step.exchange) {
+      const [x, y] = step.exchange;
+      const toX = replicas.get(y).deltaSince(replicas.get(x).versionVector());
+      const toY = replicas.get(x).deltaSince(replicas.get(y).versionVector());
+      replicas.get(x).applyDelta(toX);
+      replicas.get(y).applyDelta(toY);
+    } else if (step.op) {
+      applyTextCrdtOp(replicas.get(step.on ?? "a"), step, label);
     }
   }
 
   const expect = scenario.expect;
   if (expect) {
-    const target = replicas.get(expect.on ?? "a");
     if (expect.text !== undefined) {
-      assert.equal(target.text(), expect.text, scenario.name);
+      assert.equal(replicas.get(expect.on ?? "a").text(), expect.text, label);
     }
     if (expect.texts_equal) {
       for (const [x, y] of expect.texts_equal) {
-        assert.equal(replicas.get(x).text(), replicas.get(y).text(), scenario.name);
+        assert.equal(replicas.get(x).text(), replicas.get(y).text(), label);
       }
     }
     if (expect.len !== undefined) {
-      assert.equal(target.len(), expect.len, scenario.name);
+      assert.equal(replicas.get(expect.on ?? "a").len(), expect.len, label);
+    }
+    if (expect.text_on) {
+      for (const [name, want] of Object.entries(expect.text_on)) {
+        assert.equal(replicas.get(name).text(), want, `${label}: text_on ${name}`);
+      }
+    }
+    if (expect.version_vector_on) {
+      for (const [name, want] of Object.entries(expect.version_vector_on)) {
+        assert.deepEqual(replicas.get(name).versionVector(), want, `${label}: version_vector_on ${name}`);
+      }
     }
   }
 }
 
 test("conformance: textcrdt_convergence.json", () => {
   const fixture = loadFixture("textcrdt_convergence.json");
+  for (const scenario of fixture.scenarios) {
+    runTextCrdtScenario(scenario);
+  }
+});
+
+test("conformance: textcrdt_delta_sync.json (#lztextsync)", () => {
+  const fixture = loadFixture("textcrdt_delta_sync.json");
   for (const scenario of fixture.scenarios) {
     runTextCrdtScenario(scenario);
   }

@@ -376,11 +376,12 @@ bob.ingest(alice.syncFrame(), Date.now() * 1000); // 1 op applied; re-ingest app
 
 lazily-js replays the shared `lazily-spec` fixtures for IPC, agent-doc state,
 keyed collections (`CellMap`, `CellTree`, LIS reconciliation), semantic tree,
-sequence and text CRDTs, manufactured text identity, Harel state charts, the
-signaling protocol (`signaling/frames.json`, `signaling/anti_spoof_session.json`),
-and the distributed CRDT plane (`distributed/crdt_sync_frames.json`,
-`distributed/anti_entropy_converge.json`). It also validates generated wire
-values against the canonical JSON Schemas.
+sequence and text CRDTs (incl. `TextCrdt` delta sync, `#lztextsync`:
+`textcrdt_convergence.json` + `textcrdt_delta_sync.json`), manufactured text
+identity, Harel state charts, the signaling protocol (`signaling/frames.json`,
+`signaling/anti_spoof_session.json`), and the distributed CRDT plane
+(`distributed/crdt_sync_frames.json`, `distributed/anti_entropy_converge.json`).
+It also validates generated wire values against the canonical JSON Schemas.
 
 `npm test` builds the [`lazily-formal`][formal] Lean 4 model when that sibling
 checkout and the `lake` toolchain are present. The script exits successfully
