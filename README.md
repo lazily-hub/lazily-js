@@ -55,6 +55,7 @@ notes and platform carve-outs lives in
 | Distributed CRDT plane (`CrdtPlaneRuntime` / anti-entropy) | ✅ | — | ✅ | ✅ | ~ | — |
 | Distributed plane — WebRTC transport + signaling | ✅ | — | ✅ | ✅ | — | — |
 | State projection / mirror | ✅ | — | ✅ | ✅ | — | — |
+| Causal receipts (`CausalReceipts` outcome projection) | ✅ | — | ✅ | ✅ | — | — |
 | C-ABI FFI boundary | ✅ | ✅ | ✅ | — | ✅ | ✅ |
 | Permission boundary (`PeerPermissions` / `RemoteOp`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Capability negotiation (`SessionHandshake`) | ✅ | — | ✅ | ✅ | ✅ | ✅ |

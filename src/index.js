@@ -728,6 +728,246 @@ export class CrdtSync {
   }
 }
 
+export const ReceiptOutcome = Object.freeze({
+  Observed: "observed",
+  Accepted: "accepted",
+  Applied: "applied",
+  Rejected: "rejected",
+});
+
+export function isTerminalReceiptOutcome(outcome) {
+  return outcome === ReceiptOutcome.Applied || outcome === ReceiptOutcome.Rejected;
+}
+
+function normalizeReceiptOutcome(outcome) {
+  if (Object.values(ReceiptOutcome).includes(outcome)) {
+    return outcome;
+  }
+  throw new TypeError(`unknown receipt outcome: ${outcome}`);
+}
+
+export class CausalReceipt {
+  constructor({
+    receiptId,
+    causationId,
+    observer,
+    generation,
+    outcome,
+    reason = null,
+    payloadHash = null,
+  }) {
+    this.receiptId = assertString(receiptId, "receiptId");
+    this.causationId = assertString(causationId, "causationId");
+    this.observer = assertString(observer, "observer");
+    this.generation = assertInteger(generation, "generation");
+    this.outcome = normalizeReceiptOutcome(outcome);
+    this.reason = reason === null ? null : assertString(reason, "reason");
+    this.payloadHash = payloadHash === null ? null : assertString(payloadHash, "payloadHash");
+    Object.freeze(this);
+  }
+
+  get isTerminal() {
+    return isTerminalReceiptOutcome(this.outcome);
+  }
+
+  toWire() {
+    return {
+      receipt_id: this.receiptId,
+      causation_id: this.causationId,
+      observer: this.observer,
+      generation: this.generation,
+      outcome: this.outcome,
+      reason: this.reason,
+      payload_hash: this.payloadHash,
+    };
+  }
+
+  static observed(receiptId, causationId, observer, generation) {
+    return new CausalReceipt({
+      receiptId,
+      causationId,
+      observer,
+      generation,
+      outcome: ReceiptOutcome.Observed,
+    });
+  }
+
+  static accepted(receiptId, causationId, observer, generation) {
+    return new CausalReceipt({
+      receiptId,
+      causationId,
+      observer,
+      generation,
+      outcome: ReceiptOutcome.Accepted,
+    });
+  }
+
+  static applied(receiptId, causationId, observer, generation, payloadHash = null) {
+    return new CausalReceipt({
+      receiptId,
+      causationId,
+      observer,
+      generation,
+      outcome: ReceiptOutcome.Applied,
+      payloadHash,
+    });
+  }
+
+  static rejected(receiptId, causationId, observer, generation, reason = null) {
+    return new CausalReceipt({
+      receiptId,
+      causationId,
+      observer,
+      generation,
+      outcome: ReceiptOutcome.Rejected,
+      reason,
+    });
+  }
+
+  static fromWire(value) {
+    const object = assertObject(value, "CausalReceipt");
+    return new CausalReceipt({
+      receiptId: object.receipt_id,
+      causationId: object.causation_id,
+      observer: object.observer,
+      generation: object.generation,
+      outcome: object.outcome,
+      reason: object.reason ?? null,
+      payloadHash: object.payload_hash ?? null,
+    });
+  }
+}
+
+export class CausalReceipts {
+  constructor(receipts = []) {
+    this.receipts = Object.freeze(receipts.map((receipt) =>
+      receipt instanceof CausalReceipt ? receipt : CausalReceipt.fromWire(receipt),
+    ));
+    Object.freeze(this);
+  }
+
+  toWire() {
+    return {
+      receipts: this.receipts.map((receipt) => receipt.toWire()),
+    };
+  }
+
+  static fromWire(value) {
+    const object = assertObject(value, "CausalReceipts");
+    return new CausalReceipts(object.receipts ?? []);
+  }
+}
+
+export class ReceiptMessage {
+  constructor(kind, value) {
+    this.kind = kind;
+    this.causalReceipts = undefined;
+    if (kind === "CausalReceipts") {
+      this.causalReceipts =
+        value instanceof CausalReceipts ? value : CausalReceipts.fromWire(value);
+    } else {
+      throw new TypeError(`unknown ReceiptMessage kind: ${kind}`);
+    }
+    Object.freeze(this);
+  }
+
+  toWire() {
+    return { CausalReceipts: this.causalReceipts.toWire() };
+  }
+
+  encodeJson() {
+    return textEncoder.encode(JSON.stringify(this.toWire()));
+  }
+
+  static causalReceipts(causalReceipts) {
+    return new ReceiptMessage("CausalReceipts", causalReceipts);
+  }
+
+  static fromWire(value) {
+    const [tag, body] = assertTagged(value, "ReceiptMessage");
+    switch (tag) {
+      case "CausalReceipts":
+        return ReceiptMessage.causalReceipts(CausalReceipts.fromWire(body));
+      default:
+        throw new TypeError(`unknown ReceiptMessage variant: ${tag}`);
+    }
+  }
+
+  static decodeJson(data) {
+    const text =
+      data instanceof Uint8Array ? textDecoder.decode(data) : String(data);
+    return ReceiptMessage.fromWire(JSON.parse(text));
+  }
+}
+
+export const ReceiptApplyStatusKind = Object.freeze({
+  Recorded: "recorded",
+  Duplicate: "duplicate",
+  StaleGeneration: "stale_generation",
+  TerminalConflict: "terminal_conflict",
+});
+
+export class ReceiptProjection {
+  #receiptsById = new Map();
+  #latestByCausation = new Map();
+  #terminalByCausation = new Map();
+  #staleReceiptIds = new Set();
+
+  observe(currentGeneration, receipt) {
+    const next = receipt instanceof CausalReceipt ? receipt : CausalReceipt.fromWire(receipt);
+    if (this.#receiptsById.has(next.receiptId) || this.#staleReceiptIds.has(next.receiptId)) {
+      return { kind: ReceiptApplyStatusKind.Duplicate };
+    }
+
+    if (currentGeneration !== null && currentGeneration !== undefined) {
+      const expected = assertInteger(currentGeneration, "currentGeneration");
+      if (next.generation !== expected) {
+        this.#staleReceiptIds.add(next.receiptId);
+        return {
+          kind: ReceiptApplyStatusKind.StaleGeneration,
+          expected,
+          actual: next.generation,
+        };
+      }
+    }
+
+    if (next.isTerminal) {
+      const existing = this.#terminalByCausation.get(next.causationId);
+      if (existing && existing.outcome !== next.outcome) {
+        return {
+          kind: ReceiptApplyStatusKind.TerminalConflict,
+          causationId: next.causationId,
+          existing: existing.outcome,
+          incoming: next.outcome,
+        };
+      }
+      if (!existing) {
+        this.#terminalByCausation.set(next.causationId, next);
+      }
+    }
+
+    this.#latestByCausation.set(next.causationId, next);
+    this.#receiptsById.set(next.receiptId, next);
+    return { kind: ReceiptApplyStatusKind.Recorded };
+  }
+
+  latestFor(causationId) {
+    return this.#latestByCausation.get(causationId) ?? null;
+  }
+
+  terminalFor(causationId) {
+    return this.#terminalByCausation.get(causationId) ?? null;
+  }
+
+  containsReceipt(receiptId) {
+    return this.#receiptsById.has(receiptId) || this.#staleReceiptIds.has(receiptId);
+  }
+
+  staleReceiptIds() {
+    return [...this.#staleReceiptIds];
+  }
+}
+
 export class IpcMessage {
   constructor(kind, value) {
     this.kind = kind;
@@ -991,6 +1231,7 @@ export const BINDING_CAPABILITIES = Object.freeze({
   state_charts: true,
   permissions: true,
   capability_negotiation: true,
+  causal_receipts: true,
   // Optional (MAY) transports — bridged by this binding (./signaling,
   // ./distributed): the kebab-tagged signaling wire protocol + room routing and
   // the WebRTC DataChannel IPC transport + CRDT anti-entropy runtime. Real

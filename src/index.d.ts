@@ -279,6 +279,100 @@ export class CrdtSync {
   static fromWire(value: unknown): CrdtSync;
 }
 
+export const ReceiptOutcome: {
+  readonly Observed: "observed";
+  readonly Accepted: "accepted";
+  readonly Applied: "applied";
+  readonly Rejected: "rejected";
+};
+
+export type ReceiptOutcomeValue =
+  | "observed"
+  | "accepted"
+  | "applied"
+  | "rejected";
+
+export function isTerminalReceiptOutcome(outcome: ReceiptOutcomeValue): boolean;
+
+export type CausalReceiptWire = {
+  receipt_id: string;
+  causation_id: string;
+  observer: string;
+  generation: number;
+  outcome: ReceiptOutcomeValue;
+  reason: string | null;
+  payload_hash: string | null;
+};
+
+export class CausalReceipt {
+  constructor(fields: {
+    receiptId: string;
+    causationId: string;
+    observer: string;
+    generation: number;
+    outcome: ReceiptOutcomeValue;
+    reason?: string | null;
+    payloadHash?: string | null;
+  });
+  readonly receiptId: string;
+  readonly causationId: string;
+  readonly observer: string;
+  readonly generation: number;
+  readonly outcome: ReceiptOutcomeValue;
+  readonly reason: string | null;
+  readonly payloadHash: string | null;
+  readonly isTerminal: boolean;
+  toWire(): CausalReceiptWire;
+  static observed(receiptId: string, causationId: string, observer: string, generation: number): CausalReceipt;
+  static accepted(receiptId: string, causationId: string, observer: string, generation: number): CausalReceipt;
+  static applied(receiptId: string, causationId: string, observer: string, generation: number, payloadHash?: string | null): CausalReceipt;
+  static rejected(receiptId: string, causationId: string, observer: string, generation: number, reason?: string | null): CausalReceipt;
+  static fromWire(value: unknown): CausalReceipt;
+}
+
+export class CausalReceipts {
+  constructor(receipts?: ReadonlyArray<CausalReceipt | CausalReceiptWire>);
+  readonly receipts: readonly CausalReceipt[];
+  toWire(): { receipts: CausalReceiptWire[] };
+  static fromWire(value: unknown): CausalReceipts;
+}
+
+export class ReceiptMessage {
+  readonly kind: "CausalReceipts";
+  readonly causalReceipts: CausalReceipts;
+  toWire(): unknown;
+  encodeJson(): Uint8Array;
+  static causalReceipts(causalReceipts: CausalReceipts): ReceiptMessage;
+  static fromWire(value: unknown): ReceiptMessage;
+  static decodeJson(data: Uint8Array | string): ReceiptMessage;
+}
+
+export const ReceiptApplyStatusKind: {
+  readonly Recorded: "recorded";
+  readonly Duplicate: "duplicate";
+  readonly StaleGeneration: "stale_generation";
+  readonly TerminalConflict: "terminal_conflict";
+};
+
+export type ReceiptApplyStatus =
+  | { kind: "recorded" }
+  | { kind: "duplicate" }
+  | { kind: "stale_generation"; expected: number; actual: number }
+  | {
+      kind: "terminal_conflict";
+      causationId: string;
+      existing: ReceiptOutcomeValue;
+      incoming: ReceiptOutcomeValue;
+    };
+
+export class ReceiptProjection {
+  observe(currentGeneration: number | null | undefined, receipt: CausalReceipt | CausalReceiptWire): ReceiptApplyStatus;
+  latestFor(causationId: string): CausalReceipt | null;
+  terminalFor(causationId: string): CausalReceipt | null;
+  containsReceipt(receiptId: string): boolean;
+  staleReceiptIds(): string[];
+}
+
 export class IpcMessage {
   readonly kind: "Snapshot" | "Delta" | "CrdtSync";
   readonly snapshot?: Snapshot;
@@ -409,6 +503,7 @@ export type BindingCapabilities = {
   readonly state_charts: boolean;
   readonly permissions: boolean;
   readonly capability_negotiation: boolean;
+  readonly causal_receipts: boolean;
   readonly signaling: boolean;
   readonly webrtc: boolean;
 };

@@ -7,6 +7,8 @@ import test from "node:test";
 import {
   CrdtOp,
   CrdtSync,
+  CausalReceipt,
+  CausalReceipts,
   Delta,
   DeltaApplyStatusKind,
   DeltaOp,
@@ -29,6 +31,10 @@ import {
   NodeStateSharedBlob,
   OpKind,
   PeerPermissions,
+  ReceiptApplyStatusKind,
+  ReceiptMessage,
+  ReceiptOutcome,
+  ReceiptProjection,
   RemoteOp,
   ShmBlobRef,
   Snapshot,
@@ -530,6 +536,106 @@ test("CrdtSync.filterReadable omits non-readable ops but keeps the frontier", ()
     filtered.frontier.map((entry) => entry.peer),
     [1, 2],
   );
+});
+
+test("receipt outcomes distinguish progress from terminal authority", () => {
+  assert.equal(CausalReceipt.observed("r1", "patch-123", "editor", 7).isTerminal, false);
+  assert.equal(CausalReceipt.accepted("r2", "patch-123", "editor", 7).isTerminal, false);
+  assert.equal(CausalReceipt.applied("r3", "patch-123", "editor", 7).isTerminal, true);
+  assert.equal(CausalReceipt.rejected("r4", "patch-123", "editor", 7).isTerminal, true);
+});
+
+test("ReceiptMessage round-trips the externally-tagged CausalReceipts wire shape", () => {
+  const message = ReceiptMessage.causalReceipts(
+    new CausalReceipts([
+      CausalReceipt.observed("receipt-observed", "patch-123", "editor", 7),
+      CausalReceipt.applied("receipt-applied", "patch-123", "editor", 7, "sha256:abc"),
+    ]),
+  );
+
+  assert.deepEqual(message.toWire(), {
+    CausalReceipts: {
+      receipts: [
+        {
+          receipt_id: "receipt-observed",
+          causation_id: "patch-123",
+          observer: "editor",
+          generation: 7,
+          outcome: "observed",
+          reason: null,
+          payload_hash: null,
+        },
+        {
+          receipt_id: "receipt-applied",
+          causation_id: "patch-123",
+          observer: "editor",
+          generation: 7,
+          outcome: "applied",
+          reason: null,
+          payload_hash: "sha256:abc",
+        },
+      ],
+    },
+  });
+  assert.deepEqual(ReceiptMessage.decodeJson(message.encodeJson()), message);
+});
+
+test("ReceiptProjection records terminal outcome and ignores stale generation", () => {
+  const projection = new ReceiptProjection();
+
+  assert.deepEqual(
+    projection.observe(7, CausalReceipt.observed("receipt-observed", "patch-123", "editor", 7)),
+    { kind: ReceiptApplyStatusKind.Recorded },
+  );
+  assert.deepEqual(
+    projection.observe(7, CausalReceipt.rejected("receipt-stale", "patch-123", "editor", 6, "stale generation")),
+    { kind: ReceiptApplyStatusKind.StaleGeneration, expected: 7, actual: 6 },
+  );
+  assert.deepEqual(
+    projection.observe(7, CausalReceipt.applied("receipt-applied", "patch-123", "editor", 7)),
+    { kind: ReceiptApplyStatusKind.Recorded },
+  );
+
+  assert.equal(projection.terminalFor("patch-123").outcome, ReceiptOutcome.Applied);
+  assert.deepEqual(projection.staleReceiptIds(), ["receipt-stale"]);
+  assert.equal(projection.containsReceipt("receipt-stale"), true);
+});
+
+test("ReceiptProjection treats duplicate and conflicting terminals as no-ops", () => {
+  const projection = new ReceiptProjection();
+  const applied = CausalReceipt.applied("receipt-applied", "patch-123", "editor", 7);
+
+  assert.deepEqual(projection.observe(7, applied), { kind: ReceiptApplyStatusKind.Recorded });
+  assert.deepEqual(projection.observe(7, applied), { kind: ReceiptApplyStatusKind.Duplicate });
+  assert.deepEqual(
+    projection.observe(7, CausalReceipt.rejected("receipt-rejected", "patch-123", "editor", 7)),
+    {
+      kind: ReceiptApplyStatusKind.TerminalConflict,
+      causationId: "patch-123",
+      existing: ReceiptOutcome.Applied,
+      incoming: ReceiptOutcome.Rejected,
+    },
+  );
+  assert.equal(projection.containsReceipt("receipt-rejected"), false);
+});
+
+test("conformance causal receipts fixture replays", () => {
+  const fixture = loadFixture("receipts/causal_receipts.json");
+  const message = ReceiptMessage.fromWire(fixture.wire);
+  const receipts = message.causalReceipts.receipts;
+  const projection = new ReceiptProjection();
+  const currentGeneration = fixture.assertions.current_generation;
+
+  for (const receipt of receipts) {
+    projection.observe(currentGeneration, receipt);
+  }
+
+  assert.equal(receipts.length, fixture.assertions.receipt_count);
+  assert.equal(
+    projection.terminalFor(fixture.assertions.causation_id).outcome,
+    fixture.assertions.terminal_outcome,
+  );
+  assert.deepEqual(projection.staleReceiptIds(), fixture.assertions.stale_receipt_ids);
 });
 
 test("conformance snapshot minimal", () => {

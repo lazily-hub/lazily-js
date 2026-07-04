@@ -9,6 +9,8 @@ import Ajv2020 from "ajv/dist/2020.js";
 import {
   CrdtOp,
   CrdtSync,
+  CausalReceipt,
+  CausalReceipts,
   Delta,
   DeltaOp,
   EdgeSnapshot,
@@ -17,6 +19,7 @@ import {
   LazilyFfiStatus,
   NodeSnapshot,
   NodeState,
+  ReceiptMessage,
   ShmBlobRef,
   Snapshot,
   WireStamp,
@@ -40,6 +43,7 @@ for (const name of [
   "ffi",
   "signaling",
   "statechart",
+  "receipts",
 ]) {
   ajv.addSchema(loadSchema(name));
 }
@@ -119,6 +123,17 @@ test("lazily-js CrdtSync wire (keyed + keyless ops) validates against schemas/di
     }),
   );
   const fn = validator("distributed");
+  assert.ok(fn(message.toWire()), errorsText(fn, message.toWire()));
+});
+
+test("lazily-js CausalReceipts wire validates against schemas/receipts.json", () => {
+  const message = ReceiptMessage.causalReceipts(
+    new CausalReceipts([
+      CausalReceipt.observed("receipt-observed", "patch-123", "editor", 7),
+      CausalReceipt.applied("receipt-applied", "patch-123", "editor", 7, "sha256:abc"),
+    ]),
+  );
+  const fn = validator("receipts");
   assert.ok(fn(message.toWire()), errorsText(fn, message.toWire()));
 });
 
