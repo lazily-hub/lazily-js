@@ -46,6 +46,10 @@
       "types": "./src/text-crdt.d.ts",
       "default": "./src/text-crdt.js"
     },
+    "./lossless-tree-crdt": {
+      "types": "./src/lossless-tree-crdt.d.ts",
+      "default": "./src/lossless-tree-crdt.js"
+    },
     "./state-projection": {
       "types": "./src/state-projection.d.ts",
       "default": "./src/state-projection.js"
@@ -60,7 +64,7 @@
     }
   },
   "scripts": {
-    "build": "node --check src/index.js && node --check src/reactive.js && node --check src/reactive-async.js && node --check src/state-machine.js && node --check src/statechart.js && node --check src/collections.js && node --check src/sem-tree.js && node --check src/stable-id.js && node --check src/seq-crdt.js && node --check src/text-crdt.js && node --check src/state-projection.js && node --check src/signaling.js && node --check src/distributed.js",
+    "build": "node --check src/index.js && node --check src/reactive.js && node --check src/reactive-async.js && node --check src/state-machine.js && node --check src/statechart.js && node --check src/collections.js && node --check src/sem-tree.js && node --check src/stable-id.js && node --check src/seq-crdt.js && node --check src/text-crdt.js && node --check src/utf8-offsets.js && node --check src/lossless-tree-crdt.js && node --check src/state-projection.js && node --check src/signaling.js && node --check src/distributed.js",
     "test:formal": "node scripts/formal-check.mjs",
     "test": "npm run test:formal && node --test test/*.test.js"
   },
