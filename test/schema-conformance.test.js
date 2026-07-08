@@ -44,6 +44,7 @@ for (const name of [
   "signaling",
   "statechart",
   "receipts",
+  "message-passing",
 ]) {
   ajv.addSchema(loadSchema(name));
 }
@@ -191,4 +192,90 @@ test("lazily-js LazilyFfiStatus validates against schemas/ffi.json", () => {
   for (const value of Object.values(LazilyFfiStatus)) {
     assert.ok(allowed.includes(value), `LazilyFfiStatus ${value} missing from schema enum`);
   }
+});
+
+test("lazily-js command plane wire validates against schemas/message-passing.json", async () => {
+  const {
+    CommandMessage,
+    CommandSubmit,
+    CommandCancel,
+    CommandEvent,
+    CommandEvents,
+    CommandPolicy,
+    CommandProjectionEntry,
+    CommandProjectionImage,
+    CommandStatus,
+    CommandEventKind,
+    DedupePolicy,
+    IpcValue,
+  } = await import("../src/index.js");
+
+  const fn = validator("message-passing");
+
+  const submit = CommandMessage.ofSubmit(
+    new CommandSubmit({
+      commandId: "cmd-run-1",
+      causationId: "cmd-run-1",
+      source: "vscode-plugin",
+      target: "project-controller",
+      namespace: "agent-doc",
+      name: "editor_route",
+      authorityGeneration: 42,
+      idempotencyKey: "project-root:plan.md:run",
+      deadlineMs: 120000,
+      policy: new CommandPolicy({
+        dedupe: DedupePolicy.SameIdempotencyKey,
+        supersede: false,
+        cancelOnPreempt: true,
+      }),
+      payloadType: "agent-doc.editor_route.v1",
+      payloadHash: "sha256:abc",
+      payload: IpcValue.inline([123, 125]),
+      requiredFeatures: ["causal-receipts"],
+    }),
+  );
+  const submitWire = submit.toWire();
+  assert.ok(fn(submitWire), errorsText(fn, submitWire));
+
+  const cancel = CommandMessage.ofCancel(
+    new CommandCancel({
+      commandId: "cmd-run-1",
+      causationId: "cancel-1",
+      source: "vscode-plugin",
+      authorityGeneration: 42,
+      reason: "operator cleared run",
+    }),
+  );
+  const cancelWire = cancel.toWire();
+  assert.ok(fn(cancelWire), errorsText(fn, cancelWire));
+
+  const events = CommandMessage.ofEvents(
+    new CommandEvents([
+      new CommandEvent({
+        eventId: "ev-1",
+        commandId: "cmd-run-1",
+        kind: CommandEventKind.Accepted,
+        generation: 42,
+        detail: "queued",
+      }),
+    ]),
+  );
+  const eventsWire = events.toWire();
+  assert.ok(fn(eventsWire), errorsText(fn, eventsWire));
+
+  const projection = CommandMessage.ofProjection(
+    new CommandProjectionImage(43, [
+      new CommandProjectionEntry({
+        commandId: "cmd-run-1",
+        status: CommandStatus.Applied,
+        terminal: true,
+        generation: 43,
+        reason: null,
+        terminalReceiptId: "rcpt-1",
+        lastEventId: "ev-3",
+      }),
+    ]),
+  );
+  const projectionWire = projection.toWire();
+  assert.ok(fn(projectionWire), errorsText(fn, projectionWire));
 });

@@ -1352,3 +1352,722 @@ export class PeerPermissions {
     }
   }
 }
+
+// ===========================================================================
+// Command / RPC message plane (command-plane-v1)
+//
+// An evented command message family that is an additive sibling to
+// Snapshot / Delta / CrdtSync. The one hard rule: terminal authority is the
+// causal receipt, not the event or the transport. observed/accepted/started
+// events are non-terminal progress; a command becomes terminal only when a
+// terminal CausalReceipt folds in. CommandRpcClient is derived behavior over
+// the CommandProjection reducer — a unary call resolves only on a terminal
+// projection.
+// ===========================================================================
+
+export const DedupePolicy = Object.freeze({
+  None: "none",
+  SameIdempotencyKey: "same_idempotency_key",
+  SameCommandId: "same_command_id",
+});
+
+function normalizeDedupePolicy(value) {
+  if (Object.values(DedupePolicy).includes(value)) {
+    return value;
+  }
+  throw new TypeError(`unknown dedupe policy: ${value}`);
+}
+
+export class CommandPolicy {
+  constructor({ dedupe, supersede, cancelOnPreempt }) {
+    this.dedupe = normalizeDedupePolicy(dedupe);
+    if (typeof supersede !== "boolean") {
+      throw new TypeError("supersede must be a boolean");
+    }
+    if (typeof cancelOnPreempt !== "boolean") {
+      throw new TypeError("cancelOnPreempt must be a boolean");
+    }
+    this.supersede = supersede;
+    this.cancelOnPreempt = cancelOnPreempt;
+    Object.freeze(this);
+  }
+
+  toWire() {
+    return {
+      dedupe: this.dedupe,
+      supersede: this.supersede,
+      cancel_on_preempt: this.cancelOnPreempt,
+    };
+  }
+
+  static fromWire(value) {
+    const object = assertObject(value, "CommandPolicy");
+    return new CommandPolicy({
+      dedupe: object.dedupe,
+      supersede: object.supersede,
+      cancelOnPreempt: object.cancel_on_preempt,
+    });
+  }
+}
+
+export class CommandSubmit {
+  constructor({
+    commandId,
+    causationId,
+    source,
+    target,
+    namespace,
+    name,
+    authorityGeneration,
+    idempotencyKey,
+    deadlineMs,
+    policy,
+    payloadType,
+    payloadHash,
+    payload,
+    requiredFeatures = [],
+  }) {
+    this.commandId = assertString(commandId, "commandId");
+    this.causationId = assertString(causationId, "causationId");
+    this.source = assertString(source, "source");
+    this.target = assertString(target, "target");
+    this.namespace = assertString(namespace, "namespace");
+    this.name = assertString(name, "name");
+    this.authorityGeneration = assertInteger(authorityGeneration, "authorityGeneration");
+    this.idempotencyKey = assertString(idempotencyKey, "idempotencyKey");
+    this.deadlineMs = assertInteger(deadlineMs, "deadlineMs");
+    this.policy = policy instanceof CommandPolicy ? policy : CommandPolicy.fromWire(policy);
+    this.payloadType = assertString(payloadType, "payloadType");
+    this.payloadHash = assertString(payloadHash, "payloadHash");
+    this.payload = IpcValue.of(payload);
+    this.requiredFeatures = Object.freeze(assertStringArray(requiredFeatures, "requiredFeatures"));
+    Object.freeze(this);
+  }
+
+  toWire() {
+    return {
+      command_id: this.commandId,
+      causation_id: this.causationId,
+      source: this.source,
+      target: this.target,
+      namespace: this.namespace,
+      name: this.name,
+      authority_generation: this.authorityGeneration,
+      idempotency_key: this.idempotencyKey,
+      deadline_ms: this.deadlineMs,
+      policy: this.policy.toWire(),
+      payload_type: this.payloadType,
+      payload_hash: this.payloadHash,
+      payload: this.payload.toWire(),
+      required_features: [...this.requiredFeatures],
+    };
+  }
+
+  static fromWire(value) {
+    const object = assertObject(value, "CommandSubmit");
+    return new CommandSubmit({
+      commandId: object.command_id,
+      causationId: object.causation_id,
+      source: object.source,
+      target: object.target,
+      namespace: object.namespace,
+      name: object.name,
+      authorityGeneration: object.authority_generation,
+      idempotencyKey: object.idempotency_key,
+      deadlineMs: object.deadline_ms,
+      policy: CommandPolicy.fromWire(object.policy),
+      payloadType: object.payload_type,
+      payloadHash: object.payload_hash,
+      payload: IpcValue.fromWire(object.payload),
+      requiredFeatures: object.required_features ?? [],
+    });
+  }
+}
+
+export class CommandCancel {
+  constructor({ commandId, causationId, source, authorityGeneration, reason = null }) {
+    this.commandId = assertString(commandId, "commandId");
+    this.causationId = assertString(causationId, "causationId");
+    this.source = assertString(source, "source");
+    this.authorityGeneration = assertInteger(authorityGeneration, "authorityGeneration");
+    this.reason = reason === null ? null : assertString(reason, "reason");
+    Object.freeze(this);
+  }
+
+  toWire() {
+    return {
+      command_id: this.commandId,
+      causation_id: this.causationId,
+      source: this.source,
+      authority_generation: this.authorityGeneration,
+      reason: this.reason,
+    };
+  }
+
+  static fromWire(value) {
+    const object = assertObject(value, "CommandCancel");
+    return new CommandCancel({
+      commandId: object.command_id,
+      causationId: object.causation_id,
+      source: object.source,
+      authorityGeneration: object.authority_generation,
+      reason: object.reason ?? null,
+    });
+  }
+}
+
+export const CommandEventKind = Object.freeze({
+  Observed: "observed",
+  Accepted: "accepted",
+  Started: "started",
+  Progress: "progress",
+  Cancelled: "cancelled",
+  Superseded: "superseded",
+  TimedOut: "timed_out",
+});
+
+function normalizeCommandEventKind(value) {
+  if (Object.values(CommandEventKind).includes(value)) {
+    return value;
+  }
+  throw new TypeError(`unknown command event kind: ${value}`);
+}
+
+export class CommandEvent {
+  constructor({ eventId, commandId, kind, generation, detail = null }) {
+    this.eventId = assertString(eventId, "eventId");
+    this.commandId = assertString(commandId, "commandId");
+    this.kind = normalizeCommandEventKind(kind);
+    this.generation = assertInteger(generation, "generation");
+    this.detail = detail === null ? null : assertString(detail, "detail");
+    Object.freeze(this);
+  }
+
+  toWire() {
+    return {
+      event_id: this.eventId,
+      command_id: this.commandId,
+      kind: this.kind,
+      generation: this.generation,
+      detail: this.detail,
+    };
+  }
+
+  static fromWire(value) {
+    const object = assertObject(value, "CommandEvent");
+    return new CommandEvent({
+      eventId: object.event_id,
+      commandId: object.command_id,
+      kind: object.kind,
+      generation: object.generation,
+      detail: object.detail ?? null,
+    });
+  }
+}
+
+export class CommandEvents {
+  constructor(events = []) {
+    this.events = Object.freeze(
+      events.map((event) => (event instanceof CommandEvent ? event : CommandEvent.fromWire(event))),
+    );
+    Object.freeze(this);
+  }
+
+  toWire() {
+    return { events: this.events.map((event) => event.toWire()) };
+  }
+
+  static fromWire(value) {
+    const object = assertObject(value, "CommandEvents");
+    return new CommandEvents(object.events ?? []);
+  }
+}
+
+export const CommandStatus = Object.freeze({
+  Submitted: "submitted",
+  Accepted: "accepted",
+  Running: "running",
+  Applied: "applied",
+  Rejected: "rejected",
+  Cancelled: "cancelled",
+  Superseded: "superseded",
+  TimedOut: "timed_out",
+});
+
+const TERMINAL_COMMAND_STATUSES = Object.freeze([
+  CommandStatus.Applied,
+  CommandStatus.Rejected,
+  CommandStatus.Cancelled,
+  CommandStatus.Superseded,
+  CommandStatus.TimedOut,
+]);
+
+export function isTerminalCommandStatus(status) {
+  return TERMINAL_COMMAND_STATUSES.includes(status);
+}
+
+function normalizeCommandStatus(value) {
+  if (Object.values(CommandStatus).includes(value)) {
+    return value;
+  }
+  throw new TypeError(`unknown command status: ${value}`);
+}
+
+export class CommandProjectionEntry {
+  constructor({
+    commandId,
+    status,
+    terminal,
+    generation,
+    reason = null,
+    terminalReceiptId = null,
+    lastEventId = null,
+  }) {
+    this.commandId = assertString(commandId, "commandId");
+    this.status = normalizeCommandStatus(status);
+    if (typeof terminal !== "boolean") {
+      throw new TypeError("terminal must be a boolean");
+    }
+    this.terminal = terminal;
+    this.generation = assertInteger(generation, "generation");
+    this.reason = reason === null ? null : assertString(reason, "reason");
+    this.terminalReceiptId =
+      terminalReceiptId === null ? null : assertString(terminalReceiptId, "terminalReceiptId");
+    this.lastEventId = lastEventId === null ? null : assertString(lastEventId, "lastEventId");
+    Object.freeze(this);
+  }
+
+  toWire() {
+    return {
+      command_id: this.commandId,
+      status: this.status,
+      terminal: this.terminal,
+      generation: this.generation,
+      reason: this.reason,
+      terminal_receipt_id: this.terminalReceiptId,
+      last_event_id: this.lastEventId,
+    };
+  }
+
+  with(patch) {
+    return new CommandProjectionEntry({ ...this, ...patch });
+  }
+
+  static fromWire(value) {
+    const object = assertObject(value, "CommandProjectionEntry");
+    return new CommandProjectionEntry({
+      commandId: object.command_id,
+      status: object.status,
+      terminal: object.terminal,
+      generation: object.generation,
+      reason: object.reason ?? null,
+      terminalReceiptId: object.terminal_receipt_id ?? null,
+      lastEventId: object.last_event_id ?? null,
+    });
+  }
+}
+
+export class CommandProjectionImage {
+  constructor(generation, commands = []) {
+    this.generation = assertInteger(generation, "generation");
+    this.commands = Object.freeze(
+      commands.map((entry) =>
+        entry instanceof CommandProjectionEntry ? entry : CommandProjectionEntry.fromWire(entry),
+      ),
+    );
+    Object.freeze(this);
+  }
+
+  toWire() {
+    return {
+      generation: this.generation,
+      commands: this.commands.map((entry) => entry.toWire()),
+    };
+  }
+
+  static fromWire(value) {
+    const object = assertObject(value, "CommandProjectionImage");
+    return new CommandProjectionImage(object.generation, object.commands ?? []);
+  }
+}
+
+export class CommandMessage {
+  constructor(kind, value) {
+    this.kind = kind;
+    this.submit = undefined;
+    this.cancel = undefined;
+    this.events = undefined;
+    this.projection = undefined;
+    switch (kind) {
+      case "CommandSubmit":
+        this.submit = value instanceof CommandSubmit ? value : CommandSubmit.fromWire(value);
+        break;
+      case "CommandCancel":
+        this.cancel = value instanceof CommandCancel ? value : CommandCancel.fromWire(value);
+        break;
+      case "CommandEvents":
+        this.events = value instanceof CommandEvents ? value : CommandEvents.fromWire(value);
+        break;
+      case "CommandProjection":
+        this.projection =
+          value instanceof CommandProjectionImage ? value : CommandProjectionImage.fromWire(value);
+        break;
+      default:
+        throw new TypeError(`unknown CommandMessage kind: ${kind}`);
+    }
+    Object.freeze(this);
+  }
+
+  toWire() {
+    switch (this.kind) {
+      case "CommandSubmit":
+        return { CommandSubmit: this.submit.toWire() };
+      case "CommandCancel":
+        return { CommandCancel: this.cancel.toWire() };
+      case "CommandEvents":
+        return { CommandEvents: this.events.toWire() };
+      case "CommandProjection":
+        return { CommandProjection: this.projection.toWire() };
+      default:
+        throw new TypeError(`unknown CommandMessage kind: ${this.kind}`);
+    }
+  }
+
+  encodeJson() {
+    return textEncoder.encode(JSON.stringify(this.toWire()));
+  }
+
+  static ofSubmit(submit) {
+    return new CommandMessage("CommandSubmit", submit);
+  }
+
+  static ofCancel(cancel) {
+    return new CommandMessage("CommandCancel", cancel);
+  }
+
+  static ofEvents(events) {
+    return new CommandMessage("CommandEvents", events);
+  }
+
+  static ofProjection(image) {
+    return new CommandMessage("CommandProjection", image);
+  }
+
+  static fromWire(value) {
+    const [tag, body] = assertTagged(value, "CommandMessage");
+    switch (tag) {
+      case "CommandSubmit":
+        return CommandMessage.ofSubmit(CommandSubmit.fromWire(body));
+      case "CommandCancel":
+        return CommandMessage.ofCancel(CommandCancel.fromWire(body));
+      case "CommandEvents":
+        return CommandMessage.ofEvents(CommandEvents.fromWire(body));
+      case "CommandProjection":
+        return CommandMessage.ofProjection(CommandProjectionImage.fromWire(body));
+      default:
+        throw new TypeError(`unknown CommandMessage variant: ${tag}`);
+    }
+  }
+
+  static decodeJson(data) {
+    const text = data instanceof Uint8Array ? textDecoder.decode(data) : String(data);
+    return CommandMessage.fromWire(JSON.parse(text));
+  }
+}
+
+export const CommandApplyStatusKind = Object.freeze({
+  Recorded: "recorded",
+  Duplicate: "duplicate",
+  Unknown: "unknown",
+  StaleGeneration: "stale_generation",
+  TerminalConflict: "terminal_conflict",
+});
+
+function terminalStatusOf(outcome, reason) {
+  if (outcome === ReceiptOutcome.Applied) {
+    return CommandStatus.Applied;
+  }
+  if (outcome === ReceiptOutcome.Rejected) {
+    switch (reason) {
+      case "cancelled":
+        return CommandStatus.Cancelled;
+      case "superseded":
+        return CommandStatus.Superseded;
+      case "timed_out":
+        return CommandStatus.TimedOut;
+      default:
+        return CommandStatus.Rejected;
+    }
+  }
+  return CommandStatus.Accepted;
+}
+
+function progressStatusOf(kind) {
+  switch (kind) {
+    case CommandEventKind.Observed:
+    case CommandEventKind.Accepted:
+      return CommandStatus.Accepted;
+    case CommandEventKind.Started:
+    case CommandEventKind.Progress:
+      return CommandStatus.Running;
+    default:
+      return null;
+  }
+}
+
+function phaseRank(status) {
+  switch (status) {
+    case CommandStatus.Submitted:
+      return 0;
+    case CommandStatus.Accepted:
+      return 1;
+    case CommandStatus.Running:
+      return 2;
+    default:
+      return 3;
+  }
+}
+
+export class CommandProjection {
+  #generation = 0;
+  #entries = new Map();
+  #seenEventIds = new Set();
+  #seenReceiptIds = new Set();
+  #seenCancelIds = new Set();
+  #conflicts = new Set();
+
+  get generation() {
+    return this.#generation;
+  }
+
+  applyMessage(message) {
+    const msg = message instanceof CommandMessage ? message : CommandMessage.fromWire(message);
+    switch (msg.kind) {
+      case "CommandSubmit":
+        return this.submit(msg.submit);
+      case "CommandCancel":
+        return this.cancel(msg.cancel);
+      case "CommandEvents": {
+        let last = { kind: CommandApplyStatusKind.Unknown };
+        for (const event of msg.events.events) {
+          last = this.event(event);
+        }
+        return last;
+      }
+      case "CommandProjection":
+        return this.applyProjection(msg.projection);
+      default:
+        throw new TypeError(`unknown CommandMessage kind: ${msg.kind}`);
+    }
+  }
+
+  submit(submit) {
+    const s = submit instanceof CommandSubmit ? submit : CommandSubmit.fromWire(submit);
+    if (this.#entries.has(s.commandId)) {
+      return { kind: CommandApplyStatusKind.Duplicate };
+    }
+    this.#generation = Math.max(this.#generation, s.authorityGeneration);
+    this.#entries.set(
+      s.commandId,
+      new CommandProjectionEntry({
+        commandId: s.commandId,
+        status: CommandStatus.Submitted,
+        terminal: false,
+        generation: s.authorityGeneration,
+      }),
+    );
+    return { kind: CommandApplyStatusKind.Recorded };
+  }
+
+  event(event) {
+    const e = event instanceof CommandEvent ? event : CommandEvent.fromWire(event);
+    if (this.#seenEventIds.has(e.eventId)) {
+      return { kind: CommandApplyStatusKind.Duplicate };
+    }
+    const entry = this.#entries.get(e.commandId);
+    if (!entry) {
+      return { kind: CommandApplyStatusKind.Unknown };
+    }
+    if (e.generation !== entry.generation) {
+      return {
+        kind: CommandApplyStatusKind.StaleGeneration,
+        expected: entry.generation,
+        actual: e.generation,
+      };
+    }
+    this.#seenEventIds.add(e.eventId);
+    let updated = entry.with({ lastEventId: e.eventId });
+    const next = progressStatusOf(e.kind);
+    if (!updated.terminal && next !== null && phaseRank(next) >= phaseRank(updated.status)) {
+      updated = updated.with({ status: next });
+    }
+    this.#entries.set(e.commandId, updated);
+    return { kind: CommandApplyStatusKind.Recorded };
+  }
+
+  cancel(cancel) {
+    const c = cancel instanceof CommandCancel ? cancel : CommandCancel.fromWire(cancel);
+    if (this.#seenCancelIds.has(c.causationId)) {
+      return { kind: CommandApplyStatusKind.Duplicate };
+    }
+    const entry = this.#entries.get(c.commandId);
+    if (!entry) {
+      return { kind: CommandApplyStatusKind.Unknown };
+    }
+    if (c.authorityGeneration !== entry.generation) {
+      return {
+        kind: CommandApplyStatusKind.StaleGeneration,
+        expected: entry.generation,
+        actual: c.authorityGeneration,
+      };
+    }
+    this.#seenCancelIds.add(c.causationId);
+    // A cancel is non-terminal by itself; the rejected receipt makes it terminal.
+    return { kind: CommandApplyStatusKind.Recorded };
+  }
+
+  observeReceipt(receipt) {
+    const r = receipt instanceof CausalReceipt ? receipt : CausalReceipt.fromWire(receipt);
+    if (this.#seenReceiptIds.has(r.receiptId)) {
+      return { kind: CommandApplyStatusKind.Duplicate };
+    }
+    const entry = this.#entries.get(r.causationId);
+    if (!entry) {
+      return { kind: CommandApplyStatusKind.Unknown };
+    }
+    if (r.generation !== entry.generation) {
+      return {
+        kind: CommandApplyStatusKind.StaleGeneration,
+        expected: entry.generation,
+        actual: r.generation,
+      };
+    }
+    if (!r.isTerminal) {
+      this.#seenReceiptIds.add(r.receiptId);
+      if (!entry.terminal && phaseRank(CommandStatus.Accepted) >= phaseRank(entry.status)) {
+        this.#entries.set(r.causationId, entry.with({ status: CommandStatus.Accepted }));
+      }
+      return { kind: CommandApplyStatusKind.Recorded };
+    }
+    const incoming = terminalStatusOf(r.outcome, r.reason);
+    if (entry.terminal) {
+      if (entry.status === incoming) {
+        this.#seenReceiptIds.add(r.receiptId);
+        return { kind: CommandApplyStatusKind.Recorded };
+      }
+      this.#conflicts.add(r.causationId);
+      return {
+        kind: CommandApplyStatusKind.TerminalConflict,
+        commandId: r.causationId,
+        existing: entry.status,
+        incoming,
+      };
+    }
+    this.#seenReceiptIds.add(r.receiptId);
+    this.#entries.set(
+      r.causationId,
+      entry.with({
+        terminal: true,
+        status: incoming,
+        reason: r.reason,
+        terminalReceiptId: r.receiptId,
+      }),
+    );
+    return { kind: CommandApplyStatusKind.Recorded };
+  }
+
+  applyProjection(image) {
+    const img = image instanceof CommandProjectionImage ? image : CommandProjectionImage.fromWire(image);
+    this.#generation = Math.max(this.#generation, img.generation);
+    for (const entry of img.commands) {
+      this.#entries.set(entry.commandId, entry);
+      if (entry.lastEventId !== null) {
+        this.#seenEventIds.add(entry.lastEventId);
+      }
+      if (entry.terminalReceiptId !== null) {
+        this.#seenReceiptIds.add(entry.terminalReceiptId);
+      }
+    }
+    return { kind: CommandApplyStatusKind.Recorded };
+  }
+
+  entry(commandId) {
+    return this.#entries.get(commandId) ?? null;
+  }
+
+  terminalFor(commandId) {
+    const entry = this.#entries.get(commandId);
+    return entry && entry.terminal ? entry : null;
+  }
+
+  hasConflict(commandId) {
+    return this.#conflicts.has(commandId);
+  }
+
+  toImage() {
+    const commands = [...this.#entries.values()].sort((a, b) =>
+      a.commandId < b.commandId ? -1 : a.commandId > b.commandId ? 1 : 0,
+    );
+    return new CommandProjectionImage(this.#generation, commands);
+  }
+}
+
+export const CallStateKind = Object.freeze({
+  Pending: "pending",
+  Resolved: "resolved",
+  Conflict: "conflict",
+});
+
+// Functional helper: build + send a CommandSubmit through a transport function
+// and fold it into a projection. Returns the command id.
+export function submitCommand(transport, projection, submit) {
+  const message = CommandMessage.ofSubmit(submit);
+  transport(message);
+  projection.applyMessage(message);
+  return submit.commandId;
+}
+
+// Functional helper: build + send a CommandCancel through a transport function.
+export function cancelCommand(transport, projection, cancel) {
+  const message = CommandMessage.ofCancel(cancel);
+  transport(message);
+  projection.applyMessage(message);
+}
+
+export class CommandRpcClient {
+  #transport;
+  projection = new CommandProjection();
+
+  constructor(transport) {
+    if (typeof transport !== "function") {
+      throw new TypeError("transport must be a function (message) => void");
+    }
+    this.#transport = transport;
+  }
+
+  submit(submit) {
+    return submitCommand(this.#transport, this.projection, submit);
+  }
+
+  cancel(cancel) {
+    cancelCommand(this.#transport, this.projection, cancel);
+  }
+
+  ingestCommand(message) {
+    return this.projection.applyMessage(message);
+  }
+
+  ingestReceipt(receipt) {
+    return this.projection.observeReceipt(receipt);
+  }
+
+  pollCall(commandId) {
+    if (this.projection.hasConflict(commandId)) {
+      return { kind: CallStateKind.Conflict };
+    }
+    const entry = this.projection.terminalFor(commandId);
+    return entry
+      ? { kind: CallStateKind.Resolved, entry }
+      : { kind: CallStateKind.Pending };
+  }
+}

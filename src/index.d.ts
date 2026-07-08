@@ -509,3 +509,298 @@ export type BindingCapabilities = {
 };
 
 export const BINDING_CAPABILITIES: BindingCapabilities;
+
+// ===========================================================================
+// Command / RPC message plane (command-plane-v1)
+// ===========================================================================
+
+export const DedupePolicy: {
+  readonly None: "none";
+  readonly SameIdempotencyKey: "same_idempotency_key";
+  readonly SameCommandId: "same_command_id";
+};
+
+export type DedupePolicyValue = "none" | "same_idempotency_key" | "same_command_id";
+
+export type CommandPolicyWire = {
+  dedupe: DedupePolicyValue;
+  supersede: boolean;
+  cancel_on_preempt: boolean;
+};
+
+export class CommandPolicy {
+  constructor(fields: { dedupe: DedupePolicyValue; supersede: boolean; cancelOnPreempt: boolean });
+  readonly dedupe: DedupePolicyValue;
+  readonly supersede: boolean;
+  readonly cancelOnPreempt: boolean;
+  toWire(): CommandPolicyWire;
+  static fromWire(value: unknown): CommandPolicy;
+}
+
+export type CommandSubmitWire = {
+  command_id: string;
+  causation_id: string;
+  source: string;
+  target: string;
+  namespace: string;
+  name: string;
+  authority_generation: number;
+  idempotency_key: string;
+  deadline_ms: number;
+  policy: CommandPolicyWire;
+  payload_type: string;
+  payload_hash: string;
+  payload: unknown;
+  required_features: string[];
+};
+
+export class CommandSubmit {
+  constructor(fields: {
+    commandId: string;
+    causationId: string;
+    source: string;
+    target: string;
+    namespace: string;
+    name: string;
+    authorityGeneration: number;
+    idempotencyKey: string;
+    deadlineMs: number;
+    policy: CommandPolicy | CommandPolicyWire;
+    payloadType: string;
+    payloadHash: string;
+    payload: IpcValueValue | ShmBlobRef | WireBytes;
+    requiredFeatures?: ReadonlyArray<string>;
+  });
+  readonly commandId: string;
+  readonly causationId: string;
+  readonly source: string;
+  readonly target: string;
+  readonly namespace: string;
+  readonly name: string;
+  readonly authorityGeneration: number;
+  readonly idempotencyKey: string;
+  readonly deadlineMs: number;
+  readonly policy: CommandPolicy;
+  readonly payloadType: string;
+  readonly payloadHash: string;
+  readonly payload: IpcValueValue;
+  readonly requiredFeatures: readonly string[];
+  toWire(): CommandSubmitWire;
+  static fromWire(value: unknown): CommandSubmit;
+}
+
+export type CommandCancelWire = {
+  command_id: string;
+  causation_id: string;
+  source: string;
+  authority_generation: number;
+  reason: string | null;
+};
+
+export class CommandCancel {
+  constructor(fields: {
+    commandId: string;
+    causationId: string;
+    source: string;
+    authorityGeneration: number;
+    reason?: string | null;
+  });
+  readonly commandId: string;
+  readonly causationId: string;
+  readonly source: string;
+  readonly authorityGeneration: number;
+  readonly reason: string | null;
+  toWire(): CommandCancelWire;
+  static fromWire(value: unknown): CommandCancel;
+}
+
+export const CommandEventKind: {
+  readonly Observed: "observed";
+  readonly Accepted: "accepted";
+  readonly Started: "started";
+  readonly Progress: "progress";
+  readonly Cancelled: "cancelled";
+  readonly Superseded: "superseded";
+  readonly TimedOut: "timed_out";
+};
+
+export type CommandEventKindValue =
+  | "observed"
+  | "accepted"
+  | "started"
+  | "progress"
+  | "cancelled"
+  | "superseded"
+  | "timed_out";
+
+export type CommandEventWire = {
+  event_id: string;
+  command_id: string;
+  kind: CommandEventKindValue;
+  generation: number;
+  detail: string | null;
+};
+
+export class CommandEvent {
+  constructor(fields: {
+    eventId: string;
+    commandId: string;
+    kind: CommandEventKindValue;
+    generation: number;
+    detail?: string | null;
+  });
+  readonly eventId: string;
+  readonly commandId: string;
+  readonly kind: CommandEventKindValue;
+  readonly generation: number;
+  readonly detail: string | null;
+  toWire(): CommandEventWire;
+  static fromWire(value: unknown): CommandEvent;
+}
+
+export class CommandEvents {
+  constructor(events?: ReadonlyArray<CommandEvent | CommandEventWire>);
+  readonly events: readonly CommandEvent[];
+  toWire(): { events: CommandEventWire[] };
+  static fromWire(value: unknown): CommandEvents;
+}
+
+export const CommandStatus: {
+  readonly Submitted: "submitted";
+  readonly Accepted: "accepted";
+  readonly Running: "running";
+  readonly Applied: "applied";
+  readonly Rejected: "rejected";
+  readonly Cancelled: "cancelled";
+  readonly Superseded: "superseded";
+  readonly TimedOut: "timed_out";
+};
+
+export type CommandStatusValue =
+  | "submitted"
+  | "accepted"
+  | "running"
+  | "applied"
+  | "rejected"
+  | "cancelled"
+  | "superseded"
+  | "timed_out";
+
+export function isTerminalCommandStatus(status: CommandStatusValue): boolean;
+
+export type CommandProjectionEntryWire = {
+  command_id: string;
+  status: CommandStatusValue;
+  terminal: boolean;
+  generation: number;
+  reason: string | null;
+  terminal_receipt_id: string | null;
+  last_event_id: string | null;
+};
+
+export class CommandProjectionEntry {
+  constructor(fields: {
+    commandId: string;
+    status: CommandStatusValue;
+    terminal: boolean;
+    generation: number;
+    reason?: string | null;
+    terminalReceiptId?: string | null;
+    lastEventId?: string | null;
+  });
+  readonly commandId: string;
+  readonly status: CommandStatusValue;
+  readonly terminal: boolean;
+  readonly generation: number;
+  readonly reason: string | null;
+  readonly terminalReceiptId: string | null;
+  readonly lastEventId: string | null;
+  with(patch: Partial<{
+    status: CommandStatusValue;
+    terminal: boolean;
+    reason: string | null;
+    terminalReceiptId: string | null;
+    lastEventId: string | null;
+  }>): CommandProjectionEntry;
+  toWire(): CommandProjectionEntryWire;
+  static fromWire(value: unknown): CommandProjectionEntry;
+}
+
+export class CommandProjectionImage {
+  constructor(generation: number, commands?: ReadonlyArray<CommandProjectionEntry | CommandProjectionEntryWire>);
+  readonly generation: number;
+  readonly commands: readonly CommandProjectionEntry[];
+  toWire(): { generation: number; commands: CommandProjectionEntryWire[] };
+  static fromWire(value: unknown): CommandProjectionImage;
+}
+
+export class CommandMessage {
+  readonly kind: "CommandSubmit" | "CommandCancel" | "CommandEvents" | "CommandProjection";
+  readonly submit?: CommandSubmit;
+  readonly cancel?: CommandCancel;
+  readonly events?: CommandEvents;
+  readonly projection?: CommandProjectionImage;
+  toWire(): unknown;
+  encodeJson(): Uint8Array;
+  static ofSubmit(submit: CommandSubmit): CommandMessage;
+  static ofCancel(cancel: CommandCancel): CommandMessage;
+  static ofEvents(events: CommandEvents): CommandMessage;
+  static ofProjection(image: CommandProjectionImage): CommandMessage;
+  static fromWire(value: unknown): CommandMessage;
+  static decodeJson(data: Uint8Array | string): CommandMessage;
+}
+
+export const CommandApplyStatusKind: {
+  readonly Recorded: "recorded";
+  readonly Duplicate: "duplicate";
+  readonly Unknown: "unknown";
+  readonly StaleGeneration: "stale_generation";
+  readonly TerminalConflict: "terminal_conflict";
+};
+
+export type CommandApplyStatus =
+  | { kind: "recorded" }
+  | { kind: "duplicate" }
+  | { kind: "unknown" }
+  | { kind: "stale_generation"; expected: number; actual: number }
+  | { kind: "terminal_conflict"; commandId: string; existing: CommandStatusValue; incoming: CommandStatusValue };
+
+export class CommandProjection {
+  readonly generation: number;
+  applyMessage(message: CommandMessage | unknown): CommandApplyStatus;
+  submit(submit: CommandSubmit | CommandSubmitWire): CommandApplyStatus;
+  event(event: CommandEvent | CommandEventWire): CommandApplyStatus;
+  cancel(cancel: CommandCancel | CommandCancelWire): CommandApplyStatus;
+  observeReceipt(receipt: CausalReceipt | CausalReceiptWire): CommandApplyStatus;
+  applyProjection(image: CommandProjectionImage | unknown): CommandApplyStatus;
+  entry(commandId: string): CommandProjectionEntry | null;
+  terminalFor(commandId: string): CommandProjectionEntry | null;
+  hasConflict(commandId: string): boolean;
+  toImage(): CommandProjectionImage;
+}
+
+export const CallStateKind: {
+  readonly Pending: "pending";
+  readonly Resolved: "resolved";
+  readonly Conflict: "conflict";
+};
+
+export type CallState =
+  | { kind: "pending" }
+  | { kind: "resolved"; entry: CommandProjectionEntry }
+  | { kind: "conflict" };
+
+export type CommandTransport = (message: CommandMessage) => void;
+
+export function submitCommand(transport: CommandTransport, projection: CommandProjection, submit: CommandSubmit): string;
+export function cancelCommand(transport: CommandTransport, projection: CommandProjection, cancel: CommandCancel): void;
+
+export class CommandRpcClient {
+  constructor(transport: CommandTransport);
+  readonly projection: CommandProjection;
+  submit(submit: CommandSubmit): string;
+  cancel(cancel: CommandCancel): void;
+  ingestCommand(message: CommandMessage): CommandApplyStatus;
+  ingestReceipt(receipt: CausalReceipt): CommandApplyStatus;
+  pollCall(commandId: string): CallState;
+}
