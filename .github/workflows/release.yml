@@ -63,7 +63,11 @@ jobs:
         working-directory: lazily-js
         run: |
           version="$(node -p "require('./package.json').version")"
-          if npm publish --access public; then
+          # --provenance triggers the OIDC trusted-publishing exchange (the
+          # `id-token: write` permission minted a short-lived publish token).
+          # The bundled npm 11.x does not auto-enable provenance the way a
+          # freshly-upgraded npm@latest does, so it must be explicit.
+          if npm publish --provenance --access public; then
             echo "published @lazily-hub/lazily-js@${version}"
           elif npm view "@lazily-hub/lazily-js@${version}" version >/dev/null 2>&1; then
             echo "@lazily-hub/lazily-js@${version} already published — idempotent no-op"
