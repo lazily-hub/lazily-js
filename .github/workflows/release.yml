@@ -51,15 +51,15 @@ jobs:
         working-directory: lazily-js
         run: npm test --if-present
 
-      # Published under the `prev` dist-tag so this v0.x line does not steal
-      # `latest` from a higher already-published version; move `latest` explicitly
-      # (`npm dist-tag add @lazily-hub/lazily-js@<v> latest`) once the accidental
-      # v1.x releases are removed.
+      # Publish as `latest`. The accidental v1.x versions that forced the old
+      # `prev` dist-tag workaround have been removed (npm now shows only the
+      # 0.4.0 / 0.5.0 / 0.6.x line, latest = 0.6.1), so the v0.x line is the
+      # canonical latest again.
       - name: Publish
         working-directory: lazily-js
         run: |
           version="$(node -p "require('./package.json').version")"
-          if npm publish --access public --tag prev; then
+          if npm publish --access public; then
             echo "published @lazily-hub/lazily-js@${version}"
           elif npm view "@lazily-hub/lazily-js@${version}" version >/dev/null 2>&1; then
             echo "@lazily-hub/lazily-js@${version} already published — idempotent no-op"
