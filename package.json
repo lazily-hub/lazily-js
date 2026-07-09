@@ -2,6 +2,11 @@
   "name": "@lazily-hub/lazily-js",
   "version": "0.7.0",
   "description": "Native JavaScript port of the lazily reactive core: a full reactive graph (Cell/Slot/Signal/Effect), the lazily-spec IPC wire types, keyed cell collections + LIS reconciliation, the memoized semantic tree, the move-aware sequence CRDT, the Fugue/RGA text CRDT, manufactured text identity, full-Harel state charts, and an FFI state-projection consumer.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lazily-hub/lazily-js.git"
+  },
   "type": "module",
   "main": "src/index.js",
   "types": "src/index.d.ts",
