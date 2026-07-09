@@ -1,6 +1,6 @@
 {
   "name": "@lazily-hub/lazily-js",
-  "version": "0.6.1",
+  "version": "0.7.0",
   "description": "Native JavaScript port of the lazily reactive core: a full reactive graph (Cell/Slot/Signal/Effect), the lazily-spec IPC wire types, keyed cell collections + LIS reconciliation, the memoized semantic tree, the move-aware sequence CRDT, the Fugue/RGA text CRDT, manufactured text identity, full-Harel state charts, and an FFI state-projection consumer.",
   "type": "module",
   "main": "src/index.js",
@@ -29,6 +29,10 @@
     "./collections": {
       "types": "./src/collections.d.ts",
       "default": "./src/collections.js"
+    },
+    "./queue": {
+      "types": "./src/queue.d.ts",
+      "default": "./src/queue.js"
     },
     "./sem-tree": {
       "types": "./src/sem-tree.d.ts",
@@ -64,7 +68,7 @@
     }
   },
   "scripts": {
-    "build": "node --check src/index.js && node --check src/reactive.js && node --check src/reactive-async.js && node --check src/state-machine.js && node --check src/statechart.js && node --check src/collections.js && node --check src/sem-tree.js && node --check src/stable-id.js && node --check src/seq-crdt.js && node --check src/text-crdt.js && node --check src/utf8-offsets.js && node --check src/lossless-tree-crdt.js && node --check src/state-projection.js && node --check src/signaling.js && node --check src/distributed.js",
+    "build": "node --check src/index.js && node --check src/reactive.js && node --check src/reactive-async.js && node --check src/state-machine.js && node --check src/statechart.js && node --check src/collections.js && node --check src/queue.js && node --check src/sem-tree.js && node --check src/stable-id.js && node --check src/seq-crdt.js && node --check src/text-crdt.js && node --check src/utf8-offsets.js && node --check src/lossless-tree-crdt.js && node --check src/state-projection.js && node --check src/signaling.js && node --check src/distributed.js",
     "test:formal": "node scripts/formal-check.mjs",
     "bench": "node bench/context.bench.mjs",
     "benchmark-update": "node scripts/run-benchmarks.mjs",
