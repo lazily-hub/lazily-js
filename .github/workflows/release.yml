@@ -39,9 +39,13 @@ jobs:
           node-version: 24
           registry-url: https://registry.npmjs.org
 
-      # Trusted publishing needs npm CLI >= 11.5.1; Node 24's bundled npm may lag.
-      - name: Upgrade npm for OIDC trusted publishing
-        run: npm install -g npm@latest
+      # OIDC trusted publishing (provenance) needs npm >= 9.5.0; Node 24's
+      # bundled npm 11.x already supports it. Do NOT `npm install -g npm@latest`
+      # — that global self-upgrade drops the `sigstore` dependency that
+      # libnpmpublish requires for provenance, producing
+      # `Cannot find module 'sigstore'` at publish time.
+      - name: Verify npm supports OIDC provenance
+        run: npm --version
 
       - name: Install dependencies
         working-directory: lazily-js
