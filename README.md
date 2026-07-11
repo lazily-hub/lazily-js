@@ -66,7 +66,7 @@ notes and platform carve-outs lives in
 | C-ABI FFI boundary | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | ✅ |
 | Permission boundary (`PeerPermissions` / `RemoteOp`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Capability negotiation (`SessionHandshake`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Instrumentation / benchmarks | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | ✅ |
+| Instrumentation / benchmarks | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 <!-- coverage-table:end -->
 
 CRDT convergence and the wire protocol are pinned by the shared conformance fixtures
@@ -548,6 +548,31 @@ make check   # npm run build && npm test
 - `npm run test:formal` builds `lazily-formal` when the sibling checkout and
   `lake` are present.
 - `npm test` runs the formal check and the Node test suite.
+
+## Benchmarks
+
+Wall-clock benchmarks live in [`BENCHMARKS.md`](BENCHMARKS.md), with two suites
+built on a zero-dependency `node:perf_hooks` harness:
+
+- **Micro-benchmarks** ([`bench/context.bench.mjs`](bench/context.bench.mjs)) — a
+  1:1 port of the single-threaded `Context` cases in lazily-rs's
+  `benches/context.rs` (cached reads, cold first get, dependency fan-out,
+  set-cell invalidation, memo equality suppression, effect flushing, batch
+  storms, typed cache reads) so JS and Rust numbers are directly comparable.
+- **Scale** ([`bench/scale.bench.mjs`](bench/scale.bench.mjs)) — a
+  spreadsheet-shaped graph (`N` input cells + `N` formula slots,
+  `formula[i] = input[i] + input[i - 1]`) mirroring the lazily-rs/-go/-py `scale`
+  groups. At the default `N = 1,000,000` that is ~2M reactive nodes; the
+  `LAZILY_SCALE_N=5000000` run covers a full 10M-cell Google Sheets workbook. A
+  one-cell edit + 1,000-cell viewport read stays ~100 µs **independent of sheet
+  size** — the lazy-pull property a viewport-rendered spreadsheet needs.
+
+```bash
+make bench          # micro-suite (prints a markdown table)
+make bench-scale    # scale suite at N = 1,000,000
+npm run benchmark-update   # refresh BENCHMARKS.md's generated micro-bench table
+npm run benchmark-check    # CI gate: exit 1 if the micro-bench row set is stale
+```
 
 ## See also
 
