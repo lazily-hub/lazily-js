@@ -39,7 +39,7 @@ notes and platform carve-outs lives in
 | Feature | Rust | Python | Kotlin | JS | Dart | Zig | Go | C++ |
 | --------- | :----: | :------: | :------: | :--: | :----: | :---: | :--: | :---: |
 | Reactive graph — `Cell` / `Slot` / `Signal` / `Effect` / memo / batch | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Reactive family (`ReactiveFamily`) — keyed cell/slot family + materialization mode (`#lzmatmode`) | ✅ | — | — | — | — | — | — | — |
+| Reactive family (`ReactiveFamily`) — keyed cell/slot family + materialization mode (`#lzmatmode`) | ✅ | — | ✅ | ✅ | — | — | — | ✅ |
 | Thread-safe context (lock-backed) | ✅ | ✅ | ✅ | — | — | ✅ | ✅ | ✅ |
 | Async reactive context | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Flat state machine | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
@@ -78,6 +78,7 @@ and JSON Schemas in `lazily-spec` and the Lean models in `lazily-formal`.
 | `@lazily-hub/lazily-js` | `lazily-spec` IPC wire types: `Snapshot`, `Delta`, `DeltaOp`, `IpcMessage` (`Snapshot` / `Delta` / `CrdtSync`), `NodeState`, `IpcValue`, `PeerPermissions`, `SessionHandshake`, `BINDING_CAPABILITIES` |
 | `@lazily-hub/lazily-js/reactive` | Reactive dependency graph: `Context`, `Cell`, `Slot`, `Signal`, `Effect` |
 | `@lazily-hub/lazily-js/reactive-async` | Async reactive graph: `AsyncContext` — Promise-driven slots/effects with revision-guarded stale-completion discard, in-flight dedup, and cancellation |
+| `@lazily-hub/lazily-js/reactive-family` | Unified keyed reactive family: `ReactiveFamily` (`EntryKind` cell/slot × `MaterializationMode` eager/lazy) + `cellFamily` input-cell specialization (`#lzmatmode`) |
 | `@lazily-hub/lazily-js/state-machine` | Flat finite-state-machine kernel backed by a reactive `Cell` |
 | `@lazily-hub/lazily-js/statechart` | Harel/SCXML chart interpreter plus `ChartBuilder`, `StateBuilder`, `TransitionBuilder` |
 | `@lazily-hub/lazily-js/collections` | `CellMap`, `CellTree`, keyed reconciliation, and LIS move minimization |
@@ -155,6 +156,44 @@ ctx.get(profile); // synchronous cached read once resolved (undefined while pend
 
 ctx.setCell(userId, 2); // supersedes any in-flight compute; slot re-resolves
 await ctx.getAsync(profile); // the profile for user 2
+```
+
+## Reactive family and materialization mode
+
+`ReactiveFamily` (from `@lazily-hub/lazily-js/reactive-family`) is the unified
+**keyed reactive family** (`#lzmatmode`): it maps keys to per-entry reactive
+nodes and abstracts over the entry's handle kind. Two orthogonal axes:
+
+- **Entry kind** — `EntryKind.Cell` entries are input cells (**always
+  materialized**, any mode); `EntryKind.Slot` entries are derived slots (what
+  materialization governs). `cellFamily(...)` is the input-cell specialization.
+- **Materialization mode** — `MaterializationMode.Eager` (**default**) allocates
+  every derived node up front; `MaterializationMode.Lazy` (opt-in) allocates a
+  derived node on its **first read** ("materialize on pull") and caches it.
+
+Mode is **observationally transparent**: a read returns the same value under
+either mode — it changes allocation timing and memory, never results. Lazy pays
+off only for sparsely-touched large keyed address spaces.
+
+```js
+import { Context } from "@lazily-hub/lazily-js/reactive";
+import { ReactiveFamily } from "@lazily-hub/lazily-js/reactive-family";
+
+const ctx = new Context();
+
+// A derived (slot) family of key*3 over a large address space, built lazily:
+// nothing is allocated until a key is read.
+const fam = ReactiveFamily.lazy(ctx, range(0, 1_000_000), (k) => k * 3);
+fam.presentCount(); // 0
+
+fam.observe(5); // 15 — first read materializes just this entry
+fam.presentCount(); // 1
+fam.isPresent(5); // true
+fam.isPresent(6); // false
+
+// Eager builds the same values up front — observationally identical.
+const eager = ReactiveFamily.eager(ctx, [0, 1, 2, 3], (k) => k * 3);
+eager.observe(2) === fam.observe(2); // true
 ```
 
 ## State machine and state charts
@@ -386,7 +425,11 @@ lazily-js replays the shared `lazily-spec` fixtures for IPC, agent-doc state,
 keyed collections (`CellMap`, `CellTree`, LIS reconciliation), semantic tree,
 sequence and text CRDTs (incl. `TextCrdt` delta sync, `#lztextsync`:
 `textcrdt_convergence.json` + `textcrdt_delta_sync.json`), manufactured text
-identity, Harel state charts, the signaling protocol (`signaling/frames.json`,
+identity, the reactive family / materialization mode (`#lzmatmode`:
+`materialization/observational_transparency.json`,
+`materialization/deferral_not_deallocation.json`,
+`materialization/entry_kind_orthogonal_to_mode.json`), Harel state charts, the
+signaling protocol (`signaling/frames.json`,
 `signaling/anti_spoof_session.json`), and the distributed CRDT plane
 (`distributed/crdt_sync_frames.json`, `distributed/anti_entropy_converge.json`).
 It also validates generated wire values against the canonical JSON Schemas.
@@ -406,6 +449,7 @@ names the Lean theorems it mirrors:
 | `Reactive` | `reactive-properties.test.js` | `setCell_equal_preserves_graph`, `setCell_different_invalidates_dependents`, `recomputeSlot_equal_preserves_dependents`, `recomputeSlot_different_invalidates_dependents`, `signal_materialized_after_recompute` |
 | `Collection` | `collection-properties.test.js` | `setEntryValue_preserves_{membership,order,siblings}`, `moveKey_preserves_{membership,values}`, `moveKey_advances_order`, `addKey_advances_membership_and_order`, `Family.get_idempotent_after_first` |
 | `Tree` | `tree-properties.test.js` | `setNodeValue_preserves_{other_nodes,node_signals}`, `moveChild_preserves_{non_parent,parent_value}`, `moveChild_advances_order_signal_only` |
+| `Materialization` | `reactive-family.test.js` | `observe_canonical`, `eager_lazy_observationally_equivalent`, `eager_materializes_all`, `lazy_defers_slots`, `materialize_present_monotone`, `lazy_present_subset_eager`, `materialize_preserves_observe`, `cell_entries_materialized_in_every_mode`, `slot_entries_deferred_under_lazy` |
 | `Reconciliation` | `reconciliation-properties.test.js` | `lisBy_longest`, `reconcile_move_minimized`, `reconcile_stable_not_invalidated` |
 | `AsyncSlotState` | `reactive-async.test.js` | `stale_completeOk_discarded`, `current_completeOk_publishes`, `current_completeErr_to_error` |
 | `AsyncEffect` | `reactive-async.test.js` | `fire_blocked_during_cleanup`, `invalidate_from_idle_schedules`, `cleanupDone_resumes_deferred`, `dispose_absorbing`, `disposed_terminal` |
