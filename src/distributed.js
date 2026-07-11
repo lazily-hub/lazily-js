@@ -20,7 +20,7 @@
 //   localUpdate→CrdtOp, ingest→count (op-log dedup by (node, stamp)), and the
 //   sync-frame pull protocol.
 
-import { CrdtOp, CrdtSync, IpcMessage, WireStamp } from "./index.js";
+import { CrdtOp, CrdtSync, IpcMessage, IpcValue, WireStamp } from "./index.js";
 import { Hlc } from "./seq-crdt.js";
 
 // Lexicographic (wall_time, logical, peer) order over two WireStamps.
@@ -255,6 +255,12 @@ function dedupKey(node, stamp) {
   return `${node}|${stamp.wallTime}|${stamp.logical}|${stamp.peer}`;
 }
 
+// Base node id for entries a family materializes on first remote observation
+// (#lzfamilysync). Family entry nodes are locally-private — keyed ops resolve by
+// key string, never by raw node id — so this only needs to avoid colliding with
+// application-assigned node ids; the runtime skips any id already in use.
+const FAMILY_NODE_BASE = 2 ** 48;
+
 /**
  * The live runtime that folds distributed CRDT anti-entropy frames into a set of
  * replicated root cells (port of lazily-rs `CrdtPlaneRuntime`). One runtime per
@@ -282,6 +288,12 @@ export class CrdtPlaneRuntime {
   #nodeToKey = new Map();
   #frontier = new Map();
   #membership = new Set();
+
+  // -- Family sync (#lzfamilysync) -----------------------------------------
+  #families = new Set();
+  #familyMembers = new Map();
+  #familyEpoch = 0;
+  #nextFamilyNode = FAMILY_NODE_BASE;
 
   constructor(peer) {
     this.#peer = assertPeerId(peer);
@@ -346,6 +358,90 @@ export class CrdtPlaneRuntime {
   // The converged IpcValue at `node`, or undefined.
   value(node) {
     return this.#cells.get(node)?.value;
+  }
+
+  // -- Family sync (#lzfamilysync) -----------------------------------------
+
+  // Register a last-writer-wins family under `namespace`. An inbound keyed op whose
+  // first key segment matches materializes a fresh entry on `ingest` (instead of
+  // being dropped/mis-addressed), so membership propagates and a derived aggregate
+  // over the family converges.
+  registerFamilyLww(namespace) {
+    this.#families.add(namespace);
+    if (!this.#familyMembers.has(namespace)) this.#familyMembers.set(namespace, []);
+    return this;
+  }
+
+  // The membership signal (#lzfamilysync), bumped whenever a family entry
+  // materializes — a derived aggregate over the family reads it so a remote-added
+  // key forces a recompute. A monotonically-increasing counter.
+  membershipEpoch() {
+    return this.#familyEpoch;
+  }
+
+  // The materialized keys of family `namespace`, in first-materialization order.
+  familyKeys(namespace) {
+    return [...(this.#familyMembers.get(namespace) ?? [])];
+  }
+
+  // The current converged boolean value of family entry `namespace/keySuffix`.
+  familyValueLww(namespace, keySuffix) {
+    const node = this.#keyToNode.get(`${namespace}/${keySuffix}`);
+    if (node === undefined) return undefined;
+    const iv = this.value(node);
+    if (iv === undefined || iv.bytes === undefined) return undefined;
+    return iv.bytes.length > 0 && iv.bytes[0] !== 0;
+  }
+
+  // Insert or update local LWW family entry `namespace/keySuffix` to boolean
+  // `value`, returning the CrdtOp to broadcast (or null for a value-preserving
+  // update). Materializes the entry (and bumps membership) on first insert.
+  familySetLww(namespace, keySuffix, value, nowMicros) {
+    const key = `${namespace}/${keySuffix}`;
+    let node = this.#keyToNode.get(key);
+    if (node === undefined) {
+      node = this.#mintFamilyNode();
+      this.register(node, key);
+      this.#recordFamilyMember(namespace, key);
+      this.#bumpFamilyEpoch();
+    }
+    return this.localUpdate(node, nowMicros, IpcValue.inline(Uint8Array.of(value ? 1 : 0)));
+  }
+
+  #mintFamilyNode() {
+    for (;;) {
+      const candidate = this.#nextFamilyNode;
+      this.#nextFamilyNode += 1;
+      if (!this.#cells.has(candidate)) return candidate;
+    }
+  }
+
+  #recordFamilyMember(namespace, key) {
+    const members = this.#familyMembers.get(namespace) ?? [];
+    if (!members.includes(key)) members.push(key);
+    this.#familyMembers.set(namespace, members);
+  }
+
+  #bumpFamilyEpoch() {
+    this.#familyEpoch += 1;
+  }
+
+  // If `op` is a keyed op for a registered family whose entry is not yet known,
+  // materialize it under a fresh locally-private node (indexed by the wire key) and
+  // return that node; otherwise fall back to the normal node resolution.
+  #resolveNodeForFamily(op) {
+    if (op.key !== null && op.key !== undefined && !this.#keyToNode.has(op.key)) {
+      const namespace = String(op.key).split("/")[0];
+      if (this.#families.has(namespace)) {
+        const node = this.#mintFamilyNode();
+        this.#keyToNode.set(op.key, node);
+        this.#nodeToKey.set(node, op.key);
+        this.#recordFamilyMember(namespace, op.key);
+        this.#bumpFamilyEpoch();
+        return node;
+      }
+    }
+    return this.#resolveNode(op);
   }
 
   // The winning CrdtOp at `node`, or undefined.
@@ -420,7 +516,10 @@ export class CrdtPlaneRuntime {
         this.#hlc.recv(op.stamp, nowMicros);
       }
       this.#observeStamp(op.stamp);
-      const node = this.#resolveNode(op);
+      // Materialize-on-ingest (#lzfamilysync): a keyed op for a registered family
+      // whose entry is not yet known materializes it under a fresh local node
+      // instead of being mis-addressed to a colliding local family node.
+      const node = this.#resolveNodeForFamily(op);
       this.#cellFor(node).merge(op);
     }
     return applied;

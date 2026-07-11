@@ -103,6 +103,17 @@ export class CrdtPlaneRuntime {
     since: Iterable<FrontierEntry | [PeerId, WireStamp | unknown]>,
   ): CrdtSync;
   syncReply(request: CrdtSync): CrdtSync;
+  // Family sync (#lzfamilysync)
+  registerFamilyLww(namespace: string): this;
+  membershipEpoch(): number;
+  familyKeys(namespace: string): string[];
+  familyValueLww(namespace: string, keySuffix: string): boolean | undefined;
+  familySetLww(
+    namespace: string,
+    keySuffix: string,
+    value: boolean,
+    nowMicros: number,
+  ): CrdtOp | null;
 }
 
 // --- Browser WebRTC platform adapter ---
