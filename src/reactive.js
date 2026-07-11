@@ -114,6 +114,50 @@ export class Context {
   #flushingEffects = false;
   #batchDepth = 0;
   #batchedCells = new Set();
+  // Opt-in instrumentation (off by default → zero steady-state overhead, so the
+  // committed BENCHMARKS.md numbers are unperturbed). Mirrors the counter subset
+  // of lazily-rs's `InstrumentationSnapshot` that is meaningful single-threaded.
+  #instrument = false;
+  #counters = null;
+
+  /**
+   * @param {{ instrument?: boolean }} [opts] pass `{ instrument: true }` to
+   *   accumulate reactive-core counters readable via
+   *   {@link Context#instrumentationSnapshot}.
+   */
+  constructor(opts = {}) {
+    if (opts && opts.instrument === true) {
+      this.#instrument = true;
+      this.#counters = this.#zeroCounters();
+    }
+  }
+
+  #zeroCounters() {
+    return {
+      nodeAllocations: 0,
+      slotRecomputes: 0,
+      dependencyEdgesAdded: 0,
+      dependencyEdgesRemoved: 0,
+      effectQueuePushes: 0,
+      maxEffectQueueDepth: 0,
+    };
+  }
+
+  /**
+   * A snapshot of the reactive-core instrumentation counters, or `null` when
+   * instrumentation was not enabled at construction.
+   * @returns {{ nodeAllocations: number, slotRecomputes: number, dependencyEdgesAdded: number, dependencyEdgesRemoved: number, effectQueuePushes: number, maxEffectQueueDepth: number } | null}
+   */
+  instrumentationSnapshot() {
+    return this.#counters ? { ...this.#counters } : null;
+  }
+
+  /** Zero the instrumentation counters (no-op when instrumentation is off). */
+  resetInstrumentation() {
+    if (this.#counters) {
+      this.#counters = this.#zeroCounters();
+    }
+  }
 
   // -- Creation ----------------------------------------------------------
 
@@ -309,6 +353,9 @@ export class Context {
   // -- Internals: id + edges --------------------------------------------
 
   #allocId() {
+    if (this.#instrument) {
+      this.#counters.nodeAllocations++;
+    }
     return this.#freeIds.pop() ?? this.#nextId++;
   }
 
@@ -319,6 +366,9 @@ export class Context {
   #registerDependency(depId, parentId) {
     const dep = this.#nodes.get(depId);
     if (dep instanceof CellNode || dep instanceof SlotNode) {
+      if (this.#instrument && !dep.dependents.has(parentId)) {
+        this.#counters.dependencyEdgesAdded++;
+      }
       dep.dependents.add(parentId);
     }
     const parent = this.#nodes.get(parentId);
@@ -330,6 +380,9 @@ export class Context {
   #removeDependentEdge(depId, parentId) {
     const dep = this.#nodes.get(depId);
     if (dep instanceof CellNode || dep instanceof SlotNode) {
+      if (this.#instrument && dep.dependents.has(parentId)) {
+        this.#counters.dependencyEdgesRemoved++;
+      }
       dep.dependents.delete(parentId);
     }
   }
@@ -367,6 +420,9 @@ export class Context {
   }
 
   #recomputeSlotNow(id, node) {
+    if (this.#instrument) {
+      this.#counters.slotRecomputes++;
+    }
     for (const dep of [...node.dependencies]) {
       this.#removeDependentEdge(dep, id);
     }
@@ -457,6 +513,12 @@ export class Context {
     }
     if (this.#scheduledEffects.add(id)) {
       this.#pendingEffects.push(id);
+      if (this.#instrument) {
+        this.#counters.effectQueuePushes++;
+        if (this.#pendingEffects.length > this.#counters.maxEffectQueueDepth) {
+          this.#counters.maxEffectQueueDepth = this.#pendingEffects.length;
+        }
+      }
     }
   }
 

@@ -1,7 +1,7 @@
 {
   "name": "@lazily-hub/lazily-js",
-  "version": "0.11.0",
-  "description": "Native JavaScript port of the lazily reactive core: a full reactive graph (Cell/Slot/Signal/Effect), the lazily-spec IPC wire types, keyed cell collections + LIS reconciliation, the memoized semantic tree, the move-aware sequence CRDT, the Fugue/RGA text CRDT, manufactured text identity, full-Harel state charts, and an FFI state-projection consumer.",
+  "version": "0.12.0",
+  "description": "Native JavaScript port of the lazily reactive core: a full reactive graph (Cell/Slot/Signal/Effect), sync/async/thread-safe keyed reactive families with materialization mode, the lazily-spec IPC wire types + C-ABI FFI boundary (isomorphic channel + Node native binding), keyed cell collections + LIS reconciliation, the memoized semantic tree, the move-aware sequence CRDT, the Fugue/RGA text CRDT, manufactured text identity, full-Harel state charts, an FFI state-projection consumer, and an in-library instrumentation/benchmark API.",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -30,6 +30,28 @@
     "./reactive-family": {
       "types": "./src/reactive-family.d.ts",
       "default": "./src/reactive-family.js"
+    },
+    "./async-reactive-family": {
+      "types": "./src/async-reactive-family.d.ts",
+      "default": "./src/async-reactive-family.js"
+    },
+    "./thread-safe": {
+      "types": "./src/thread-safe.d.ts",
+      "default": "./src/thread-safe.js"
+    },
+    "./thread-safe-reactive-family": {
+      "types": "./src/thread-safe-reactive-family.d.ts",
+      "default": "./src/thread-safe-reactive-family.js"
+    },
+    "./ffi": {
+      "types": "./src/ffi.d.ts",
+      "node": "./src/ffi-node.js",
+      "browser": "./src/ffi.js",
+      "default": "./src/ffi.js"
+    },
+    "./instrumentation": {
+      "types": "./src/instrumentation.d.ts",
+      "default": "./src/instrumentation.js"
     },
     "./state-machine": {
       "types": "./src/state-machine.d.ts",
@@ -81,7 +103,7 @@
     }
   },
   "scripts": {
-    "build": "node --check src/index.js && node --check src/transport.js && node --check src/shm-backend.js && node --check src/reactive.js && node --check src/reactive-async.js && node --check src/reactive-family.js && node --check src/state-machine.js && node --check src/statechart.js && node --check src/collections.js && node --check src/queue.js && node --check src/sem-tree.js && node --check src/stable-id.js && node --check src/seq-crdt.js && node --check src/text-crdt.js && node --check src/utf8-offsets.js && node --check src/lossless-tree-crdt.js && node --check src/state-projection.js && node --check src/signaling.js && node --check src/distributed.js",
+    "build": "node --check src/index.js && node --check src/transport.js && node --check src/shm-backend.js && node --check src/reactive.js && node --check src/reactive-async.js && node --check src/reactive-family.js && node --check src/async-reactive-family.js && node --check src/thread-safe.js && node --check src/thread-safe-reactive-family.js && node --check src/ffi.js && node --check src/ffi-node.js && node --check src/instrumentation.js && node --check src/state-machine.js && node --check src/statechart.js && node --check src/collections.js && node --check src/queue.js && node --check src/sem-tree.js && node --check src/stable-id.js && node --check src/seq-crdt.js && node --check src/text-crdt.js && node --check src/utf8-offsets.js && node --check src/lossless-tree-crdt.js && node --check src/state-projection.js && node --check src/signaling.js && node --check src/distributed.js",
     "test:formal": "node scripts/formal-check.mjs",
     "bench": "node bench/context.bench.mjs",
     "bench:scale": "node --max-old-space-size=8192 bench/scale.bench.mjs",

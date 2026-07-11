@@ -40,10 +40,10 @@ notes and platform carve-outs lives in
 | --------- | :----: | :------: | :------: | :--: | :----: | :---: | :--: | :---: |
 | Reactive graph — `Cell` / `Slot` / `Signal` / `Effect` / memo / batch | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Reactive family (`ReactiveFamily`) — keyed cell/slot family + materialization mode (`#lzmatmode`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Thread-safe reactive family (`ThreadSafeReactiveFamily`) — `Send + Sync` keyed family + materialization confluence (`#lzmatmode`) | ✅ | — | — | — | — | — | — | — |
-| Async reactive family (`AsyncReactiveFamily`) — keyed family + eventual transparency (`#lzmatmode`) | ✅ | — | — | — | — | — | — | — |
-| Reactive family sync — membership propagation + materialize-on-ingest + derived-aggregate transparency (`#lzfamilysync`) | ✅ | — | ✅ | ✅ | — | — | — | — |
-| Thread-safe context (lock-backed) | ✅ | ✅ | ✅ | — | — | ✅ | ✅ | ✅ |
+| Thread-safe reactive family (`ThreadSafeReactiveFamily`) — `Send + Sync` keyed family + materialization confluence (`#lzmatmode`) | ✅ | — | — | ✅ | — | ✅ | — | ✅ |
+| Async reactive family (`AsyncReactiveFamily`) — keyed family + eventual transparency (`#lzmatmode`) | ✅ | — | — | ✅ | — | ✅ | — | ✅ |
+| Reactive family sync — membership propagation + materialize-on-ingest + derived-aggregate transparency (`#lzfamilysync`) | ✅ | — | ✅ | ✅ | — | ✅ | — | ✅ |
+| Thread-safe context (lock-backed) | ✅ | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ |
 | Async reactive context | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Flat state machine | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Harel state charts | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
@@ -66,10 +66,10 @@ notes and platform carve-outs lives in
 | State projection / mirror | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Causal receipts (`CausalReceipts` outcome projection) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Message-passing + RPC command plane (`command-plane-v1`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| C-ABI FFI boundary | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | ✅ |
+| C-ABI FFI boundary | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Permission boundary (`PeerPermissions` / `RemoteOp`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Capability negotiation (`SessionHandshake`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Instrumentation / benchmarks | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | ✅ |
+| Instrumentation / benchmarks | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 <!-- coverage-table:end -->
 
 CRDT convergence and the wire protocol are pinned by the shared conformance fixtures
@@ -83,6 +83,11 @@ and JSON Schemas in `lazily-spec` and the Lean models in `lazily-formal`.
 | `@lazily-hub/lazily-js/reactive` | Reactive dependency graph: `Context`, `Cell`, `Slot`, `Signal`, `Effect` |
 | `@lazily-hub/lazily-js/reactive-async` | Async reactive graph: `AsyncContext` — Promise-driven slots/effects with revision-guarded stale-completion discard, in-flight dedup, and cancellation |
 | `@lazily-hub/lazily-js/reactive-family` | Unified keyed reactive family: `ReactiveFamily` (`EntryKind` cell/slot × `MaterializationMode` eager/lazy) + `cellFamily` input-cell specialization (`#lzmatmode`) |
+| `@lazily-hub/lazily-js/async-reactive-family` | Async keyed reactive family: `AsyncReactiveFamily` + `asyncCellFamily` over `AsyncContext` — eventual transparency (a pending slot observes `undefined` and resolves to the canonical value; eager ≡ lazy once resolved) (`#lzmatmode`) |
+| `@lazily-hub/lazily-js/thread-safe` | Lock-backed reactive context: `ThreadSafeContext` (`Send + Sync` flavor of `Context`) + `AtomicMutex` — a real `SharedArrayBuffer` + `Atomics` reentrant mutex giving cross-worker mutual exclusion; degrades to a single-realm guard where shared memory is unavailable |
+| `@lazily-hub/lazily-js/thread-safe-reactive-family` | Thread-safe keyed reactive family: `ThreadSafeReactiveFamily` + `threadSafeCellFamily` — mutex-guarded present set with first-writer-wins materialization confluence (`#lzmatmode`) |
+| `@lazily-hub/lazily-js/ffi` | C-ABI FFI boundary (`schemas/ffi.json`): message codec (`encodeMessage` / `decodeMessage` / `validateMessage` / `kindOf`, `LazilyFfiStatus` / `LazilyFfiMessageKind`) + `FfiChannel` FIFO. Isomorphic core (browser shim); the Node build additionally exposes `NativeFfiChannel` / `loadNativeChannel` over the real `lazily_ffi_channel_*` C ABI via koffi |
+| `@lazily-hub/lazily-js/instrumentation` | In-library instrumentation/benchmark API: `benchmark`, `runBenchmarkSuite`, `BenchmarkResult`, `withInstrumentation` — plus opt-in reactive-core counters via `new Context({ instrument: true })` / `instrumentationSnapshot()` |
 | `@lazily-hub/lazily-js/state-machine` | Flat finite-state-machine kernel backed by a reactive `Cell` |
 | `@lazily-hub/lazily-js/statechart` | Harel/SCXML chart interpreter plus `ChartBuilder`, `StateBuilder`, `TransitionBuilder` |
 | `@lazily-hub/lazily-js/collections` | `CellMap`, `CellTree`, keyed reconciliation, and LIS move minimization |
@@ -495,7 +500,10 @@ sequence and text CRDTs (incl. `TextCrdt` delta sync, `#lztextsync`:
 identity, the reactive family / materialization mode (`#lzmatmode`:
 `materialization/observational_transparency.json`,
 `materialization/deferral_not_deallocation.json`,
-`materialization/entry_kind_orthogonal_to_mode.json`), Harel state charts, the
+`materialization/entry_kind_orthogonal_to_mode.json` — replayed through the
+single-threaded, async, and thread-safe families), the C-ABI FFI boundary
+(`schemas/ffi.json`: message codec + channel round-trip over `snapshot_*` /
+`delta_*` wire), Harel state charts, the
 signaling protocol (`signaling/frames.json`,
 `signaling/anti_spoof_session.json`), and the distributed CRDT plane
 (`distributed/crdt_sync_frames.json`, `distributed/anti_entropy_converge.json`).
@@ -517,13 +525,18 @@ names the Lean theorems it mirrors:
 | `Collection` | `collection-properties.test.js` | `setEntryValue_preserves_{membership,order,siblings}`, `moveKey_preserves_{membership,values}`, `moveKey_advances_order`, `addKey_advances_membership_and_order`, `Family.get_idempotent_after_first` |
 | `Tree` | `tree-properties.test.js` | `setNodeValue_preserves_{other_nodes,node_signals}`, `moveChild_preserves_{non_parent,parent_value}`, `moveChild_advances_order_signal_only` |
 | `Materialization` | `reactive-family.test.js` | `observe_canonical`, `eager_lazy_observationally_equivalent`, `eager_materializes_all`, `lazy_defers_slots`, `materialize_present_monotone`, `lazy_present_subset_eager`, `materialize_preserves_observe`, `cell_entries_materialized_in_every_mode`, `slot_entries_deferred_under_lazy` |
+| `Materialization` (thread-safe) | `thread-safe-reactive-family.test.js` | `materialize_present_comm`, `materialize_observe_comm` (materialization confluence) + the base materialization laws replayed through `ThreadSafeReactiveFamily` |
+| `AsyncMaterialization` | `async-reactive-family.test.js` | eventual transparency (a driven async slot resolves to the canonical value; eager ≡ lazy) + present-set monotonicity through `AsyncReactiveFamily` |
+| `ThreadSafe` | `thread-safe.test.js` | `flushBatch_empty`, `flushBatch_singleton_eq_setCell` (thread-safe batch refines `setCell`), `flushBatch_dependent_dirty`, `flushBatch_preserves_nondependent_dirty` |
 | `Reconciliation` | `reconciliation-properties.test.js` | `lisBy_longest`, `reconcile_move_minimized`, `reconcile_stable_not_invalidated` |
 | `AsyncSlotState` | `reactive-async.test.js` | `stale_completeOk_discarded`, `current_completeOk_publishes`, `current_completeErr_to_error` |
 | `AsyncEffect` | `reactive-async.test.js` | `fire_blocked_during_cleanup`, `invalidate_from_idle_schedules`, `cleanupDone_resumes_deferred`, `dispose_absorbing`, `disposed_terminal` |
 
-Thread-safe context theorems are not mirrored because JavaScript is
-single-threaded (one event loop): a lock-backed context has no meaning on this
-runtime — the concurrency-layer platform carve-out. The `Signaling` /
+The thread-safe context IS mirrored on this runtime: JavaScript is
+single-threaded per realm but shares memory across Web Workers via
+`SharedArrayBuffer` + `Atomics`, so `ThreadSafeContext` guards every operation
+with a real reentrant Atomics mutex (cross-worker mutual exclusion, degrading to
+a single-realm guard where shared memory is unavailable). The `Signaling` /
 `SignalingRoster` formal models are exercised through the `SignalingRoom`
 fixture replay (`signaling/anti_spoof_session.json`) rather than a named-theorem
 property test.

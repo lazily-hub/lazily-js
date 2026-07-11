@@ -23,7 +23,17 @@ export class SignalHandle<T = unknown> {
   readonly effect: EffectHandle;
 }
 
+export interface InstrumentationSnapshot {
+  nodeAllocations: number;
+  slotRecomputes: number;
+  dependencyEdgesAdded: number;
+  dependencyEdgesRemoved: number;
+  effectQueuePushes: number;
+  maxEffectQueueDepth: number;
+}
+
 export class Context {
+  constructor(opts?: { instrument?: boolean });
   cell<T>(value: T): CellHandle<T>;
   computed<T>(compute: ComputeFn<T>): SlotHandle<T>;
   slot<T>(compute: ComputeFn<T>): SlotHandle<T>;
@@ -40,4 +50,8 @@ export class Context {
   disposeSignal(handle: SignalHandle<unknown>): void;
   isSignalActive(handle: SignalHandle<unknown>): boolean;
   isSet<T>(handle: SlotHandle<T>): boolean;
+  /** Instrumentation counters, or `null` if not enabled at construction. */
+  instrumentationSnapshot(): InstrumentationSnapshot | null;
+  /** Zero the instrumentation counters (no-op when instrumentation is off). */
+  resetInstrumentation(): void;
 }
