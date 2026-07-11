@@ -442,10 +442,12 @@ if (shmSupported()) {
 }
 ```
 
-The Node and Bun paths are exercised by the test suite; the Deno path targets its
-stable FFI API. The `shm` region uses a bump-allocated arena with a fixed header
-(magic / version / capacity / epoch / generation / cursor) and per-entry
-`{ generation, epoch, len, checksum }` validation.
+All three runtimes are verified end-to-end, including cross-runtime interop: a
+Node process writes a region that a separate Deno process attaches and resolves,
+proving the layout is byte-identical across FFI implementations. The `shm` region
+is a bump-allocated arena with a fixed header (magic / version / capacity / epoch
+/ generation / cursor) and per-entry `{ generation, epoch, len, checksum }`
+validation.
 
 ## Distributed plane
 
