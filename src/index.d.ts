@@ -2,6 +2,14 @@ export type NodeId = number;
 export type PeerId = number;
 export type WireBytes = readonly number[] | Uint8Array;
 
+export type BlobBackendKindValue = "shm" | "arrow" | "in_process";
+
+export const BlobBackendKind: {
+  readonly Shm: "shm";
+  readonly Arrow: "arrow";
+  readonly InProcess: "in_process";
+};
+
 export class ShmBlobRef {
   constructor(fields: {
     offset: number;
@@ -9,12 +17,15 @@ export class ShmBlobRef {
     generation: number;
     epoch: number;
     checksum: number;
+    backend?: BlobBackendKindValue;
   });
   readonly offset: number;
   readonly len: number;
   readonly generation: number;
   readonly epoch: number;
   readonly checksum: number;
+  readonly backend: BlobBackendKindValue;
+  withBackend(backend: BlobBackendKindValue): ShmBlobRef;
   toWire(): ShmBlobRefWire;
   static fromWire(value: ShmBlobRefWire): ShmBlobRef;
 }
@@ -25,6 +36,7 @@ export type ShmBlobRefWire = {
   generation: number;
   epoch: number;
   checksum: number;
+  backend?: BlobBackendKindValue;
 };
 
 export class NodeStatePayload {

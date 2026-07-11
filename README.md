@@ -56,8 +56,8 @@ notes and platform carve-outs lives in
 | Lossless tree — concurrent merge convergence | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Registers (LWW / MV) + `PnCounter` + `CellCrdt` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | IPC wire — `Snapshot` + `Delta` + `CrdtSync` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Shared-memory blob path (`ShmBlobArena`) | ✅ | ✅ | ✅ | ~ | ~ | ✅ | ✅ | ✅ |
-| Cross-process zero-copy transport (`BlobBackend` / shm / arrow) | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | ✅ |
+| Shared-memory blob path (`ShmBlobArena`) | ✅ | ✅ | ✅ | ✅ | ~ | ✅ | ✅ | ✅ |
+| Cross-process zero-copy transport (`BlobBackend` / shm / arrow) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Distributed CRDT plane (`CrdtPlaneRuntime` / anti-entropy) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Distributed plane — WebRTC transport + signaling | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | State projection / mirror | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
@@ -76,6 +76,7 @@ and JSON Schemas in `lazily-spec` and the Lean models in `lazily-formal`.
 | Import | What it is |
 |--------|------------|
 | `@lazily-hub/lazily-js` | `lazily-spec` IPC wire types: `Snapshot`, `Delta`, `DeltaOp`, `IpcMessage` (`Snapshot` / `Delta` / `CrdtSync`), `NodeState`, `IpcValue`, `PeerPermissions`, `SessionHandshake`, `BINDING_CAPABILITIES` |
+| `@lazily-hub/lazily-js/transport` | Cross-process zero-copy transport (`#lzzcpy`): `ShmBlobArena`, `InProcessBackend` / `ArrowBackend`, `BlobRouter`, `spillMessage` / `resolveValue`, and the FFI-gated `createShmBackend` (Node/Bun/Deno). Isomorphic — no FFI import; browser-safe |
 | `@lazily-hub/lazily-js/reactive` | Reactive dependency graph: `Context`, `Cell`, `Slot`, `Signal`, `Effect` |
 | `@lazily-hub/lazily-js/reactive-async` | Async reactive graph: `AsyncContext` — Promise-driven slots/effects with revision-guarded stale-completion discard, in-flight dedup, and cancellation |
 | `@lazily-hub/lazily-js/reactive-family` | Unified keyed reactive family: `ReactiveFamily` (`EntryKind` cell/slot × `MaterializationMode` eager/lazy) + `cellFamily` input-cell specialization (`#lzmatmode`) |
@@ -384,6 +385,67 @@ state machine, state charts, permissions, capability negotiation, async context,
 signaling, and the WebRTC transport are shipped; C-ABI FFI is `none` because
 browser/Worker JS cannot host a native in-process ABI. The same payload types
 can still be carried by any transport a host application owns.
+
+## Cross-process zero-copy transport
+
+`@lazily-hub/lazily-js/transport` implements the pluggable blob-backend
+transport (`#lzzcpy`). A large payload is not copied through the wire codec: the
+producer **spills** it to a backend (which mints a `ShmBlobRef` descriptor) and
+ships only the descriptor; the receiver **routes** the descriptor by its
+`backend` discriminator and **resolves** it zero-copy — reading the backend's own
+bytes in place. `ShmBlobRef` gained an optional `backend` field (`shm` | `arrow`
+| `in_process`) that defaults to `shm` and is omitted from the wire, so every
+pre-transport descriptor round-trips byte-for-byte.
+
+The module is **isomorphic**: it imports no FFI, so it bundles and runs in the
+browser. `InProcessBackend`, `ArrowBackend`, the `BlobRouter`, and the
+spill/resolve policy are pure JS and available everywhere (including a
+main-thread ↔ Web Worker deployment).
+
+```js
+import {
+  BlobRouter,
+  InProcessBackend,
+  ArrowBackend,
+  spillMessage,
+} from "@lazily-hub/lazily-js/transport";
+import { Delta, DeltaOp, IpcMessage, IpcValue } from "@lazily-hub/lazily-js";
+
+const backend = new InProcessBackend(); // or ArrowBackend for columnar payloads
+const big = IpcValue.inline(new Uint8Array(4096));
+const { message, spilledBytes } = spillMessage(
+  IpcMessage.delta(new Delta({ baseEpoch: 0, epoch: 1, ops: [DeltaOp.slotValue(7, big)] })),
+  backend,
+); // message now carries a small SharedBlob descriptor; spilledBytes === 4096
+
+const router = new BlobRouter().register(backend);
+router.resolve(message.delta.ops[0].payload); // Uint8Array view, zero copy
+```
+
+The genuine **cross-process** `shm` backend (POSIX `shm_open` + `mmap`) is loaded
+lazily and only where a runtime provides FFI — Node (via `koffi`), Bun (`bun:ffi`),
+or Deno (`Deno.dlopen`, needs `--allow-ffi --unstable-ffi`). A peer process on the
+same host that attaches the same name resolves the descriptor without copying
+across the process boundary. In the browser (or any runtime without FFI)
+`createShmBackend` rejects with `ShmUnavailableError`; guard with `shmSupported()`
+and fall back to `InProcessBackend` / `ArrowBackend`.
+
+```js
+import { createShmBackend, shmSupported } from "@lazily-hub/lazily-js/transport";
+
+if (shmSupported()) {
+  const shm = await createShmBackend("my-session", { capacity: 1 << 20 });
+  const ref = shm.write(new Uint8Array([1, 2, 3])); // ref.backend === "shm"
+  // ...ship `ref` to a peer; the peer attaches `createShmBackend("my-session",
+  // { capacity: 1 << 20, create: false })` and calls `shm.readView(ref)`.
+  shm.close();
+}
+```
+
+The Node and Bun paths are exercised by the test suite; the Deno path targets its
+stable FFI API. The `shm` region uses a bump-allocated arena with a fixed header
+(magic / version / capacity / epoch / generation / cursor) and per-entry
+`{ generation, epoch, len, checksum }` validation.
 
 ## Distributed plane
 

@@ -73,24 +73,62 @@ function normalizeNodeKey(key) {
   return key;
 }
 
+// The pluggable blob backends a descriptor may name (zero-copy transport,
+// `#lzzcpy`). `shm` is the default and is omitted from the wire so legacy
+// descriptors round-trip byte-for-byte. See src/transport.js and
+// lazily-spec/docs/zero-copy-transport.md.
+export const BlobBackendKind = Object.freeze({
+  Shm: "shm",
+  Arrow: "arrow",
+  InProcess: "in_process",
+});
+
+const BLOB_BACKEND_KINDS = new Set(Object.values(BlobBackendKind));
+
 export class ShmBlobRef {
-  constructor({ offset, len, generation, epoch, checksum }) {
+  constructor({ offset, len, generation, epoch, checksum, backend }) {
     this.offset = assertInteger(offset, "offset");
     this.len = assertInteger(len, "len");
     this.generation = assertInteger(generation, "generation");
     this.epoch = assertInteger(epoch, "epoch");
     this.checksum = assertInteger(checksum, "checksum");
+    // Optional pluggable-backend discriminator. Defaults to `shm` so every
+    // pre-transport descriptor keeps meaning "POSIX shared memory".
+    const kind = backend ?? BlobBackendKind.Shm;
+    if (!BLOB_BACKEND_KINDS.has(kind)) {
+      throw new TypeError(`unknown blob backend: ${kind}`);
+    }
+    this.backend = kind;
     Object.freeze(this);
   }
 
+  // Return a copy of this descriptor tagged for `backend`. Backends stamp their
+  // own kind onto an arena-minted descriptor via this helper.
+  withBackend(backend) {
+    return new ShmBlobRef({
+      offset: this.offset,
+      len: this.len,
+      generation: this.generation,
+      epoch: this.epoch,
+      checksum: this.checksum,
+      backend,
+    });
+  }
+
   toWire() {
-    return {
+    const wire = {
       offset: this.offset,
       len: this.len,
       generation: this.generation,
       epoch: this.epoch,
       checksum: this.checksum,
     };
+    // Omit the default `shm` so the descriptor stays byte-compatible with the
+    // pre-`#lzzcpy` wire form (the `backend`-absent conformance fixture).
+    if (this.backend !== BlobBackendKind.Shm) {
+      wire.backend = this.backend;
+    }
+    return wire;
   }
 
   static fromWire(value) {
@@ -101,6 +139,7 @@ export class ShmBlobRef {
       generation: object.generation,
       epoch: object.epoch,
       checksum: object.checksum,
+      backend: object.backend ?? BlobBackendKind.Shm,
     });
   }
 }
