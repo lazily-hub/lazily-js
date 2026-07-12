@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
-import { GraphReplica } from "../src/graph-replica.js";
+import { GraphView } from "../src/graph-view.js";
 import {
   Snapshot,
   NodeSnapshot,
@@ -27,8 +27,8 @@ const fixturesPresent = existsSync(join(fixtureDir, "snapshot_agent_doc_state.js
 const loadFixture = (name) => JSON.parse(readFileSync(join(fixtureDir, name), "utf8"));
 const phaseOf = (replica, id) => JSON.parse(str(replica.node(id).payload)).phase;
 
-test("GraphReplica applies native snapshot then delta", () => {
-  const replica = new GraphReplica();
+test("GraphView applies native snapshot then delta", () => {
+  const replica = new GraphView();
   assert.equal(replica.isInitialized, false);
 
   replica.applySnapshot(
@@ -70,8 +70,8 @@ test("GraphReplica applies native snapshot then delta", () => {
   assert.deepEqual(replica.allEdges(), []);
 });
 
-test("GraphReplica re-emitted delta is idempotent", () => {
-  const replica = new GraphReplica();
+test("GraphView re-emitted delta is idempotent", () => {
+  const replica = new GraphView();
   replica.applySnapshot(new Snapshot({ epoch: 1, nodes: [new NodeSnapshot(1, "t", new NodeStatePayload(bytes("a")))] }));
   const delta = new Delta({ baseEpoch: 1, epoch: 2, ops: [new DeltaOpCellSet(1, new IpcValueInline(bytes("b")))] });
   replica.applyDelta(delta);
@@ -81,13 +81,13 @@ test("GraphReplica re-emitted delta is idempotent", () => {
   assert.equal(replica.epoch, 2);
 });
 
-test("GraphReplica folds the canonical native agent-doc fixtures", { skip: !fixturesPresent }, () => {
-  // Pin the js GraphReplica to the SAME lazily-spec native fixtures the kt replica uses
+test("GraphView folds the canonical native agent-doc fixtures", { skip: !fixturesPresent }, () => {
+  // Pin the js GraphView to the SAME lazily-spec native fixtures the kt replica uses
   // (`conformance/agent-doc/{snapshot,delta}_agent_doc_state.json`) — cross-language drift catch.
   const snapshot = Snapshot.fromWire(loadFixture("snapshot_agent_doc_state.json").wire.Snapshot);
   const delta = Delta.fromWire(loadFixture("delta_agent_doc_state.json").wire.Delta);
 
-  const replica = new GraphReplica();
+  const replica = new GraphView();
   replica.applySnapshot(snapshot);
   assert.equal(replica.nodeCount, 3);
   assert.equal(replica.epoch, 3);

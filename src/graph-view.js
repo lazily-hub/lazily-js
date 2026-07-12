@@ -1,6 +1,6 @@
 // Generic, read-only replica of a lazily reactive graph (`#lzsync` 3B clean split).
 //
-// Domain-agnostic counterpart to lazily-kt's `GraphReplica`: folds lazily's canonical
+// Domain-agnostic counterpart to lazily-kt's `GraphView`: folds lazily's canonical
 // wire (native `Snapshot` / `Delta`, `NodeId`/`IpcValue`) into a flat, queryable node/edge
 // map. It knows nothing about any `type_tag` or payload schema — node payloads are the raw
 // bytes the producer published (`IpcValueInline` / `NodeStatePayload`); interpreting them is
@@ -29,7 +29,7 @@ function payloadOfValue(value) {
   return value instanceof IpcValueInline ? [...value.bytes] : null;
 }
 
-export class GraphReplica {
+export class GraphView {
   /** @type {Map<number, {id:number, typeTag:string, payload:number[]|null}>} */
   #nodes = new Map();
   /** @type {Set<string>} */
