@@ -412,6 +412,8 @@ export class IpcMessage {
   readonly isSnapshot: boolean;
   readonly isDelta: boolean;
   readonly isCrdtSync: boolean;
+  readonly isResyncRequest: boolean;
+  readonly isOutboxAck: boolean;
   readonly isControl: boolean;
   toWire(): unknown;
   encodeJson(): Uint8Array;
@@ -476,6 +478,79 @@ export class WireLwwRegister<V = unknown> {
   value: V;
   set(stamp: WireStamp, value: V): void;
   join(other: WireLwwRegister<V>): void;
+}
+
+// Full-duplex reliable-sync loop driver (#sync-driver).
+
+// Outbound transport seam: deliver one already-framed IpcMessage. Returning
+// `false` (or throwing) means the frame was not durably handed to the peer;
+// at-least-once is a driver property, not a sink property.
+export interface IpcSink {
+  send(msg: IpcMessage): boolean | void;
+}
+
+// Inbound transport seam: poll for the next frame without blocking. `null`/
+// `undefined` means currently exhausted/closed; a throw is the reconnect signal
+// (surfaces from tick() as a DriverError).
+export interface IpcSource {
+  recv(): IpcMessage | null | undefined;
+}
+
+// Monotonic clock seam (host owns cadence; the driver only timestamps stalls).
+export interface Clock {
+  nowMillis(): number;
+}
+
+// Sender-side answer to a peer's ResyncRequest: a covering Snapshot at
+// epoch >= fromEpoch.
+export interface SnapshotProvider {
+  snapshot(fromEpoch: number): IpcMessage;
+}
+
+export class SystemClock implements Clock {
+  nowMillis(): number;
+}
+
+export class Progress {
+  sent: number;
+  applied: IpcMessage[];
+  resyncRequested: boolean;
+  snapshotsServed: number;
+  peerAckedThrough: number;
+  retained: number;
+}
+
+export class DriverError extends Error {
+  readonly name: "DriverError";
+  readonly kind: "Source";
+  readonly cause: unknown;
+}
+
+export interface SyncDriverOptions {
+  sink: IpcSink;
+  source: IpcSource;
+  outbox?: DurableOutbox;
+  clock?: Clock;
+  provider: SnapshotProvider;
+  lastEpoch?: number;
+}
+
+export class SyncDriver {
+  constructor(options: SyncDriverOptions);
+  sink: IpcSink;
+  source: IpcSource;
+  outbox: DurableOutbox;
+  clock: Clock;
+  provider: SnapshotProvider;
+  coordinator: ResyncCoordinator;
+  peerAckedThrough: number;
+  enqueue(epoch: number, msg: IpcMessage): void;
+  onReconnect(): void;
+  lastEpoch(): number;
+  isStalled(): boolean;
+  stalledFor(now: number): number;
+  /** One scheduler-driven step. Throws DriverError on an inbound source read failure. */
+  tick(): Progress;
 }
 
 export const OpKind: {

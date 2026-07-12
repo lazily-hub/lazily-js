@@ -1087,6 +1087,14 @@ export class IpcMessage {
     return this.kind === "CrdtSync";
   }
 
+  get isResyncRequest() {
+    return this.kind === "ResyncRequest";
+  }
+
+  get isOutboxAck() {
+    return this.kind === "OutboxAck";
+  }
+
   // Reliable-sync reverse-channel control frame (no node content).
   get isControl() {
     return this.kind === "ResyncRequest" || this.kind === "OutboxAck";
@@ -1343,6 +1351,209 @@ export class WireLwwRegister {
   // Join another replica's register (keep the higher stamp).
   join(other) {
     this.set(other.stamp, other.value);
+  }
+}
+
+// -- SyncDriver: full-duplex reliable-sync loop (#sync-driver) --------------
+//
+// The transport seam is two host-supplied duck-typed objects (spec §
+// "Transport seam (IpcSink / IpcSource, #lzsync-transport-seam)"); the seams
+// carry no wire form of their own — what crosses the wire is the codec-encoded
+// IpcMessage frame. A binding names them idiomatically; the semantics are
+// normative:
+//
+//   IpcSink   — { send(msg): boolean }  outbound: deliver one already-framed
+//               IpcMessage. Returning `false` (or throwing) means the frame was
+//               NOT durably handed to the peer; at-least-once is a DRIVER
+//               property (retain-in-outbox + replay-on-reconnect), not a sink
+//               property, so a sink is free to be plain best-effort.
+//   IpcSource — { recv(): IpcMessage | null }  inbound: poll for the next frame
+//               without blocking. `null`/`undefined` = currently exhausted or
+//               closed (no inbound progress this tick). A THROW is the reconnect
+//               signal: it surfaces from tick() as a DriverError.Source and the
+//               host re-establishes the carrier and calls onReconnect().
+//   Clock     — { nowMillis(): number }  monotonic millis; the driver owns no
+//               clock/runtime — the host ticks on its own cadence and the clock
+//               only timestamps the stall signal.
+//   SnapshotProvider — { snapshot(fromEpoch): IpcMessage }  the sender-side
+//               answer to a peer's ResyncRequest (a covering Snapshot at
+//               epoch >= fromEpoch).
+
+// A monotonic wall-clock Clock seam (Date.now millis). Hosts that need a
+// deterministic or steady clock inject their own { nowMillis() } instead.
+export class SystemClock {
+  nowMillis() {
+    return Date.now();
+  }
+}
+
+// What one SyncDriver.tick() accomplished (spec § SyncDriver). `applied` are the
+// inbound Snapshot/Delta/CrdtSync frames the host MUST fold into its projection
+// this tick — the driver has already advanced the receiver cursor for them.
+export class Progress {
+  constructor() {
+    this.sent = 0; // data frames pushed to the sink this tick
+    this.applied = []; // inbound frames the host must fold (Apply)
+    this.resyncRequested = false; // a gap was detected → ResyncRequest emitted
+    this.snapshotsServed = 0; // inbound ResyncRequests answered with a snapshot
+    this.peerAckedThrough = 0; // peer ack cursor after this tick (retention/resume)
+    this.retained = 0; // outbox frames still unacked (reconnect replay depth)
+  }
+}
+
+// A transport error surfaced by SyncDriver.tick(). A SINK failure is not fatal
+// (retain-and-stall, reported via Progress/stall signals); only an inbound
+// SOURCE read failure is thrown, telling the host to reconnect + onReconnect().
+export class DriverError extends Error {
+  constructor(cause) {
+    super(`reliable-sync source read failed: ${cause}`);
+    this.name = "DriverError";
+    this.kind = "Source";
+    this.cause = cause;
+  }
+}
+
+// Full-duplex reliable-sync loop driver (spec § SyncDriver). One driver drives
+// one peer connection over a host-supplied sink/source pair. It composes the
+// three pure-protocol pieces (ResyncCoordinator, DurableOutbox, SnapshotProvider)
+// into the loop shape the spec pins: drain (append-before-send) → retain-on-fail
+// → receive (route control frames + coordinator) → resync-on-reconnect. The
+// driver owns no threads, no clock source, and no storage engine — the host
+// injects all three and decides the tick cadence. Mirrors lazily-rs SyncDriver.
+export class SyncDriver {
+  // options: { sink, source, outbox?, clock?, provider, lastEpoch? }.
+  constructor(options) {
+    const opts = assertObject(options, "SyncDriver");
+    this.sink = opts.sink;
+    this.source = opts.source;
+    this.outbox = opts.outbox ?? new InMemoryOutbox();
+    this.clock = opts.clock ?? new SystemClock();
+    this.provider = opts.provider;
+    this.coordinator = new ResyncCoordinator(opts.lastEpoch ?? 0);
+    this.pending = []; // host-enqueued outbound [epoch, IpcMessage] staged for drain
+    this.peerAckedThrough = 0; // highest epoch the peer has acked (retention/resume)
+    this.ackOwed = false; // we applied a frame and owe the peer an OutboxAck
+    this.replayPending = false; // a reconnect happened; next tick replays the suffix
+    this.stalledSince = null; // millis of the last sink send failure (null = healthy)
+  }
+
+  // Stage an outbound data frame at `epoch` for the next tick's drain. `epoch`
+  // is the frame's accepted-event count (Delta.epoch / Snapshot.epoch); it
+  // becomes the outbox retention key.
+  enqueue(epoch, msg) {
+    this.pending.push([epoch, msg]);
+  }
+
+  // Signal that the transport was re-established; the next tick() replays the
+  // unacked outbox suffix and re-advertises our receiver cursor.
+  onReconnect() {
+    this.replayPending = true;
+    this.ackOwed = true;
+    this.stalledSince = null;
+  }
+
+  // The receiver's current applied epoch.
+  lastEpoch() {
+    return this.coordinator.lastEpoch;
+  }
+
+  // Whether the sink is currently stalled (last send failed, awaiting reconnect).
+  isStalled() {
+    return this.stalledSince !== null;
+  }
+
+  // Millis the sink has been stalled as of `now`, or 0 when healthy — a backoff
+  // signal for the host scheduler (which owns cadence/backoff policy).
+  stalledFor(now) {
+    return this.stalledSince === null ? 0 : Math.max(0, now - this.stalledSince);
+  }
+
+  // Deliver one frame; a `false` return OR a throw is a send failure (the outbox
+  // already holds the frame, so it is retained + replayed on reconnect).
+  #trySend(msg) {
+    try {
+      return this.sink.send(msg) !== false;
+    } catch {
+      return false;
+    }
+  }
+
+  // Run one loop pass. Sink failures retain-and-stall (not an error); only an
+  // inbound source read failure throws a DriverError. Returns a Progress.
+  tick() {
+    const now = this.clock.nowMillis();
+    const progress = new Progress();
+
+    // 1. resync-on-reconnect: replay the unacked outbox suffix, oldest first.
+    if (this.replayPending) {
+      this.replayPending = false;
+      for (const [, msg] of this.outbox.replayFrom(this.peerAckedThrough)) {
+        if (this.#trySend(msg)) {
+          progress.sent += 1;
+        } else {
+          this.stalledSince = now;
+          this.replayPending = true; // finish the replay after the next reconnect
+          break;
+        }
+      }
+    }
+
+    // 2. drain fresh enqueues: append-before-send, retain-and-stop on failure.
+    //    A pre-existing stall skips the drain — never push into a sink already
+    //    known to be down.
+    while (this.stalledSince === null && this.pending.length > 0) {
+      const [epoch, msg] = this.pending[0];
+      this.outbox.append(epoch, msg); // append BEFORE send: at-least-once durability
+      this.pending.shift();
+      if (this.#trySend(msg)) {
+        progress.sent += 1;
+      } else {
+        this.stalledSince = now; // retained in the outbox → replayed on reconnect
+        break;
+      }
+    }
+
+    // 3. receive: route control frames + feed data frames through the coordinator.
+    for (;;) {
+      let msg;
+      try {
+        msg = this.source.recv();
+      } catch (error) {
+        throw new DriverError(error);
+      }
+      if (msg == null) break; // exhausted/closed → no inbound progress this tick
+      if (msg.isOutboxAck) {
+        const through = msg.outboxAck.throughEpoch;
+        if (through > this.peerAckedThrough) this.peerAckedThrough = through;
+        this.outbox.ackThrough(through);
+      } else if (msg.isResyncRequest) {
+        const snap = this.provider.snapshot(msg.resyncRequest.fromEpoch);
+        if (this.#trySend(snap)) progress.snapshotsServed += 1;
+        else this.stalledSince = now;
+      } else if (msg.isCrdtSync) {
+        progress.applied.push(msg); // idempotent anti-entropy plane — host folds it
+      } else if (msg.isSnapshot || msg.isDelta) {
+        const res = this.coordinator.ingest(msg);
+        if (res.action === ResyncAction.Apply) {
+          this.ackOwed = true;
+          progress.applied.push(msg);
+        } else if (res.action === ResyncAction.RequestSnapshot) {
+          const req = IpcMessage.resyncRequestMessage(new ResyncRequest({ fromEpoch: res.fromEpoch }));
+          if (this.#trySend(req)) progress.resyncRequested = true;
+          else this.stalledSince = now;
+        }
+        // Ignore → drop
+      }
+    }
+
+    // 4. advertise our receiver cursor if we applied anything (retry until sent).
+    if (this.ackOwed && this.#trySend(this.coordinator.ack())) {
+      this.ackOwed = false;
+    }
+
+    progress.peerAckedThrough = this.peerAckedThrough;
+    progress.retained = this.outbox.retainedEpochs().length;
+    return progress;
   }
 }
 

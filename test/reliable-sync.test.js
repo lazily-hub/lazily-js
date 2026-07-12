@@ -7,13 +7,17 @@ import test from "node:test";
 
 import {
   Delta,
+  DriverError,
   IpcMessage,
   InMemoryOutbox,
   OrSet,
   OutboxAck,
+  Progress,
   ResyncAction,
   ResyncCoordinator,
   ResyncRequest,
+  Snapshot,
+  SyncDriver,
   WireLwwRegister,
   WireStamp,
 } from "../src/index.js";
@@ -250,4 +254,163 @@ test("reliable-sync: liveness_orset_lww.json", () => {
   alive.get(pid).set(stamp(op.stamp), op.value);
   const live = [...new Set(open.filter(([, p]) => alive.get(p)?.value === true).map(([doc]) => doc))].sort();
   assert.deepEqual(live, [...death.expect.live_docs_after].sort());
+});
+
+// -- SyncDriver (#sync-driver): the loop-shape mechanism over a scripted seam --
+//
+// A SimWorld-style deterministic transport pair mirroring lazily-rs: the sink
+// records what the driver sends (and can be toggled "down" to model a
+// disconnect); the source replays a scripted inbound stream (and can inject one
+// read error). No threads, no real socket — every tick is a pure step. The seam
+// carries no wire form of its own, so it has no conformance fixture (the
+// message-sequence fixtures above already pin the driver's observable behavior);
+// these unit tests pin the loop shape the spec § SyncDriver requires.
+
+function makeWire() {
+  return { sent: [], inbound: [], up: true, sourceErr: false };
+}
+
+// SnapshotProvider that answers ResyncRequest{from} with a snapshot at from + 5.
+const snapAhead = { snapshot: (from) => IpcMessage.snapshot(new Snapshot({ epoch: from + 5 })) };
+const zeroClock = { nowMillis: () => 0 };
+
+function driverAt(wire, lastEpoch) {
+  const sink = {
+    send(m) {
+      if (!wire.up) return false;
+      wire.sent.push(m);
+      return true;
+    },
+  };
+  const source = {
+    recv() {
+      if (wire.sourceErr) {
+        wire.sourceErr = false;
+        throw new Error("scripted source read failure");
+      }
+      return wire.inbound.shift() ?? null;
+    },
+  };
+  return new SyncDriver({
+    sink,
+    source,
+    outbox: new InMemoryOutbox(),
+    clock: zeroClock,
+    provider: snapAhead,
+    lastEpoch,
+  });
+}
+
+const dframe = (base, epoch) => IpcMessage.delta(new Delta({ baseEpoch: base, epoch }));
+
+test("sync-driver: drains append-before-send and retains until acked", () => {
+  const wire = makeWire();
+  const d = driverAt(wire, 0);
+  d.enqueue(1, dframe(0, 1));
+  d.enqueue(2, dframe(1, 2));
+  let p = d.tick();
+  assert.ok(p instanceof Progress);
+  assert.equal(p.sent, 2, "both fresh frames pushed to the sink");
+  assert.equal(wire.sent.length, 2);
+  assert.equal(p.retained, 2, "appended-before-send, retained until acked");
+  assert.equal(d.isStalled(), false);
+
+  // Peer proves receipt → the outbox prunes and the resume cursor advances.
+  wire.inbound.push(IpcMessage.outboxAckMessage(new OutboxAck({ throughEpoch: 2 })));
+  p = d.tick();
+  assert.equal(p.peerAckedThrough, 2);
+  assert.equal(p.retained, 0, "acked frames pruned");
+});
+
+test("sync-driver: retains on send failure and replays on reconnect", () => {
+  const wire = makeWire();
+  const d = driverAt(wire, 0);
+  wire.up = false; // sink down before the first send
+  d.enqueue(1, dframe(0, 1));
+  let p = d.tick();
+  assert.equal(p.sent, 0);
+  assert.equal(d.isStalled(), true, "a failed send stalls the driver");
+  assert.equal(p.retained, 1, "frame retained in the outbox despite the failure");
+  assert.equal(wire.sent.length, 0);
+  assert.equal(d.stalledFor(250), 250, "stall duration is a host backoff signal");
+
+  // Transport recovers → the unacked suffix replays from the ack cursor.
+  wire.up = true;
+  d.onReconnect();
+  p = d.tick();
+  assert.equal(d.isStalled(), false);
+  assert.equal(p.sent, 1, "the retained frame is replayed");
+  assert.ok(
+    wire.sent.some((m) => m.isDelta && m.delta.epoch === 1),
+    "the replayed delta reached the sink",
+  );
+});
+
+test("sync-driver: applies inbound delta and advertises receiver cursor", () => {
+  const wire = makeWire();
+  const d = driverAt(wire, 0);
+  wire.inbound.push(dframe(0, 1));
+  const p = d.tick();
+  assert.equal(p.applied.length, 1, "the applied frame is handed to the host");
+  assert.equal(d.lastEpoch(), 1);
+  assert.ok(
+    wire.sent.some((m) => m.isOutboxAck && m.outboxAck.throughEpoch === 1),
+    "an OutboxAck advertising the new cursor was sent",
+  );
+});
+
+test("sync-driver: re-delivery is an idempotent no-op", () => {
+  const wire = makeWire();
+  const d = driverAt(wire, 0);
+  wire.inbound.push(dframe(0, 1));
+  assert.equal(d.tick().applied.length, 1);
+  // Re-deliver the exact same frame (an outbox replay from the peer).
+  wire.inbound.push(dframe(0, 1));
+  const p = d.tick();
+  assert.equal(p.applied.length, 0, "already-applied re-delivery is ignored");
+  assert.equal(d.lastEpoch(), 1, "cursor does not double-advance");
+});
+
+test("sync-driver: requests a snapshot on an inbound gap", () => {
+  const wire = makeWire();
+  const d = driverAt(wire, 2);
+  wire.inbound.push(dframe(3, 4)); // base 3 > last 2 → gap
+  const p = d.tick();
+  assert.equal(p.resyncRequested, true);
+  assert.equal(p.applied.length, 0, "the gapped delta is not applied");
+  assert.ok(
+    wire.sent.some((m) => m.isResyncRequest && m.resyncRequest.fromEpoch === 2),
+    "a ResyncRequest at the current cursor was emitted",
+  );
+});
+
+test("sync-driver: answers a ResyncRequest with a provider snapshot", () => {
+  const wire = makeWire();
+  const d = driverAt(wire, 0);
+  wire.inbound.push(IpcMessage.resyncRequestMessage(new ResyncRequest({ fromEpoch: 2 })));
+  const p = d.tick();
+  assert.equal(p.snapshotsServed, 1);
+  assert.ok(
+    wire.sent.some((m) => m.isSnapshot && m.snapshot.epoch === 7),
+    "a covering snapshot (from + 5) was sent",
+  );
+});
+
+test("sync-driver: surfaces a source read error as DriverError", () => {
+  const wire = makeWire();
+  const d = driverAt(wire, 0);
+  wire.sourceErr = true;
+  assert.throws(() => d.tick(), (e) => e instanceof DriverError && e.kind === "Source");
+});
+
+test("sync-driver: gap then covering snapshot converges", () => {
+  const wire = makeWire();
+  const d = driverAt(wire, 2);
+  wire.inbound.push(dframe(4, 5)); // gap
+  d.tick();
+  assert.equal(d.lastEpoch(), 2, "still stuck at the pre-gap cursor");
+  wire.inbound.push(IpcMessage.snapshot(new Snapshot({ epoch: 5 })));
+  const p = d.tick();
+  assert.equal(p.applied.length, 1);
+  assert.equal(d.lastEpoch(), 5, "snapshot restored convergence");
 });
