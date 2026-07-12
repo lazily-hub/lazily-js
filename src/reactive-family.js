@@ -1,269 +1,418 @@
-// The unified keyed reactive family (`ReactiveFamily`) and its materialization
-// mode (`#lzmatmode`).
+// Keyed reactive collections: the generic `ReactiveMap` and its `CellMap` /
+// `SlotMap` specializations (`#reactivemap`).
 //
-// `lazily-spec/cell-model.md` § "The `ReactiveFamily` vehicle" fixes a keyed
-// reactive family that maps keys `K` to per-entry reactive nodes and abstracts
-// over the entry's handle kind (`ReactiveFamily<K, V, H>`):
+// `lazily-spec/cell-model.md` § "Keyed cell collections" fixes ONE keyed
+// primitive, generic over the entry's handle kind (`ReactiveMap<K, V, H>`):
+// reactive membership + order, `getOrInsertWith` (mint-on-access), `remove`,
+// and atomic `move`. Its two specializations are the concrete types a binding
+// exposes:
 //
-//   - Cell entries (`EntryKind.Cell`) are INPUT nodes. An input has no
-//     derivation to defer, so it is ALWAYS materialized regardless of mode. The
-//     keyed cell collection (`CellFamily`) is this input-cell specialization.
-//   - Slot entries (`EntryKind.Slot`) are DERIVED nodes. These are what
-//     materialization mode governs: eager allocates up front, lazy defers each
-//     to first read.
+//   - `CellMap<K, V>` = `ReactiveMap` over the input-cell handle. Adds cell-only
+//     `set(key, value)` (an input is settable) and eager value-minting
+//     (`entry` / `entryWith`). Minting is eager-by-value.
+//   - `SlotMap<K, V>` = `ReactiveMap` over the derived-slot handle.
+//     `getOrInsertWith(key, factory)` mints a slot on first access (LAZY
+//     materialization); a slot's value is derived, so `SlotMap` has NO `set`.
+//     Eager materialization is `materializeAll` — a pre-mint loop over the
+//     keyset. There is NO eager/lazy mode flag.
 //
-// Materialization mode is orthogonal to entry kind and MUST NOT be observable
-// through any cell's value — it changes allocation timing and memory, never
-// results. `Eager` is the required default; `Lazy` is an opt-in keyed overlay
-// on the eager core (the first read of key `k` builds the same node the eager
-// build would have, then caches it).
+// The shared surface — `getOrInsertWith` / `remove` / `move*` / membership /
+// order / `keys` / `len` / `containsKey` — lives on the generic `ReactiveMap`.
+// `set` and eager value-minting are the `CellMap`-only specialization; the
+// pre-mint eager helper is the `SlotMap`-only specialization. There are NO
+// family types: the "keyed materialized family" is `SlotMap` + the mint recipe,
+// and the "auto-mint keyed default" is `getOrInsertWith`.
 //
-// Rust reference: `lazily-rs/src/reactive_family.rs`. Formal proof:
-// `lazily-formal` `Materialization` module (observe_canonical,
-// eager_lazy_observationally_equivalent, cell_entries_materialized_in_every_mode,
-// slot_entries_deferred_under_lazy, materialize_present_monotone,
-// lazy_present_subset_eager, materialize_preserves_observe).
+// Fine-grained, not coarse: each entry is its own reactive node, so a reader of
+// entry `a` is not invalidated when entry `b` changes; membership (the set of
+// keys) is tracked by a dedicated version cell, so `keys` / `len` readers
+// recompute only when keys are added or removed, and a pure reorder invalidates
+// only order readers.
+//
+// Rust reference: `lazily-rs/src/cell_family.rs`.
 
 /**
- * Which kind of reactive node a {@link ReactiveFamily} entry is — the
- * handle-kind axis the family abstracts over, kept orthogonal to
- * {@link MaterializationMode}. Mirrors `EntryKind` in `lazily-formal`.
+ * Which kind of reactive node a {@link ReactiveMap} entry is — the handle-kind
+ * axis the map abstracts over. Mirrors `EntryKind` in `lazily-formal`.
  * @enum {string}
  */
 export const EntryKind = Object.freeze({
-  /** An input cell — always materialized, any mode. */
+  /** An input cell — always materialized on `get`. */
   Cell: "cell",
-  /** A derived slot — materialized eagerly, or lazily on first read. */
+  /** A derived slot — materialized eagerly (pre-mint) or lazily on first read. */
   Slot: "slot",
 });
 
 /**
- * When a {@link ReactiveFamily}'s derived (slot) entries are allocated.
- * Orthogonal to {@link EntryKind}; never observable on the value axis. Mirrors
- * `Mode` in `lazily-formal`. The default is {@link MaterializationMode.Eager}.
- * @enum {string}
- */
-export const MaterializationMode = Object.freeze({
-  /** Allocate every derived node up front at build time. Required default. */
-  Eager: "eager",
-  /** Allocate a derived node on its first read, keyed rather than held. */
-  Lazy: "lazy",
-});
-
-/** The default materialization mode (`Mode.default = Mode.eager`). */
-export const DEFAULT_MATERIALIZATION_MODE = MaterializationMode.Eager;
-
-function resolveKind(entryKind, key) {
-  const kind = typeof entryKind === "function" ? entryKind(key) : entryKind;
-  if (kind !== EntryKind.Cell && kind !== EntryKind.Slot) {
-    throw new TypeError(`entry kind for key ${String(key)} must be EntryKind.Cell or EntryKind.Slot`);
-  }
-  return kind;
-}
-
-/**
- * The unified keyed reactive family (`#lzmatmode`): keys map to per-entry
- * reactive nodes ({@link EntryKind.Cell} input cells or {@link EntryKind.Slot}
- * derived slots), allocated per the family's {@link MaterializationMode}.
+ * A keyed reactive collection generic over the entry handle kind: a map of
+ * `K -> handle` with reactive membership and independently-tracked per-entry
+ * nodes.
  *
  * Operations run against the owning `Context` (from `./reactive.js`), like the
- * rest of `lazily`.
+ * rest of `lazily`. The two specializations a binding exposes are {@link CellMap}
+ * (input cells) and {@link SlotMap} (derived slots).
  *
  * @template K, V
  */
-export class ReactiveFamily {
+export class ReactiveMap {
   /** @type {import("./reactive.js").Context} */
-  #ctx;
-  /** @type {string} */
-  #mode;
-  /** @type {(key: K) => V} */
-  #factory;
-  /** @type {EntryKind | ((key: K) => EntryKind)} */
-  #entryKind;
-  /** Present (materialized) entries: key -> { kind, handle }. */
-  #materialized = new Map();
-  /** First-materialization order of the present set. */
-  #order = [];
+  _ctx;
+  /** @type {EntryKind} */
+  _kind;
+  /** Per-key reactive node handles: key -> handle. @type {Map<K, any>} */
+  _entries = new Map();
+  /** Insertion-ordered authoritative key list. @type {K[]} */
+  _order = [];
+  /** Reactive set-membership signal; bumped only when the key set changes. */
+  _membership;
+  /** Untracked mirror of the membership version. @type {number} */
+  _version = 0;
+  /** Reactive order signal; bumped on add/remove AND on move/reorder. */
+  _orderSignal;
+  /** Untracked mirror of the order version. @type {number} */
+  _orderVersion = 0;
 
   /**
    * @param {import("./reactive.js").Context} ctx owning context
-   * @param {string} mode {@link MaterializationMode}
-   * @param {Iterable<K>} keys declared keys
-   * @param {(key: K) => V} factory canonical per-key value producer
-   * @param {EntryKind | ((key: K) => EntryKind)} [entryKind] entry kind (or per-key resolver); defaults to Slot
+   * @param {EntryKind} [kind] entry handle kind; defaults to {@link EntryKind.Slot}
    */
-  constructor(ctx, mode, keys, factory, entryKind = EntryKind.Slot) {
-    if (mode !== MaterializationMode.Eager && mode !== MaterializationMode.Lazy) {
-      throw new TypeError("mode must be a MaterializationMode");
+  constructor(ctx, kind = EntryKind.Slot) {
+    if (kind !== EntryKind.Cell && kind !== EntryKind.Slot) {
+      throw new TypeError("kind must be EntryKind.Cell or EntryKind.Slot");
     }
-    if (typeof factory !== "function") {
-      throw new TypeError("factory must be a function");
-    }
-    this.#ctx = ctx;
-    this.#mode = mode;
-    this.#factory = factory;
-    this.#entryKind = entryKind;
+    this._ctx = ctx;
+    this._kind = kind;
+    this._membership = ctx.cell(0);
+    this._orderSignal = ctx.cell(0);
+  }
 
-    for (const key of keys) {
-      // A cell entry is always materialized regardless of mode; a slot entry
-      // only under eager. (buildEager materializes every node; buildLazy
-      // materializes only input cells — `present := isInput`.)
-      if (resolveKind(entryKind, key) === EntryKind.Cell || mode === MaterializationMode.Eager) {
-        this.#materializeKey(key);
-      }
-    }
+  /** Bump the order signal (invalidates `keys` readers). */
+  _bumpOrder() {
+    this._orderVersion = (this._orderVersion + 1) >>> 0;
+    this._ctx.setCell(this._orderSignal, this._orderVersion);
+  }
+
+  /** Bump set-membership (invalidates `len`/`containsKey` readers) + order. */
+  _bumpMembership() {
+    this._version = (this._version + 1) >>> 0;
+    this._ctx.setCell(this._membership, this._version);
+    // The key set changed, so the ordered key list changed too.
+    this._bumpOrder();
   }
 
   /**
-   * Build an eager family: every declared key's node is allocated now. The
-   * default mode.
-   * @template K, V
-   * @param {import("./reactive.js").Context} ctx
-   * @param {Iterable<K>} keys
-   * @param {(key: K) => V} factory
-   * @param {EntryKind | ((key: K) => EntryKind)} [entryKind]
-   * @returns {ReactiveFamily<K, V>}
+   * Mint the entry node for `key` (via `compute` as its canonical value
+   * producer) on first access, caching the handle and bumping reactive
+   * membership. Re-minting an existing key returns the cached handle.
+   * @param {K} key
+   * @param {() => V} compute
+   * @returns {any} the entry handle
    */
-  static eager(ctx, keys, factory, entryKind = EntryKind.Slot) {
-    return new ReactiveFamily(ctx, MaterializationMode.Eager, keys, factory, entryKind);
-  }
-
-  /**
-   * Build a lazy family: derived (slot) entries are deferred to first read;
-   * input (cell) entries in `keys` are still materialized at build. Pass an
-   * empty `keys` for a purely on-demand slot family.
-   * @template K, V
-   * @param {import("./reactive.js").Context} ctx
-   * @param {Iterable<K>} keys
-   * @param {(key: K) => V} factory
-   * @param {EntryKind | ((key: K) => EntryKind)} [entryKind]
-   * @returns {ReactiveFamily<K, V>}
-   */
-  static lazy(ctx, keys, factory, entryKind = EntryKind.Slot) {
-    return new ReactiveFamily(ctx, MaterializationMode.Lazy, keys, factory, entryKind);
-  }
-
-  /**
-   * Build a family in the default mode (eager). Alias for {@link ReactiveFamily.eager}.
-   * @template K, V
-   * @param {import("./reactive.js").Context} ctx
-   * @param {Iterable<K>} keys
-   * @param {(key: K) => V} factory
-   * @param {EntryKind | ((key: K) => EntryKind)} [entryKind]
-   * @returns {ReactiveFamily<K, V>}
-   */
-  static create(ctx, keys, factory, entryKind = EntryKind.Slot) {
-    return ReactiveFamily.eager(ctx, keys, factory, entryKind);
-  }
-
-  #materializeKey(key) {
-    const existing = this.#materialized.get(key);
+  _mint(key, compute) {
+    const existing = this._entries.get(key);
     if (existing !== undefined) {
       return existing; // warm: already allocated.
     }
-    const kind = resolveKind(this.#entryKind, key);
-    const factory = this.#factory;
-    // A cell entry sets its value directly (materialize-by-set); a slot entry
-    // wraps the factory as its recomputation — the same node an eager build
-    // would allocate.
+    // An input cell sets its value directly; a derived slot wraps `compute` as
+    // its recomputation — the same node an eager pre-mint would allocate.
     const handle =
-      kind === EntryKind.Cell
-        ? this.#ctx.cell(factory(key))
-        : this.#ctx.computed(() => factory(key));
-    const entry = { kind, handle };
-    this.#materialized.set(key, entry);
-    this.#order.push(key);
-    return entry;
+      this._kind === EntryKind.Cell ? this._ctx.cell(compute()) : this._ctx.computed(() => compute());
+    this._entries.set(key, handle);
+    this._order.push(key);
+    this._bumpMembership();
+    return handle;
+  }
+
+  /** Read a handle's value through the owning context (subscribes the caller). */
+  _observe(handle) {
+    return this._kind === EntryKind.Cell ? this._ctx.getCell(handle) : this._ctx.get(handle);
   }
 
   /**
-   * Get the entry handle for `key`, materializing it on first access (the lazy
-   * pull) and caching it. Under eager mode an entry is already present.
+   * Get the value at `key`, minting the entry via `factory(key)` first if the
+   * key is absent — the mint-on-access recipe. For a {@link SlotMap} this is the
+   * LAZY materialization pull; for a {@link CellMap} it seeds an input cell.
+   * Bumps reactive membership only on insert; an existing key returns its
+   * current value without re-running the factory.
    * @param {K} key
-   * @returns {import("./reactive.js").CellHandle<V> | import("./reactive.js").SlotHandle<V>}
-   */
-  get(key) {
-    return this.#materializeKey(key).handle;
-  }
-
-  /**
-   * Observe `key`'s value — the transparency law: the returned value is
-   * identical under either mode. Materializes the entry if absent.
-   * @param {K} key
+   * @param {(key: K) => V} factory
    * @returns {V}
    */
-  observe(key) {
-    const { kind, handle } = this.#materializeKey(key);
-    return kind === EntryKind.Cell ? this.#ctx.getCell(handle) : this.#ctx.get(handle);
-  }
-
-  /**
-   * Set a cell entry's value (input entries only). Materializes it if absent.
-   * @param {K} key
-   * @param {V} value
-   */
-  setCell(key, value) {
-    const { kind, handle } = this.#materializeKey(key);
-    if (kind !== EntryKind.Cell) {
-      throw new TypeError(`key ${String(key)} is a derived slot, not a writable input cell`);
+  getOrInsertWith(key, factory) {
+    const existing = this._entries.get(key);
+    if (existing !== undefined) {
+      return this._observe(existing);
     }
-    this.#ctx.setCell(handle, value);
+    const handle = this._mint(key, () => factory(key));
+    return this._observe(handle);
   }
 
   /**
-   * Whether `key` is currently materialized (present in the allocated set).
-   * Non-reactive.
+   * Return the existing entry handle for `key`, or `undefined`. Non-reactive.
+   * @param {K} key
+   * @returns {any}
+   */
+  handle(key) {
+    return this._entries.get(key);
+  }
+
+  /**
+   * Read the value at `key` if present, else `undefined`. Reactive on that entry
+   * only (a reader is invalidated when this entry changes, not when siblings do).
+   * @param {K} key
+   * @returns {V | undefined}
+   */
+  get(key) {
+    const handle = this._entries.get(key);
+    return handle === undefined ? undefined : this._observe(handle);
+  }
+
+  /**
+   * Remove `key`'s entry. Bumps reactive membership. Returns whether the key was
+   * present. (The underlying node id is not recycled; the orphaned node stops
+   * being referenced by the map.)
    * @param {K} key
    * @returns {boolean}
    */
-  isPresent(key) {
-    return this.#materialized.has(key);
+  remove(key) {
+    if (!this._entries.has(key)) {
+      return false;
+    }
+    this._entries.delete(key);
+    const idx = this._order.indexOf(key);
+    if (idx !== -1) {
+      this._order.splice(idx, 1);
+    }
+    this._bumpMembership();
+    return true;
   }
 
   /**
-   * The currently-materialized keys, in first-materialization order. The
-   * present set only grows (deferral, not de-allocation).
+   * Reactive snapshot of the keys in their current order. Subscribes the caller
+   * to ORDER changes (add/remove AND move/reorder), not to per-entry value
+   * changes.
+   * @returns {K[]}
+   */
+  keys() {
+    this._ctx.getCell(this._orderSignal);
+    return [...this._order];
+  }
+
+  /**
+   * The currently-materialized (present) keys, in first-materialization order.
+   * Non-reactive; the present set only grows (deferral, not de-allocation).
    * @returns {K[]}
    */
   presentKeys() {
-    return [...this.#order];
+    return [...this._order];
   }
 
-  /**
-   * Number of currently-materialized entries.
-   * @returns {number}
-   */
+  /** Number of currently-materialized (present) entries. Non-reactive. */
   presentCount() {
-    return this.#order.length;
+    return this._order.length;
+  }
+
+  /** Whether `key` is currently materialized (present). Non-reactive. */
+  isPresent(key) {
+    return this._entries.has(key);
   }
 
   /**
-   * This family's entry kind for `key` ({@link EntryKind.Cell} or
-   * {@link EntryKind.Slot}).
+   * Current 0-based position of `key` in the order, or `undefined` if absent.
+   * Non-reactive.
    * @param {K} key
-   * @returns {EntryKind}
+   * @returns {number | undefined}
    */
-  entryKind(key) {
-    return resolveKind(this.#entryKind, key);
+  position(key) {
+    const i = this._order.indexOf(key);
+    return i === -1 ? undefined : i;
   }
 
-  /** This family's materialization mode. @returns {MaterializationMode} */
-  get mode() {
-    return this.#mode;
+  /**
+   * Atomically move `key` to `index` in the order (`#lzcellmove`). The entry
+   * keeps the SAME node, dependents, and lineage — unlike `remove` + re-mint.
+   * Only the order signal is bumped (once), so `keys` readers recompute but
+   * `len`/`containsKey` readers stay cached. `index` is clamped to `[0, len)`.
+   * Returns whether `key` was present.
+   * @param {K} key
+   * @param {number} index
+   * @returns {boolean}
+   */
+  moveTo(key, index) {
+    const from = this._order.indexOf(key);
+    if (from === -1) {
+      return false;
+    }
+    const to = Math.min(index, Math.max(this._order.length - 1, 0));
+    if (from === to) {
+      return true; // no-op: do not invalidate readers needlessly.
+    }
+    this._order.splice(from, 1);
+    this._order.splice(to, 0, key);
+    this._bumpOrder();
+    return true;
+  }
+
+  /**
+   * Atomically move `key` to just before `anchor` in the order (`#lzcellmove`).
+   * No-op returns `false` if either key is absent.
+   * @param {K} key
+   * @param {K} anchor
+   * @returns {boolean}
+   */
+  moveBefore(key, anchor) {
+    const anchorIdx = this.position(anchor);
+    if (anchorIdx === undefined) {
+      return false;
+    }
+    const from = this.position(key);
+    if (from === undefined) {
+      return false;
+    }
+    // Removing `key` first shifts `anchor` left by one when key precedes it.
+    const target = from < anchorIdx ? anchorIdx - 1 : anchorIdx;
+    return this.moveTo(key, target);
+  }
+
+  /**
+   * Atomically move `key` to just after `anchor` in the order (`#lzcellmove`).
+   * @param {K} key
+   * @param {K} anchor
+   * @returns {boolean}
+   */
+  moveAfter(key, anchor) {
+    const anchorIdx = this.position(anchor);
+    if (anchorIdx === undefined) {
+      return false;
+    }
+    const from = this.position(key);
+    if (from === undefined) {
+      return false;
+    }
+    const target = from <= anchorIdx ? anchorIdx : anchorIdx + 1;
+    return this.moveTo(key, target);
+  }
+
+  /** Reactive entry count. Subscribes the caller to membership changes only. */
+  len() {
+    this._ctx.getCell(this._membership);
+    return this._order.length;
+  }
+
+  /** Reactive emptiness check. Subscribes the caller to membership changes. */
+  isEmpty() {
+    return this.len() === 0;
+  }
+
+  /**
+   * Reactive membership test for `key`. Subscribes the caller to membership
+   * changes (add/remove of any key), not to value changes.
+   * @param {K} key
+   * @returns {boolean}
+   */
+  containsKey(key) {
+    this._ctx.getCell(this._membership);
+    return this._entries.has(key);
+  }
+
+  /** Non-reactive count. Does not subscribe the caller to anything. */
+  lenUntracked() {
+    return this._order.length;
+  }
+
+  /** This map's entry kind ({@link EntryKind.Cell} or {@link EntryKind.Slot}). */
+  entryKind() {
+    return this._kind;
   }
 }
 
 /**
- * The input-cell specialization of {@link ReactiveFamily}: a keyed family whose
- * entries are all input cells ({@link EntryKind.Cell} — always materialized).
- * Convenience factory that fixes `entryKind` to `Cell`.
+ * A keyed INPUT-CELL collection: every entry is a settable input cell. The
+ * `CellMap` specialization of {@link ReactiveMap} adds cell-only `set` and eager
+ * value-minting (`entry` / `entryWith`) on top of the shared reactive keyed
+ * surface.
+ *
  * @template K, V
- * @param {import("./reactive.js").Context} ctx
- * @param {Iterable<K>} keys
- * @param {(key: K) => V} factory
- * @param {string} [mode] {@link MaterializationMode} (cell entries materialize under either)
- * @returns {ReactiveFamily<K, V>}
+ * @extends {ReactiveMap<K, V>}
  */
-export function cellFamily(ctx, keys, factory, mode = DEFAULT_MATERIALIZATION_MODE) {
-  return new ReactiveFamily(ctx, mode, keys, factory, EntryKind.Cell);
+export class CellMap extends ReactiveMap {
+  /** @param {import("./reactive.js").Context} ctx */
+  constructor(ctx) {
+    super(ctx, EntryKind.Cell);
+  }
+
+  /**
+   * Return the value cell for `key`, minting it with `default` (computed via the
+   * closure) on first access. Subsequent calls return the cached handle. Adding
+   * a new key bumps reactive membership; re-fetching an existing key does not.
+   * Cell-only: eager value-minting has no derived-slot analog.
+   * @param {K} key
+   * @param {() => V} defaultFn
+   * @returns {import("./reactive.js").CellHandle<V>}
+   */
+  entryWith(key, defaultFn) {
+    const existing = this._entries.get(key);
+    if (existing !== undefined) {
+      return existing;
+    }
+    const value = defaultFn();
+    return this._mint(key, () => value);
+  }
+
+  /**
+   * Return the value cell for `key`, minting it with `default` on first access.
+   * Convenience wrapper over {@link CellMap#entryWith}.
+   * @param {K} key
+   * @param {V} defaultValue
+   * @returns {import("./reactive.js").CellHandle<V>}
+   */
+  entry(key, defaultValue) {
+    return this.entryWith(key, () => defaultValue);
+  }
+
+  /**
+   * Set the value at `key`, inserting a new entry (and bumping membership) if it
+   * does not exist yet. Updating an existing entry leaves membership untouched
+   * and invalidates only that entry's dependents. Cell-only: an input is
+   * settable; a derived {@link SlotMap} slot is not.
+   * @param {K} key
+   * @param {V} value
+   */
+  set(key, value) {
+    const existing = this._entries.get(key);
+    if (existing !== undefined) {
+      this._ctx.setCell(existing, value);
+      return;
+    }
+    this.entryWith(key, () => value);
+  }
+}
+
+/**
+ * A keyed DERIVED-SLOT collection: every entry is a derived slot whose value is
+ * derived. `getOrInsertWith` mints a slot on first access (lazy
+ * materialization); {@link SlotMap#materializeAll} pre-mints the keyset (eager).
+ * A slot's value is derived, so `SlotMap` has NO `set`.
+ *
+ * @template K, V
+ * @extends {ReactiveMap<K, V>}
+ */
+export class SlotMap extends ReactiveMap {
+  /** @param {import("./reactive.js").Context} ctx */
+  constructor(ctx) {
+    super(ctx, EntryKind.Slot);
+  }
+
+  /**
+   * EAGER materialization: pre-mint a derived slot for every key in `keys` via
+   * `factory`, up front. Observationally identical to minting each key lazily on
+   * first read — it only changes WHEN the nodes are allocated.
+   * @param {Iterable<K>} keys
+   * @param {(key: K) => V} factory
+   */
+  materializeAll(keys, factory) {
+    for (const key of keys) {
+      this.getOrInsertWith(key, factory);
+    }
+  }
 }

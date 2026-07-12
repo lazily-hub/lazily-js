@@ -1,249 +1,213 @@
-// The async keyed reactive family (`AsyncReactiveFamily`, `#lzmatmode` async
-// flavor) — the {@link AsyncContext} analog of {@link ReactiveFamily}.
+// Async keyed reactive collection (`#reactivemap`, async flavor) — the
+// {@link AsyncContext} analog of {@link ReactiveMap}.
 //
-// Keys `K` map to per-entry async reactive nodes: {@link EntryKind.Cell} input
-// cells ({@link AsyncCellHandle}, always resolved) or {@link EntryKind.Slot}
-// derived slots ({@link AsyncSlotHandle}, resolved asynchronously), allocated per
-// the family's {@link MaterializationMode}.
+// Keys `K` map to per-entry async reactive nodes: input cells
+// ({@link AsyncCellHandle}, always resolved) or derived slots
+// ({@link AsyncSlotHandle}, resolved asynchronously). Like the thread-safe map
+// it keeps its present-set state under its own {@link AtomicMutex}.
 //
-// The eager/lazy contract and present-set monotonicity are identical to the
-// single-threaded family. The transparency law here is EVENTUAL: an async derived
-// slot read is `undefined` while pending and resolves to the canonical value — so
-// `observe` returns `V | undefined`. Input cells are always resolved. Drive a slot
-// to resolution with {@link AsyncReactiveFamily#resolve} (or
-// `ctx.getAsync(fam.get(key))`).
+// The eager/lazy behavior and present-set monotonicity are identical to the
+// single-threaded map: eager pre-mints the keyset (`materializeAll`); lazy mints
+// on access (`getOrInsertHandle`). There is NO eager/lazy mode flag. The
+// transparency law is EVENTUAL: an async derived slot read is `undefined` while
+// pending and resolves to the canonical value — so `observe` returns
+// `V | undefined`. Input cells are always resolved. Drive a slot to resolution
+// with `ctx.getAsync(map.get(key))` or {@link AsyncReactiveMap#resolve}.
 //
-// To keep the sync/thread-safe/async families API-parallel the per-key factory is
-// the same sync `(key) => V`; a derived slot wraps it in a ready async
-// recomputation. Mirrors the async materialization case in lazily-spec and the
-// `AsyncMaterialization` proofs (eventual transparency) in lazily-formal.
+// Its two specializations are {@link AsyncCellMap} (input cells) and
+// {@link AsyncSlotMap} (derived slots).
 //
 // Rust reference: `lazily-rs/src/async_reactive_family.rs`.
 
-import { EntryKind, MaterializationMode, DEFAULT_MATERIALIZATION_MODE } from "./reactive-family.js";
+import { EntryKind } from "./reactive-family.js";
+import { AtomicMutex } from "./thread-safe.js";
 
-export { EntryKind, MaterializationMode, DEFAULT_MATERIALIZATION_MODE };
-
-function resolveKind(entryKind, key) {
-  const kind = typeof entryKind === "function" ? entryKind(key) : entryKind;
-  if (kind !== EntryKind.Cell && kind !== EntryKind.Slot) {
-    throw new TypeError(`entry kind for key ${String(key)} must be EntryKind.Cell or EntryKind.Slot`);
-  }
-  return kind;
-}
+export { EntryKind };
 
 /**
- * The async unified keyed reactive family (`#lzmatmode`): keys map to per-entry
- * async reactive nodes ({@link EntryKind.Cell} input cells resolved
- * synchronously, or {@link EntryKind.Slot} derived slots resolved
- * asynchronously), allocated per the family's {@link MaterializationMode}.
+ * The async keyed reactive collection (`#reactivemap`) generic over the entry
+ * handle kind. Present-set state is guarded by an {@link AtomicMutex}; the
+ * transparency law is EVENTUAL (a pending slot observes as `undefined`).
  *
  * Operations run against an owning `AsyncContext` (from `./reactive-async.js`).
  *
  * @template K, V
  */
-export class AsyncReactiveFamily {
+export class AsyncReactiveMap {
   /** @type {import("./reactive-async.js").AsyncContext} */
-  #ctx;
-  /** @type {string} */
-  #mode;
-  /** @type {(key: K) => V} */
-  #factory;
-  /** @type {EntryKind | ((key: K) => EntryKind)} */
-  #entryKind;
-  /** Present (materialized) entries: key -> { kind, handle }. */
-  #materialized = new Map();
-  /** First-materialization order of the present set. */
-  #order = [];
+  _ctx;
+  /** @type {EntryKind} */
+  _kind;
+  /** Present (materialized) entries: key -> handle. @type {Map<K, any>} */
+  _materialized = new Map();
+  /** First-materialization order of the present set. @type {K[]} */
+  _order = [];
+  /** @type {AtomicMutex} */
+  _mutex = new AtomicMutex();
 
   /**
    * @param {import("./reactive-async.js").AsyncContext} ctx owning async context
-   * @param {string} mode {@link MaterializationMode}
-   * @param {Iterable<K>} keys declared keys
-   * @param {(key: K) => V} factory canonical per-key value producer
-   * @param {EntryKind | ((key: K) => EntryKind)} [entryKind] entry kind (or per-key resolver); defaults to Slot
+   * @param {EntryKind} [kind] entry handle kind; defaults to {@link EntryKind.Slot}
    */
-  constructor(ctx, mode, keys, factory, entryKind = EntryKind.Slot) {
-    if (mode !== MaterializationMode.Eager && mode !== MaterializationMode.Lazy) {
-      throw new TypeError("mode must be a MaterializationMode");
+  constructor(ctx, kind = EntryKind.Slot) {
+    if (kind !== EntryKind.Cell && kind !== EntryKind.Slot) {
+      throw new TypeError("kind must be EntryKind.Cell or EntryKind.Slot");
     }
-    if (typeof factory !== "function") {
-      throw new TypeError("factory must be a function");
-    }
-    this.#ctx = ctx;
-    this.#mode = mode;
-    this.#factory = factory;
-    this.#entryKind = entryKind;
-
-    for (const key of keys) {
-      // A cell entry is always materialized regardless of mode; a slot entry
-      // only under eager.
-      if (resolveKind(entryKind, key) === EntryKind.Cell || mode === MaterializationMode.Eager) {
-        this.#materializeKey(key);
-      }
-    }
+    this._ctx = ctx;
+    this._kind = kind;
   }
 
   /**
-   * Build an eager async family: every declared key's node is allocated now. The
-   * default mode.
-   * @template K, V
-   * @param {import("./reactive-async.js").AsyncContext} ctx
-   * @param {Iterable<K>} keys
-   * @param {(key: K) => V} factory
-   * @param {EntryKind | ((key: K) => EntryKind)} [entryKind]
-   * @returns {AsyncReactiveFamily<K, V>}
-   */
-  static eager(ctx, keys, factory, entryKind = EntryKind.Slot) {
-    return new AsyncReactiveFamily(ctx, MaterializationMode.Eager, keys, factory, entryKind);
-  }
-
-  /**
-   * Build a lazy async family: derived (slot) entries deferred to first read;
-   * input (cell) entries in `keys` are still materialized at build.
-   * @template K, V
-   * @param {import("./reactive-async.js").AsyncContext} ctx
-   * @param {Iterable<K>} keys
-   * @param {(key: K) => V} factory
-   * @param {EntryKind | ((key: K) => EntryKind)} [entryKind]
-   * @returns {AsyncReactiveFamily<K, V>}
-   */
-  static lazy(ctx, keys, factory, entryKind = EntryKind.Slot) {
-    return new AsyncReactiveFamily(ctx, MaterializationMode.Lazy, keys, factory, entryKind);
-  }
-
-  /**
-   * Build an async family in the default mode (eager). Alias for
-   * {@link AsyncReactiveFamily.eager}.
-   * @template K, V
-   * @param {import("./reactive-async.js").AsyncContext} ctx
-   * @param {Iterable<K>} keys
-   * @param {(key: K) => V} factory
-   * @param {EntryKind | ((key: K) => EntryKind)} [entryKind]
-   * @returns {AsyncReactiveFamily<K, V>}
-   */
-  static create(ctx, keys, factory, entryKind = EntryKind.Slot) {
-    return AsyncReactiveFamily.eager(ctx, keys, factory, entryKind);
-  }
-
-  #materializeKey(key) {
-    const existing = this.#materialized.get(key);
-    if (existing !== undefined) {
-      return existing; // warm: already allocated (first-writer-wins, stable handle).
-    }
-    const kind = resolveKind(this.#entryKind, key);
-    const factory = this.#factory;
-    // A cell entry sets its value directly (always resolved); a derived slot
-    // wraps the factory as a ready async recomputation — the same node an eager
-    // build would allocate.
-    const handle =
-      kind === EntryKind.Cell
-        ? this.#ctx.cell(factory(key))
-        : this.#ctx.computedAsync(async () => factory(key));
-    const entry = { kind, handle };
-    this.#materialized.set(key, entry);
-    this.#order.push(key);
-    return entry;
-  }
-
-  /**
-   * Get the entry handle for `key`, materializing it on first access (the lazy
-   * pull) and caching it. For a slot family this is the {@link AsyncSlotHandle}
-   * to drive with `ctx.getAsync` or {@link AsyncReactiveFamily#resolve}.
+   * Mint the entry node for `key` on first access. A cell sets its value
+   * directly (always resolved); a derived slot wraps `compute` in a ready async
+   * recomputation. FIRST-WRITER-WINS so a raced key keeps a stable handle.
    * @param {K} key
-   * @returns {import("./reactive-async.js").AsyncCellHandle | import("./reactive-async.js").AsyncSlotHandle}
+   * @param {() => V} compute
+   * @returns {any}
    */
-  get(key) {
-    return this.#materializeKey(key).handle;
+  _mintWith(key, compute) {
+    const warm = this._mutex.runExclusive(() => this._materialized.get(key));
+    if (warm !== undefined) {
+      return warm;
+    }
+    const handle =
+      this._kind === EntryKind.Cell
+        ? this._ctx.cell(compute())
+        : this._ctx.computedAsync(async () => compute());
+    return this._mutex.runExclusive(() => {
+      const existing = this._materialized.get(key);
+      if (existing !== undefined) {
+        return existing;
+      }
+      this._materialized.set(key, handle);
+      this._order.push(key);
+      return handle;
+    });
   }
 
   /**
-   * Non-blocking observe: the resolved value for a cell or resolved slot, or
-   * `undefined` for a slot still pending. The EVENTUAL-transparency law: once
-   * resolved this equals the canonical value under either mode. Materializes the
-   * entry if absent.
+   * Get the entry handle for `key`, minting it via `factory(key)` on first
+   * access and caching it. For a slot map this is the {@link AsyncSlotHandle} to
+   * drive with `ctx.getAsync` or {@link AsyncReactiveMap#resolve}.
+   * @param {K} key
+   * @param {(key: K) => V} factory
+   * @returns {any}
+   */
+  getOrInsertHandle(key, factory) {
+    return this._mintWith(key, () => factory(key));
+  }
+
+  /**
+   * Non-blocking observe of an existing entry: the value for a cell or resolved
+   * slot, or `undefined` for a pending slot or an absent key. Non-minting.
    * @param {K} key
    * @returns {V | undefined}
    */
   observe(key) {
-    const { kind, handle } = this.#materializeKey(key);
-    return kind === EntryKind.Cell ? this.#ctx.getCell(handle) : this.#ctx.get(handle);
+    const handle = this._mutex.runExclusive(() => this._materialized.get(key));
+    if (handle === undefined) {
+      return undefined;
+    }
+    return this._kind === EntryKind.Cell ? this._ctx.getCell(handle) : this._ctx.get(handle);
   }
 
   /**
-   * Drive `key` to resolution and return its canonical value. For a cell this is
-   * immediate; for a slot it awaits the async recomputation. Materializes the
-   * entry if absent.
+   * Drive `key` to resolution and return its canonical value, minting the entry
+   * via `factory(key)` first if absent. For a cell this is immediate; for a slot
+   * it awaits the async recomputation.
    * @param {K} key
+   * @param {(key: K) => V} factory
    * @returns {Promise<V>}
    */
-  async resolve(key) {
-    const { kind, handle } = this.#materializeKey(key);
-    return kind === EntryKind.Cell ? this.#ctx.getCell(handle) : this.#ctx.getAsync(handle);
-  }
-
-  /**
-   * Set a cell entry's value (input entries only). Materializes it if absent.
-   * @param {K} key
-   * @param {V} value
-   */
-  setCell(key, value) {
-    const { kind, handle } = this.#materializeKey(key);
-    if (kind !== EntryKind.Cell) {
-      throw new TypeError(`key ${String(key)} is a derived slot, not a writable input cell`);
+  async resolve(key, factory) {
+    const handle = factory === undefined ? this.handle(key) : this.getOrInsertHandle(key, factory);
+    if (handle === undefined) {
+      throw new Error(`resolve: key ${String(key)} is absent and no factory was given`);
     }
-    this.#ctx.setCell(handle, value);
+    return this._kind === EntryKind.Cell ? this._ctx.getCell(handle) : this._ctx.getAsync(handle);
   }
 
   /**
-   * Whether `key` is currently materialized (present). Non-reactive.
+   * Return the existing entry handle for `key`, or `undefined`. Non-minting.
    * @param {K} key
-   * @returns {boolean}
+   * @returns {any}
    */
+  handle(key) {
+    return this._mutex.runExclusive(() => this._materialized.get(key));
+  }
+
+  /** Whether `key` is currently materialized (present). Non-reactive. */
   isPresent(key) {
-    return this.#materialized.has(key);
+    return this._mutex.runExclusive(() => this._materialized.has(key));
   }
 
-  /**
-   * The currently-materialized keys, in first-materialization order. The present
-   * set only grows (deferral, not de-allocation).
-   * @returns {K[]}
-   */
+  /** Currently-materialized keys, in first-materialization order. */
   presentKeys() {
-    return [...this.#order];
+    return this._mutex.runExclusive(() => [...this._order]);
   }
 
-  /** Number of currently-materialized entries. @returns {number} */
+  /** Number of currently-materialized entries. */
   presentCount() {
-    return this.#order.length;
+    return this._mutex.runExclusive(() => this._order.length);
   }
 
-  /**
-   * This family's entry kind for `key`.
-   * @param {K} key
-   * @returns {EntryKind}
-   */
-  entryKind(key) {
-    return resolveKind(this.#entryKind, key);
-  }
-
-  /** This family's materialization mode. @returns {MaterializationMode} */
-  get mode() {
-    return this.#mode;
+  /** This map's entry kind. */
+  entryKind() {
+    return this._kind;
   }
 }
 
 /**
- * The input-cell specialization of {@link AsyncReactiveFamily}: a keyed async
- * family whose entries are all input cells ({@link EntryKind.Cell} — always
- * materialized, always resolved).
+ * An async INPUT-CELL map: every entry is an always-resolved input cell. The
+ * async analog of {@link CellMap}. Adds cell-only `set`.
+ *
  * @template K, V
- * @param {import("./reactive-async.js").AsyncContext} ctx
- * @param {Iterable<K>} keys
- * @param {(key: K) => V} factory
- * @param {string} [mode] {@link MaterializationMode} (cell entries materialize under either)
- * @returns {AsyncReactiveFamily<K, V>}
+ * @extends {AsyncReactiveMap<K, V>}
  */
-export function asyncCellFamily(ctx, keys, factory, mode = DEFAULT_MATERIALIZATION_MODE) {
-  return new AsyncReactiveFamily(ctx, mode, keys, factory, EntryKind.Cell);
+export class AsyncCellMap extends AsyncReactiveMap {
+  /** @param {import("./reactive-async.js").AsyncContext} ctx */
+  constructor(ctx) {
+    super(ctx, EntryKind.Cell);
+  }
+
+  /**
+   * Set the value at `key`, inserting a new input cell if absent. Cell-only.
+   * @param {K} key
+   * @param {V} value
+   */
+  set(key, value) {
+    const existing = this._mutex.runExclusive(() => this._materialized.get(key));
+    if (existing !== undefined) {
+      this._ctx.setCell(existing, value);
+      return;
+    }
+    this.getOrInsertHandle(key, () => value);
+  }
+}
+
+/**
+ * An async DERIVED-SLOT map: entries are derived slots minted lazily on access
+ * or eagerly via {@link AsyncSlotMap#materializeAll}, resolved via
+ * `ctx.getAsync`. The async analog of {@link SlotMap}.
+ *
+ * @template K, V
+ * @extends {AsyncReactiveMap<K, V>}
+ */
+export class AsyncSlotMap extends AsyncReactiveMap {
+  /** @param {import("./reactive-async.js").AsyncContext} ctx */
+  constructor(ctx) {
+    super(ctx, EntryKind.Slot);
+  }
+
+  /**
+   * EAGER materialization: pre-mint a derived slot for every key in `keys`.
+   * Observationally identical to minting each lazily on first read.
+   * @param {Iterable<K>} keys
+   * @param {(key: K) => V} factory
+   */
+  materializeAll(keys, factory) {
+    for (const key of keys) {
+      this.getOrInsertHandle(key, factory);
+    }
+  }
 }

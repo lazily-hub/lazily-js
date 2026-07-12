@@ -1,100 +1,86 @@
 import type { CellHandle, Context, SlotHandle } from "./reactive.js";
 
 /**
- * Which kind of reactive node a {@link ReactiveFamily} entry is — the
- * handle-kind axis the family abstracts over, orthogonal to
- * {@link MaterializationMode}.
+ * Which kind of reactive node a {@link ReactiveMap} entry is — the handle-kind
+ * axis the map abstracts over.
  */
 export const EntryKind: {
-  /** An input cell — always materialized, any mode. */
+  /** An input cell — always materialized on `get`. */
   readonly Cell: "cell";
-  /** A derived slot — materialized eagerly, or lazily on first read. */
+  /** A derived slot — materialized eagerly (pre-mint) or lazily on first read. */
   readonly Slot: "slot";
 };
 export type EntryKind = (typeof EntryKind)[keyof typeof EntryKind];
 
-/**
- * When a {@link ReactiveFamily}'s derived (slot) entries are allocated.
- * Orthogonal to {@link EntryKind}; never observable on the value axis.
- */
-export const MaterializationMode: {
-  /** Allocate every derived node up front at build time. Required default. */
-  readonly Eager: "eager";
-  /** Allocate a derived node on its first read, keyed rather than held. */
-  readonly Lazy: "lazy";
-};
-export type MaterializationMode =
-  (typeof MaterializationMode)[keyof typeof MaterializationMode];
-
-/** The default materialization mode (eager). */
-export const DEFAULT_MATERIALIZATION_MODE: MaterializationMode;
-
-export type EntryKindResolver<K> = EntryKind | ((key: K) => EntryKind);
-export type FamilyHandle<V> = CellHandle<V> | SlotHandle<V>;
+/** The entry handle a {@link ReactiveMap} holds: an input cell or a derived slot. */
+export type MapHandle<V> = CellHandle<V> | SlotHandle<V>;
 
 /**
- * The unified keyed reactive family (`#lzmatmode`): keys map to per-entry
- * reactive nodes (input cells or derived slots), allocated per the family's
- * {@link MaterializationMode}.
+ * A keyed reactive collection generic over the entry handle kind (`#reactivemap`):
+ * reactive membership + order, `getOrInsertWith` mint-on-access, `remove`, and
+ * atomic `move`. Its two specializations are {@link CellMap} (input cells) and
+ * {@link SlotMap} (derived slots).
  */
-export class ReactiveFamily<K = unknown, V = unknown> {
-  constructor(
-    ctx: Context,
-    mode: MaterializationMode,
-    keys: Iterable<K>,
-    factory: (key: K) => V,
-    entryKind?: EntryKindResolver<K>,
-  );
+export class ReactiveMap<K = unknown, V = unknown> {
+  constructor(ctx: Context, kind?: EntryKind);
 
-  /** Build an eager family: every declared key's node is allocated now. */
-  static eager<K, V>(
-    ctx: Context,
-    keys: Iterable<K>,
-    factory: (key: K) => V,
-    entryKind?: EntryKindResolver<K>,
-  ): ReactiveFamily<K, V>;
-
-  /** Build a lazy family: derived (slot) entries are deferred to first read. */
-  static lazy<K, V>(
-    ctx: Context,
-    keys: Iterable<K>,
-    factory: (key: K) => V,
-    entryKind?: EntryKindResolver<K>,
-  ): ReactiveFamily<K, V>;
-
-  /** Build a family in the default (eager) mode. */
-  static create<K, V>(
-    ctx: Context,
-    keys: Iterable<K>,
-    factory: (key: K) => V,
-    entryKind?: EntryKindResolver<K>,
-  ): ReactiveFamily<K, V>;
-
-  /** Materialize (lazy pull) and return the entry handle for `key`. */
-  get(key: K): FamilyHandle<V>;
-  /** Observe `key`'s value — identical under either mode. */
-  observe(key: K): V;
-  /** Set a cell entry's value (input entries only). */
-  setCell(key: K, value: V): void;
+  /** Get the value at `key`, minting via `factory(key)` if absent (mint-on-access). */
+  getOrInsertWith(key: K, factory: (key: K) => V): V;
+  /** The existing entry handle for `key`, or `undefined`. Non-reactive. */
+  handle(key: K): MapHandle<V> | undefined;
+  /** Read the value at `key` if present, else `undefined`. Reactive on that entry. */
+  get(key: K): V | undefined;
+  /** Remove `key`'s entry; bumps membership. Returns whether it was present. */
+  remove(key: K): boolean;
+  /** Reactive snapshot of keys in order (subscribes to order changes). */
+  keys(): K[];
+  /** Currently-materialized keys, in first-materialization order. Non-reactive. */
+  presentKeys(): K[];
+  /** Number of currently-materialized entries. Non-reactive. */
+  presentCount(): number;
   /** Whether `key` is currently materialized. Non-reactive. */
   isPresent(key: K): boolean;
-  /** Currently-materialized keys, in first-materialization order. */
-  presentKeys(): K[];
-  /** Number of currently-materialized entries. */
-  presentCount(): number;
-  /** This family's entry kind for `key`. */
-  entryKind(key: K): EntryKind;
-  /** This family's materialization mode. */
-  readonly mode: MaterializationMode;
+  /** Current 0-based position of `key`, or `undefined` if absent. Non-reactive. */
+  position(key: K): number | undefined;
+  /** Atomically move `key` to `index` (`#lzcellmove`). Returns whether present. */
+  moveTo(key: K, index: number): boolean;
+  /** Atomically move `key` to just before `anchor`. */
+  moveBefore(key: K, anchor: K): boolean;
+  /** Atomically move `key` to just after `anchor`. */
+  moveAfter(key: K, anchor: K): boolean;
+  /** Reactive entry count (subscribes to membership changes only). */
+  len(): number;
+  /** Reactive emptiness check (subscribes to membership changes). */
+  isEmpty(): boolean;
+  /** Reactive membership test for `key` (subscribes to membership changes). */
+  containsKey(key: K): boolean;
+  /** Non-reactive count. */
+  lenUntracked(): number;
+  /** This map's entry kind. */
+  entryKind(): EntryKind;
 }
 
 /**
- * The input-cell specialization of {@link ReactiveFamily}: a keyed family whose
- * entries are all input cells (always materialized).
+ * The input-cell specialization of {@link ReactiveMap}: adds cell-only `set` and
+ * eager value-minting (`entry` / `entryWith`).
  */
-export function cellFamily<K, V>(
-  ctx: Context,
-  keys: Iterable<K>,
-  factory: (key: K) => V,
-  mode?: MaterializationMode,
-): ReactiveFamily<K, V>;
+export class CellMap<K = unknown, V = unknown> extends ReactiveMap<K, V> {
+  constructor(ctx: Context);
+  /** Return the cell for `key`, minting with `defaultFn()` on first access. */
+  entryWith(key: K, defaultFn: () => V): CellHandle<V>;
+  /** Return the cell for `key`, minting with `defaultValue` on first access. */
+  entry(key: K, defaultValue: V): CellHandle<V>;
+  /** Set the value at `key`, inserting a new input cell if absent. Cell-only. */
+  set(key: K, value: V): void;
+}
+
+/**
+ * The derived-slot specialization of {@link ReactiveMap}: `getOrInsertWith` mints
+ * a slot on first access (lazy); `materializeAll` pre-mints the keyset (eager).
+ * NO `set`.
+ */
+export class SlotMap<K = unknown, V = unknown> extends ReactiveMap<K, V> {
+  constructor(ctx: Context);
+  /** Eager materialization: pre-mint a derived slot for every key in `keys`. */
+  materializeAll(keys: Iterable<K>, factory: (key: K) => V): void;
+}

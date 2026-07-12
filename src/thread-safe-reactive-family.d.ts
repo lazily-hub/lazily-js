@@ -1,65 +1,56 @@
 import type { CellHandle, SlotHandle } from "./reactive.js";
-import type { EntryKind, MaterializationMode } from "./reactive-family.js";
+import type { EntryKind } from "./reactive-family.js";
 import type { ThreadSafeContext } from "./thread-safe.js";
 
-export { EntryKind, MaterializationMode, DEFAULT_MATERIALIZATION_MODE } from "./reactive-family.js";
+export { EntryKind } from "./reactive-family.js";
 
-export type EntryKindResolver<K> = EntryKind | ((key: K) => EntryKind);
-export type FamilyHandle<V> = CellHandle<V> | SlotHandle<V>;
+/** The entry handle a {@link ThreadSafeReactiveMap} holds. */
+export type MapHandle<V> = CellHandle<V> | SlotHandle<V>;
 
 /**
- * The thread-safe keyed reactive family (`#lzmatmode`, thread-safe flavor): keys
- * map to per-entry reactive nodes on a {@link ThreadSafeContext}, allocated per
- * the family's {@link MaterializationMode}. Materialization is confluent under
- * concurrent access.
+ * The thread-safe keyed reactive collection (`#reactivemap`, thread-safe flavor):
+ * keys map to per-entry reactive nodes on a {@link ThreadSafeContext}. Present-set
+ * state is guarded by a mutex; materialization is confluent under concurrent
+ * access. Its two specializations are {@link ThreadSafeCellMap} and
+ * {@link ThreadSafeSlotMap}.
  */
-export class ThreadSafeReactiveFamily<K = unknown, V = unknown> {
-  constructor(
-    ctx: ThreadSafeContext,
-    mode: MaterializationMode,
-    keys: Iterable<K>,
-    factory: (key: K) => V,
-    entryKind?: EntryKindResolver<K>,
-  );
+export class ThreadSafeReactiveMap<K = unknown, V = unknown> {
+  constructor(ctx: ThreadSafeContext, kind?: EntryKind);
 
-  static eager<K, V>(
-    ctx: ThreadSafeContext,
-    keys: Iterable<K>,
-    factory: (key: K) => V,
-    entryKind?: EntryKindResolver<K>,
-  ): ThreadSafeReactiveFamily<K, V>;
-
-  static lazy<K, V>(
-    ctx: ThreadSafeContext,
-    keys: Iterable<K>,
-    factory: (key: K) => V,
-    entryKind?: EntryKindResolver<K>,
-  ): ThreadSafeReactiveFamily<K, V>;
-
-  static create<K, V>(
-    ctx: ThreadSafeContext,
-    keys: Iterable<K>,
-    factory: (key: K) => V,
-    entryKind?: EntryKindResolver<K>,
-  ): ThreadSafeReactiveFamily<K, V>;
-
-  get(key: K): FamilyHandle<V>;
-  observe(key: K): V;
-  setCell(key: K, value: V): void;
+  /** Get the entry handle for `key`, minting via `factory(key)` if absent. */
+  getOrInsertHandle(key: K, factory: (key: K) => V): MapHandle<V>;
+  /** Get the value at `key`, minting via `factory(key)` if absent. */
+  getOrInsertWith(key: K, factory: (key: K) => V): V;
+  /** Observe `key`'s value if present, else `undefined`. Non-minting. */
+  observe(key: K): V | undefined;
+  /** The existing entry handle for `key`, or `undefined`. Non-minting. */
+  handle(key: K): MapHandle<V> | undefined;
+  /** Whether `key` is currently materialized. Non-reactive. */
   isPresent(key: K): boolean;
+  /** Currently-materialized keys, in first-materialization order. */
   presentKeys(): K[];
+  /** Number of currently-materialized entries. */
   presentCount(): number;
-  entryKind(key: K): EntryKind;
-  readonly mode: MaterializationMode;
+  /** This map's entry kind. */
+  entryKind(): EntryKind;
 }
 
 /**
- * The input-cell specialization of {@link ThreadSafeReactiveFamily}: a keyed
- * thread-safe family whose entries are all input cells (always materialized).
+ * The thread-safe input-cell map: every entry is an always-materialized input
+ * cell. Adds cell-only `set`.
  */
-export function threadSafeCellFamily<K, V>(
-  ctx: ThreadSafeContext,
-  keys: Iterable<K>,
-  factory: (key: K) => V,
-  mode?: MaterializationMode,
-): ThreadSafeReactiveFamily<K, V>;
+export class ThreadSafeCellMap<K = unknown, V = unknown> extends ThreadSafeReactiveMap<K, V> {
+  constructor(ctx: ThreadSafeContext);
+  /** Set the value at `key`, inserting a new input cell if absent. Cell-only. */
+  set(key: K, value: V): void;
+}
+
+/**
+ * The thread-safe derived-slot map: entries are derived slots minted lazily on
+ * access or eagerly via `materializeAll`. NO `set`.
+ */
+export class ThreadSafeSlotMap<K = unknown, V = unknown> extends ThreadSafeReactiveMap<K, V> {
+  constructor(ctx: ThreadSafeContext);
+  /** Eager materialization: pre-mint a derived slot for every key in `keys`. */
+  materializeAll(keys: Iterable<K>, factory: (key: K) => V): void;
+}

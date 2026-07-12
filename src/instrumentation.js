@@ -12,7 +12,7 @@
 // dev-only criterion-style suite that generates BENCHMARKS.md lives in `bench/`.
 
 import { Context } from "./reactive.js";
-import { ReactiveFamily } from "./reactive-family.js";
+import { SlotMap } from "./reactive-family.js";
 
 function nowMicros() {
   const perf = globalThis.performance;
@@ -160,7 +160,7 @@ export function runBenchmarkSuite(iterations = 1000) {
     void sink;
   }
 
-  // keyed family materialize-on-pull (lazy slot family).
+  // keyed map materialize-on-pull (lazy SlotMap).
   {
     const ctx = new Context();
     let k = 0;
@@ -168,8 +168,8 @@ export function runBenchmarkSuite(iterations = 1000) {
       benchmark(
         "family_materialize",
         () => {
-          const fam = ReactiveFamily.lazy(ctx, [], (key) => key * 2);
-          fam.observe((k = (k + 1) & 1023));
+          const map = new SlotMap(ctx);
+          map.getOrInsertWith((k = (k + 1) & 1023), (key) => key * 2);
         },
         iterations,
       ),

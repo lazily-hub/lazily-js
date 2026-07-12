@@ -76,7 +76,7 @@ notes and platform carve-outs lives in
 
 Two JS ✅ marks are backed by runtime-specific mechanisms while keeping the core isomorphic:
 
-- **Thread-safe** (`ThreadSafeReactiveFamily`, `Thread-safe context`) — cross-realm mutual exclusion via a `SharedArrayBuffer` + `Atomics` reentrant mutex shared across Web Workers / `worker_threads`; degrades to a single-realm guard where shared memory is unavailable (e.g. a browser without cross-origin isolation), which is sound because no shared memory means no cross-realm concurrency.
+- **Thread-safe** (`ThreadSafeReactiveMap`, `Thread-safe context`) — cross-realm mutual exclusion via a `SharedArrayBuffer` + `Atomics` reentrant mutex shared across Web Workers / `worker_threads`; degrades to a single-realm guard where shared memory is unavailable (e.g. a browser without cross-origin isolation), which is sound because no shared memory means no cross-realm concurrency.
 - **C-ABI FFI** — the normative codec + in-process `FfiChannel` are pure-JS and run unchanged in the browser; the Node build additionally binds the real `lazily` shared library (`lazily_ffi_channel_*`) via koffi. Both speak the identical byte contract, so browser and native are drop-in interchangeable.
 
 CRDT convergence and the wire protocol are pinned by the shared conformance fixtures
@@ -89,10 +89,10 @@ and JSON Schemas in `lazily-spec` and the Lean models in `lazily-formal`.
 | `@lazily-hub/lazily-js/transport` | Cross-process zero-copy transport (`#lzzcpy`): `ShmBlobArena`, `InProcessBackend` / `ArrowBackend`, `BlobRouter`, `spillMessage` / `resolveValue`, and the FFI-gated `createShmBackend` (Node/Bun/Deno). Isomorphic — no FFI import; browser-safe |
 | `@lazily-hub/lazily-js/reactive` | Reactive dependency graph: `Context`, `Cell`, `Slot`, `Signal`, `Effect` |
 | `@lazily-hub/lazily-js/reactive-async` | Async reactive graph: `AsyncContext` — Promise-driven slots/effects with revision-guarded stale-completion discard, in-flight dedup, and cancellation |
-| `@lazily-hub/lazily-js/reactive-family` | Unified keyed reactive family: `ReactiveFamily` (`EntryKind` cell/slot × `MaterializationMode` eager/lazy) + `cellFamily` input-cell specialization (`#lzmatmode`) |
-| `@lazily-hub/lazily-js/async-reactive-family` | Async keyed reactive family: `AsyncReactiveFamily` + `asyncCellFamily` over `AsyncContext` — eventual transparency (a pending slot observes `undefined` and resolves to the canonical value; eager ≡ lazy once resolved) (`#lzmatmode`) |
+| `@lazily-hub/lazily-js/reactive-family` | Unified keyed reactive map: `ReactiveMap<K,V,H>` (reactive membership/order, `getOrInsertWith` mint-on-access, `remove`, `move`) + `CellMap` (adds cell-only `set` + eager `entry`/`entryWith`) and `SlotMap` (lazy `getOrInsertWith` + eager `materializeAll`; no `set`) specializations. No eager/lazy mode flag (`#reactivemap`) |
+| `@lazily-hub/lazily-js/async-reactive-family` | Async keyed reactive map: `AsyncReactiveMap` + `AsyncCellMap` / `AsyncSlotMap` over `AsyncContext` — eventual transparency (a pending slot observes `undefined` and resolves to the canonical value; eager ≡ lazy once resolved) (`#reactivemap`) |
 | `@lazily-hub/lazily-js/thread-safe` | Lock-backed reactive context: `ThreadSafeContext` (`Send + Sync` flavor of `Context`) + `AtomicMutex` — a real `SharedArrayBuffer` + `Atomics` reentrant mutex giving cross-worker mutual exclusion; degrades to a single-realm guard where shared memory is unavailable |
-| `@lazily-hub/lazily-js/thread-safe-reactive-family` | Thread-safe keyed reactive family: `ThreadSafeReactiveFamily` + `threadSafeCellFamily` — mutex-guarded present set with first-writer-wins materialization confluence (`#lzmatmode`) |
+| `@lazily-hub/lazily-js/thread-safe-reactive-family` | Thread-safe keyed reactive map: `ThreadSafeReactiveMap` + `ThreadSafeCellMap` / `ThreadSafeSlotMap` — mutex-guarded present set with first-writer-wins materialization confluence (`#reactivemap`) |
 | `@lazily-hub/lazily-js/ffi` | C-ABI FFI boundary (`schemas/ffi.json`): message codec (`encodeMessage` / `decodeMessage` / `validateMessage` / `kindOf`, `LazilyFfiStatus` / `LazilyFfiMessageKind`) + `FfiChannel` FIFO. Isomorphic core (browser shim); the Node build additionally exposes `NativeFfiChannel` / `loadNativeChannel` over the real `lazily_ffi_channel_*` C ABI via koffi |
 | `@lazily-hub/lazily-js/instrumentation` | In-library instrumentation/benchmark API: `benchmark`, `runBenchmarkSuite`, `BenchmarkResult`, `withInstrumentation` — plus opt-in reactive-core counters via `new Context({ instrument: true })` / `instrumentationSnapshot()` |
 | `@lazily-hub/lazily-js/state-machine` | Flat finite-state-machine kernel backed by a reactive `Cell` |
@@ -174,42 +174,46 @@ ctx.setCell(userId, 2); // supersedes any in-flight compute; slot re-resolves
 await ctx.getAsync(profile); // the profile for user 2
 ```
 
-## Reactive family and materialization mode
+## Keyed reactive maps (`ReactiveMap` / `CellMap` / `SlotMap`)
 
-`ReactiveFamily` (from `@lazily-hub/lazily-js/reactive-family`) is the unified
-**keyed reactive family** (`#lzmatmode`): it maps keys to per-entry reactive
-nodes and abstracts over the entry's handle kind. Two orthogonal axes:
+`ReactiveMap<K, V, H>` (from `@lazily-hub/lazily-js/reactive-family`) is the ONE
+unified **keyed reactive collection** (`#reactivemap`): reactive membership +
+order, `getOrInsertWith` mint-on-access, `remove`, and atomic `move`, generic
+over the entry's handle kind. Its two specializations are the concrete types you
+use:
 
-- **Entry kind** — `EntryKind.Cell` entries are input cells (**always
-  materialized**, any mode); `EntryKind.Slot` entries are derived slots (what
-  materialization governs). `cellFamily(...)` is the input-cell specialization.
-- **Materialization mode** — `MaterializationMode.Eager` (**default**) allocates
-  every derived node up front; `MaterializationMode.Lazy` (opt-in) allocates a
-  derived node on its **first read** ("materialize on pull") and caches it.
+- **`CellMap<K, V>`** — input-cell entries. Adds cell-only `set(key, value)` (an
+  input is settable) and eager value-minting (`entry` / `entryWith`).
+- **`SlotMap<K, V>`** — derived-slot entries. `getOrInsertWith(key, factory)`
+  mints a slot on **first access** ("materialize on pull", **lazy**);
+  `materializeAll(keys, factory)` pre-mints the keyset up front (**eager**). A
+  slot's value is derived, so `SlotMap` has **no `set`**.
 
-Mode is **observationally transparent**: a read returns the same value under
-either mode — it changes allocation timing and memory, never results. Lazy pays
-off only for sparsely-touched large keyed address spaces.
+There is **no eager/lazy mode flag** — eager is the pre-mint loop, lazy is
+mint-on-access, and they are **observationally transparent**: a read returns the
+same value either way; only allocation timing and memory change. Lazy pays off
+only for sparsely-touched large keyed address spaces.
 
 ```js
 import { Context } from "@lazily-hub/lazily-js/reactive";
-import { ReactiveFamily } from "@lazily-hub/lazily-js/reactive-family";
+import { SlotMap } from "@lazily-hub/lazily-js/reactive-family";
 
 const ctx = new Context();
 
-// A derived (slot) family of key*3 over a large address space, built lazily:
+// A derived (slot) map of key*3 over a large address space, built lazily:
 // nothing is allocated until a key is read.
-const fam = ReactiveFamily.lazy(ctx, range(0, 1_000_000), (k) => k * 3);
-fam.presentCount(); // 0
+const map = new SlotMap(ctx);
+map.presentCount(); // 0
 
-fam.observe(5); // 15 — first read materializes just this entry
-fam.presentCount(); // 1
-fam.isPresent(5); // true
-fam.isPresent(6); // false
+map.getOrInsertWith(5, (k) => k * 3); // 15 — first read materializes just this entry
+map.presentCount(); // 1
+map.isPresent(5); // true
+map.isPresent(6); // false
 
-// Eager builds the same values up front — observationally identical.
-const eager = ReactiveFamily.eager(ctx, [0, 1, 2, 3], (k) => k * 3);
-eager.observe(2) === fam.observe(2); // true
+// Eager pre-mints the same values up front — observationally identical.
+const eager = new SlotMap(ctx);
+eager.materializeAll([0, 1, 2, 3], (k) => k * 3);
+eager.get(2) === map.getOrInsertWith(2, (k) => k * 3); // true
 ```
 
 ## State machine and state charts
@@ -504,11 +508,11 @@ lazily-js replays the shared `lazily-spec` fixtures for IPC, agent-doc state,
 keyed collections (`CellMap`, `CellTree`, LIS reconciliation), semantic tree,
 sequence and text CRDTs (incl. `TextCrdt` delta sync, `#lztextsync`:
 `textcrdt_convergence.json` + `textcrdt_delta_sync.json`), manufactured text
-identity, the reactive family / materialization mode (`#lzmatmode`:
+identity, the keyed reactive maps / materialization (`#reactivemap`:
 `materialization/observational_transparency.json`,
 `materialization/deferral_not_deallocation.json`,
 `materialization/entry_kind_orthogonal_to_mode.json` — replayed through the
-single-threaded, async, and thread-safe families), the C-ABI FFI boundary
+single-threaded, async, and thread-safe maps), the C-ABI FFI boundary
 (`schemas/ffi.json`: message codec + channel round-trip over `snapshot_*` /
 `delta_*` wire), Harel state charts, the
 signaling protocol (`signaling/frames.json`,
@@ -532,8 +536,8 @@ names the Lean theorems it mirrors:
 | `Collection` | `collection-properties.test.js` | `setEntryValue_preserves_{membership,order,siblings}`, `moveKey_preserves_{membership,values}`, `moveKey_advances_order`, `addKey_advances_membership_and_order`, `Family.get_idempotent_after_first` |
 | `Tree` | `tree-properties.test.js` | `setNodeValue_preserves_{other_nodes,node_signals}`, `moveChild_preserves_{non_parent,parent_value}`, `moveChild_advances_order_signal_only` |
 | `Materialization` | `reactive-family.test.js` | `observe_canonical`, `eager_lazy_observationally_equivalent`, `eager_materializes_all`, `lazy_defers_slots`, `materialize_present_monotone`, `lazy_present_subset_eager`, `materialize_preserves_observe`, `cell_entries_materialized_in_every_mode`, `slot_entries_deferred_under_lazy` |
-| `Materialization` (thread-safe) | `thread-safe-reactive-family.test.js` | `materialize_present_comm`, `materialize_observe_comm` (materialization confluence) + the base materialization laws replayed through `ThreadSafeReactiveFamily` |
-| `AsyncMaterialization` | `async-reactive-family.test.js` | eventual transparency (a driven async slot resolves to the canonical value; eager ≡ lazy) + present-set monotonicity through `AsyncReactiveFamily` |
+| `Materialization` (thread-safe) | `thread-safe-reactive-family.test.js` | `materialize_present_comm`, `materialize_observe_comm` (materialization confluence) + the base materialization laws replayed through `ThreadSafeSlotMap` |
+| `AsyncMaterialization` | `async-reactive-family.test.js` | eventual transparency (a driven async slot resolves to the canonical value; eager ≡ lazy) + present-set monotonicity through `AsyncSlotMap` |
 | `ThreadSafe` | `thread-safe.test.js` | `flushBatch_empty`, `flushBatch_singleton_eq_setCell` (thread-safe batch refines `setCell`), `flushBatch_dependent_dirty`, `flushBatch_preserves_nondependent_dirty` |
 | `Reconciliation` | `reconciliation-properties.test.js` | `lisBy_longest`, `reconcile_move_minimized`, `reconcile_stable_not_invalidated` |
 | `AsyncSlotState` | `reactive-async.test.js` | `stale_completeOk_discarded`, `current_completeOk_publishes`, `current_completeErr_to_error` |

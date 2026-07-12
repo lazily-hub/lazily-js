@@ -21,7 +21,7 @@
 // Observationally this is IDENTICAL to the single-threaded `Context` regardless
 // of interleaving — the refinement lazily-formal certifies as
 // `flushBatch_singleton_eq_setCell` (thread-safe batch refines `setCell`) plus the
-// materialization-confluence theorems consumed by `ThreadSafeReactiveFamily`.
+// materialization-confluence theorems consumed by `ThreadSafeReactiveMap`.
 //
 // Rust reference: `lazily-rs/src/thread_safe.rs`.
 
@@ -148,7 +148,7 @@ export class ThreadSafeContext {
     return this.#mutex.buffer;
   }
 
-  /** The mutex guarding this context (for {@link ThreadSafeReactiveFamily}). */
+  /** The mutex guarding this context (for {@link ThreadSafeReactiveMap}). */
   get mutex() {
     return this.#mutex;
   }
