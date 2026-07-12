@@ -601,6 +601,13 @@ export class Delta {
     return this.baseEpoch === lastEpoch && this.epoch === this.baseEpoch + 1;
   }
 
+  // The accepted-event span this delta advances: epoch - baseEpoch (usually 1,
+  // > 1 for a coalesced multi-epoch-span delta; #lzsync, spec § Multi-epoch-span
+  // delta). Coerced to >= 0 for a malformed backward delta.
+  span() {
+    return Math.max(0, this.epoch - this.baseEpoch);
+  }
+
   applyStatus(lastEpoch) {
     if (this.isNextAfter(lastEpoch)) {
       return DeltaApplyStatus.apply();
@@ -1007,18 +1014,61 @@ export class ReceiptProjection {
   }
 }
 
+// Reliable-sync reverse-channel control frame: request a covering Snapshot on a
+// detected gap (#lzsync, spec § ResyncCoordinator). Carries no node content.
+export class ResyncRequest {
+  constructor({ fromEpoch }) {
+    this.fromEpoch = assertInteger(fromEpoch, "fromEpoch");
+    Object.freeze(this);
+  }
+
+  toWire() {
+    return { from_epoch: this.fromEpoch };
+  }
+
+  static fromWire(value) {
+    const object = assertObject(value, "ResyncRequest");
+    return new ResyncRequest({ fromEpoch: object.from_epoch });
+  }
+}
+
+// Reliable-sync reverse-channel control frame: prove receipt through throughEpoch
+// (#lzsync, spec § DurableOutbox). Advances the sender's outbox retention cursor
+// and doubles as the reconnect resume cursor. Carries no node content.
+export class OutboxAck {
+  constructor({ throughEpoch }) {
+    this.throughEpoch = assertInteger(throughEpoch, "throughEpoch");
+    Object.freeze(this);
+  }
+
+  toWire() {
+    return { through_epoch: this.throughEpoch };
+  }
+
+  static fromWire(value) {
+    const object = assertObject(value, "OutboxAck");
+    return new OutboxAck({ throughEpoch: object.through_epoch });
+  }
+}
+
 export class IpcMessage {
   constructor(kind, value) {
     this.kind = kind;
     this.snapshot = undefined;
     this.delta = undefined;
     this.crdtSync = undefined;
+    this.resyncRequest = undefined;
+    this.outboxAck = undefined;
     if (kind === "Snapshot") {
       this.snapshot = value;
     } else if (kind === "Delta") {
       this.delta = value;
     } else if (kind === "CrdtSync") {
       this.crdtSync = value;
+    } else if (kind === "ResyncRequest") {
+      this.resyncRequest = value;
+    } else if (kind === "OutboxAck") {
+      this.outboxAck = value;
     } else {
       throw new TypeError(`unknown IpcMessage kind: ${kind}`);
     }
@@ -1037,6 +1087,11 @@ export class IpcMessage {
     return this.kind === "CrdtSync";
   }
 
+  // Reliable-sync reverse-channel control frame (no node content).
+  get isControl() {
+    return this.kind === "ResyncRequest" || this.kind === "OutboxAck";
+  }
+
   toWire() {
     if (this.kind === "Snapshot") {
       return { Snapshot: this.snapshot.toWire() };
@@ -1044,7 +1099,13 @@ export class IpcMessage {
     if (this.kind === "Delta") {
       return { Delta: this.delta.toWire() };
     }
-    return { CrdtSync: this.crdtSync.toWire() };
+    if (this.kind === "CrdtSync") {
+      return { CrdtSync: this.crdtSync.toWire() };
+    }
+    if (this.kind === "ResyncRequest") {
+      return { ResyncRequest: this.resyncRequest.toWire() };
+    }
+    return { OutboxAck: this.outboxAck.toWire() };
   }
 
   encodeJson() {
@@ -1063,6 +1124,14 @@ export class IpcMessage {
     return new IpcMessage("CrdtSync", crdtSync);
   }
 
+  static resyncRequestMessage(request) {
+    return new IpcMessage("ResyncRequest", request);
+  }
+
+  static outboxAckMessage(ack) {
+    return new IpcMessage("OutboxAck", ack);
+  }
+
   static fromWire(value) {
     const [tag, body] = assertTagged(value, "IpcMessage");
     switch (tag) {
@@ -1072,6 +1141,10 @@ export class IpcMessage {
         return IpcMessage.delta(Delta.fromWire(body));
       case "CrdtSync":
         return IpcMessage.crdtSync(CrdtSync.fromWire(body));
+      case "ResyncRequest":
+        return IpcMessage.resyncRequestMessage(ResyncRequest.fromWire(body));
+      case "OutboxAck":
+        return IpcMessage.outboxAckMessage(OutboxAck.fromWire(body));
       default:
         throw new TypeError(`unknown IpcMessage variant: ${tag}`);
     }
@@ -1104,6 +1177,8 @@ export const LazilyFfiMessageKind = Object.freeze({
   Snapshot: 1,
   Delta: 2,
   CrdtSync: 3,
+  ResyncRequest: 4,
+  OutboxAck: 5,
 });
 
 // The FFI status codes mirror schemas/ffi.json § LazilyFfiStatus.
@@ -1115,6 +1190,161 @@ export const LazilyFfiStatus = Object.freeze({
   EncodeFailed: 4,
   Panic: 5,
 });
+
+// ---------------------------------------------------------------------------
+// Reliable sync protocol (#lzsync).
+//
+// Delivery-reliability over the Snapshot/Delta/CrdtSync planes (lazily-spec
+// § Reliable Sync): gap recovery, at-least-once outbox, and OR-set / LWW liveness
+// cells. Correctness backstop: lazily-formal ReliableSync.lean; cross-language
+// pins: lazily-spec/conformance/reliable-sync/.
+// ---------------------------------------------------------------------------
+
+// Receiver decision for an inbound frame (spec § ResyncCoordinator).
+export const ResyncAction = Object.freeze({
+  Apply: "Apply",
+  RequestSnapshot: "RequestSnapshot",
+  Ignore: "Ignore",
+});
+
+// Receiver-side reliable-sync coordinator. Holds lastEpoch (highest epoch fully
+// applied) and a resyncing flag (a RequestSnapshot is outstanding until a covering
+// Snapshot lands). ingest advances lastEpoch on Apply; the caller MUST fold the
+// frame's ops on Apply. Mirrors ReliableSync.step.
+export class ResyncCoordinator {
+  constructor(lastEpoch = 0) {
+    this.lastEpoch = assertInteger(lastEpoch, "lastEpoch");
+    this.resyncing = false;
+  }
+
+  // Classify + fold an inbound Delta; advances to delta.epoch on Apply (multi-epoch aware).
+  // Returns { action, fromEpoch? }.
+  ingestDelta(delta) {
+    if (delta.baseEpoch === this.lastEpoch) {
+      if (delta.epoch >= delta.baseEpoch + 1) {
+        this.lastEpoch = delta.epoch;
+        this.resyncing = false;
+        return { action: ResyncAction.Apply };
+      }
+      return { action: ResyncAction.Ignore }; // empty/backward epoch
+    }
+    if (delta.baseEpoch < this.lastEpoch) {
+      return { action: ResyncAction.Ignore }; // already applied — re-delivery
+    }
+    // gap: baseEpoch > lastEpoch
+    if (this.resyncing) {
+      return { action: ResyncAction.Ignore }; // suppress duplicate request
+    }
+    this.resyncing = true;
+    return { action: ResyncAction.RequestSnapshot, fromEpoch: this.lastEpoch };
+  }
+
+  // Adopt a Snapshot — a full-state frame always applies.
+  ingestSnapshot(snapshotEpoch) {
+    this.lastEpoch = snapshotEpoch;
+    this.resyncing = false;
+    return { action: ResyncAction.Apply };
+  }
+
+  // Classify an inbound IpcMessage. CrdtSync rides the CRDT plane and the
+  // reverse-channel control frames are for the sender's driver, so both are
+  // ignored by this data receiver.
+  ingest(msg) {
+    if (msg.isSnapshot) return this.ingestSnapshot(msg.snapshot.epoch);
+    if (msg.isDelta) return this.ingestDelta(msg.delta);
+    return { action: ResyncAction.Ignore };
+  }
+
+  // The IpcMessage(OutboxAck) advertising this receiver's resume cursor.
+  ack() {
+    return IpcMessage.outboxAckMessage(new OutboxAck({ throughEpoch: this.lastEpoch }));
+  }
+}
+
+// In-memory durable outbox — correct within a process lifetime; the default.
+// A DurableOutbox is any object with append/ackThrough/replayFrom/retainedEpochs.
+export class InMemoryOutbox {
+  constructor() {
+    this.entries = []; // [epoch, IpcMessage]
+    this.ackedThrough = 0;
+  }
+
+  append(epoch, msg) {
+    this.entries.push([epoch, msg]);
+  }
+
+  ackThrough(epoch) {
+    if (epoch > this.ackedThrough) this.ackedThrough = epoch;
+    this.entries = this.entries.filter(([e]) => e > this.ackedThrough);
+  }
+
+  replayFrom(cursor) {
+    return this.entries.filter(([e]) => e > cursor).sort((a, b) => a[0] - b[0]);
+  }
+
+  retainedEpochs() {
+    return this.entries.map(([e]) => e).sort((a, b) => a - b);
+  }
+}
+
+// An observed-remove set (OR-set) liveness cell. A (doc, pid) is present iff some
+// add-tag is not shadowed by a remove that observed it (add-wins over a stale
+// remove). Join is the union of both tag sets — a semilattice, so out-of-order and
+// duplicate delivery converge (ReliableSync.joinOR_*).
+export class OrSet {
+  constructor() {
+    this.adds = new Set();
+    this.removes = new Set();
+  }
+
+  add(tag) {
+    this.adds.add(tag);
+  }
+
+  removeObserved(tags) {
+    for (const t of tags) this.removes.add(t);
+  }
+
+  present() {
+    for (const t of this.adds) if (!this.removes.has(t)) return true;
+    return false;
+  }
+
+  join(other) {
+    for (const t of other.adds) this.adds.add(t);
+    for (const t of other.removes) this.removes.add(t);
+  }
+}
+
+// Total order (wallTime, logical, peer) — the wire mirror of the HLC stamp.
+export function wireStampGreater(a, b) {
+  if (a.wallTime !== b.wallTime) return a.wallTime > b.wallTime;
+  if (a.logical !== b.logical) return a.logical > b.logical;
+  return a.peer > b.peer;
+}
+
+// A last-writer-wins register liveness cell (per-pid alive, owner lease), keyed by
+// WireStamp: the highest stamp wins. Join is the stamp-max, a semilattice
+// (ReliableSync.joinReg_*).
+export class WireLwwRegister {
+  constructor(stamp, value) {
+    this.stamp = stamp;
+    this.value = value;
+  }
+
+  // Write value at stamp iff it dominates the current stamp.
+  set(stamp, value) {
+    if (wireStampGreater(stamp, this.stamp)) {
+      this.stamp = stamp;
+      this.value = value;
+    }
+  }
+
+  // Join another replica's register (keep the higher stamp).
+  join(other) {
+    this.set(other.stamp, other.value);
+  }
+}
 
 function assertString(value, name) {
   if (typeof value !== "string") {

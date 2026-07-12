@@ -233,6 +233,8 @@ export class Delta {
   readonly epoch: number;
   readonly ops: readonly DeltaOpValue[];
   isNextAfter(lastEpoch: number): boolean;
+  /** Accepted-event span `epoch - baseEpoch` (>= 0); > 1 for a multi-epoch-span delta (#lzsync). */
+  span(): number;
   applyStatus(lastEpoch: number): DeltaApplyStatus;
   filterReadable(permissions: PeerPermissions, peer: PeerId): Delta;
   toWire(): unknown;
@@ -385,21 +387,95 @@ export class ReceiptProjection {
   staleReceiptIds(): string[];
 }
 
+// Reliable-sync reverse-channel control frames (#lzsync).
+export class ResyncRequest {
+  constructor(fields: { fromEpoch: number });
+  readonly fromEpoch: number;
+  toWire(): { from_epoch: number };
+  static fromWire(value: unknown): ResyncRequest;
+}
+
+export class OutboxAck {
+  constructor(fields: { throughEpoch: number });
+  readonly throughEpoch: number;
+  toWire(): { through_epoch: number };
+  static fromWire(value: unknown): OutboxAck;
+}
+
 export class IpcMessage {
-  readonly kind: "Snapshot" | "Delta" | "CrdtSync";
+  readonly kind: "Snapshot" | "Delta" | "CrdtSync" | "ResyncRequest" | "OutboxAck";
   readonly snapshot?: Snapshot;
   readonly delta?: Delta;
   readonly crdtSync?: CrdtSync;
+  readonly resyncRequest?: ResyncRequest;
+  readonly outboxAck?: OutboxAck;
   readonly isSnapshot: boolean;
   readonly isDelta: boolean;
   readonly isCrdtSync: boolean;
+  readonly isControl: boolean;
   toWire(): unknown;
   encodeJson(): Uint8Array;
   static snapshot(snapshot: Snapshot): IpcMessage;
   static delta(delta: Delta): IpcMessage;
   static crdtSync(crdtSync: CrdtSync): IpcMessage;
+  static resyncRequestMessage(request: ResyncRequest): IpcMessage;
+  static outboxAckMessage(ack: OutboxAck): IpcMessage;
   static fromWire(value: unknown): IpcMessage;
   static decodeJson(data: Uint8Array | string): IpcMessage;
+}
+
+// Reliable sync protocol (#lzsync).
+export const ResyncAction: {
+  readonly Apply: "Apply";
+  readonly RequestSnapshot: "RequestSnapshot";
+  readonly Ignore: "Ignore";
+};
+
+export type ResyncActionResult = {
+  action: "Apply" | "RequestSnapshot" | "Ignore";
+  fromEpoch?: number;
+};
+
+export class ResyncCoordinator {
+  constructor(lastEpoch?: number);
+  lastEpoch: number;
+  resyncing: boolean;
+  ingestDelta(delta: Delta): ResyncActionResult;
+  ingestSnapshot(snapshotEpoch: number): ResyncActionResult;
+  ingest(msg: IpcMessage): ResyncActionResult;
+  ack(): IpcMessage;
+}
+
+export interface DurableOutbox {
+  append(epoch: number, msg: IpcMessage): void;
+  ackThrough(epoch: number): void;
+  replayFrom(cursor: number): Array<[number, IpcMessage]>;
+  retainedEpochs(): number[];
+}
+
+export class InMemoryOutbox implements DurableOutbox {
+  ackedThrough: number;
+  append(epoch: number, msg: IpcMessage): void;
+  ackThrough(epoch: number): void;
+  replayFrom(cursor: number): Array<[number, IpcMessage]>;
+  retainedEpochs(): number[];
+}
+
+export class OrSet {
+  add(tag: string): void;
+  removeObserved(tags: Iterable<string>): void;
+  present(): boolean;
+  join(other: OrSet): void;
+}
+
+export function wireStampGreater(a: WireStamp, b: WireStamp): boolean;
+
+export class WireLwwRegister<V = unknown> {
+  constructor(stamp: WireStamp, value: V);
+  stamp: WireStamp;
+  value: V;
+  set(stamp: WireStamp, value: V): void;
+  join(other: WireLwwRegister<V>): void;
 }
 
 export const OpKind: {
@@ -449,6 +525,8 @@ export const LazilyFfiMessageKind: {
   readonly Snapshot: 1;
   readonly Delta: 2;
   readonly CrdtSync: 3;
+  readonly ResyncRequest: 4;
+  readonly OutboxAck: 5;
 };
 
 export const LazilyFfiStatus: {

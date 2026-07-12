@@ -21,7 +21,13 @@ import { IpcMessage, LazilyFfiMessageKind, LazilyFfiStatus } from "./index.js";
 export { LazilyFfiMessageKind, LazilyFfiStatus, IpcMessage };
 
 function isUnknownKind(message) {
-  return !(message && (message.isSnapshot || message.isDelta || message.isCrdtSync));
+  return !(
+    message &&
+    (message.isSnapshot ||
+      message.isDelta ||
+      message.isCrdtSync ||
+      message.isControl)
+  );
 }
 
 /**
@@ -42,6 +48,12 @@ export function kindOf(message) {
   }
   if (message.isCrdtSync) {
     return LazilyFfiMessageKind.CrdtSync;
+  }
+  if (message.kind === "ResyncRequest") {
+    return LazilyFfiMessageKind.ResyncRequest;
+  }
+  if (message.kind === "OutboxAck") {
+    return LazilyFfiMessageKind.OutboxAck;
   }
   return LazilyFfiMessageKind.Unknown;
 }

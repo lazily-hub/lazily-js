@@ -163,10 +163,13 @@ export class WebRtcSink {
       filtered = IpcMessage.delta(
         message.delta.filterReadable(this.#permissions, this.#peer),
       );
-    } else {
+    } else if (message.isCrdtSync) {
       filtered = IpcMessage.crdtSync(
         message.crdtSync.filterReadable(this.#permissions, this.#peer),
       );
+    } else {
+      // Reliable-sync control frames carry no node content; filtering is identity.
+      filtered = message;
     }
     let frame;
     try {
