@@ -50,15 +50,23 @@ export const QueuePopError = Object.freeze({
 //
 // The shell / storage split keeps the reactive shell storage-agnostic. The
 // default backend is `VecDequeStorage` (unbounded or bounded array-backed
-// FIFO). A conforming backend MUST:
+// FIFO).
+//
+// Minimal required contract: a backend MUST implement `tryPush` / `tryPop` /
+// `len` / `isClosed` / `close`. `peek` and `capacity` are OPTIONAL capabilities
+// (default: absent) — a raw channel that satisfies only the five required
+// methods is fully conforming; it simply has no `head` reader (no `peek`) and no
+// `isFull` reader (unbounded, `capacity() → null`). A conforming backend MUST
+// also:
 //
 // 1. FIFO order — `tryPop()` returns elements in `tryPush()` order.
 // 2. Cardinality compatibility — native producer/consumer shape is a superset
 //    of SPSC; MPSC usage requires a multi-writer backend.
-// 3. Bounded contract (optional) — `capacity()` returns a number and
-//    `tryPush()` returns `QueuePushError.Full` at capacity.
+// 3. Bounded contract (optional) — a bounded backend's `capacity()` returns a
+//    number and `tryPush()` returns `QueuePushError.Full` at capacity.
 // 4. Position identity — invalidation is phrased over reader kind, not storage
-//    indices; the shell layers its own logical version counters above storage.
+//    indices; the shell layers its own logical reader-kind derivations above
+//    storage.
 
 // ---------------------------------------------------------------------------
 // VecDequeStorage — the reference unbounded/bounded backend.
@@ -166,7 +174,9 @@ export class VecDequeStorage {
  * `closed`) changed via the returned `invalidates` matrix. Wire the matrix to a
  * reactive `Context` to make the queue live-reactive. The reader-kind
  * independence law — a push to a non-empty queue does NOT invalidate the `head`
- * reader, a pop does — falls out of the value-diff this shell computes.
+ * reader, a pop does — falls out of the transition predicates this shell
+ * computes (derivable kinds by value-diff; `head` by op direction, so no `peek`
+ * is required). `peek`/`capacity` are optional storage capabilities.
  */
 export class QueueCell {
   /**
@@ -192,9 +202,8 @@ export class QueueCell {
 
   #snapshot() {
     const len = this.#storage.len();
-    const cap = this.#storage.capacity();
+    const cap = this.#storage.capacity?.() ?? null;
     return {
-      head: this.#storage.peek(),
       len,
       is_empty: len === 0,
       is_full: cap !== null && len >= cap,
@@ -202,10 +211,21 @@ export class QueueCell {
     };
   }
 
-  #diff(next) {
+  /**
+   * Diff the derivable reader-kinds (len / is_empty / is_full / closed) against
+   * the previous snapshot. `head` is NOT derived here — it depends on op
+   * *direction*, not just `len`, and deriving it would require `peek()`, which is
+   * now an optional storage capability (`relaycell-backpressure-analysis.md`
+   * §4.1). The caller passes `headChanged` from the transition predicate: a pop
+   * always changes head; a push changes it only from empty. This keeps the
+   * minimal storage contract (`tryPush`/`tryPop`/`len`/`isClosed`/`close`) free
+   * of `peek`.
+   * @param {boolean} headChanged
+   */
+  #diff(next, headChanged) {
     const prev = this.#prev;
     const invalidates = {
-      head: !deepEqual(prev.head, next.head),
+      head: headChanged,
       len: prev.len !== next.len,
       is_empty: prev.is_empty !== next.is_empty,
       is_full: prev.is_full !== next.is_full,
@@ -224,11 +244,16 @@ export class QueueCell {
    *   `invalidates` matrix is all-false.
    */
   tryPush(value) {
+    const lenBefore = this.#storage.len();
     const err = this.#storage.tryPush(value);
     if (err !== null) {
       return { returns: err, invalidates: emptyInvalidates() };
     }
-    return { returns: null, invalidates: this.#diff(this.#snapshot()) };
+    // Head changes on a push only when the queue was empty (the new element
+    // becomes the head); a push to a non-empty queue leaves head untouched —
+    // the reader-kind independence law.
+    const headChanged = lenBefore === 0;
+    return { returns: null, invalidates: this.#diff(this.#snapshot(), headChanged) };
   }
 
   /**
@@ -241,7 +266,8 @@ export class QueueCell {
     if (value === QueuePopError.Empty || value === QueuePopError.Closed) {
       return { returns: value, invalidates: emptyInvalidates() };
     }
-    return { returns: value, invalidates: this.#diff(this.#snapshot()) };
+    // A successful pop always advances the head (to the next element or empty).
+    return { returns: value, invalidates: this.#diff(this.#snapshot(), true) };
   }
 
   /**
@@ -256,14 +282,20 @@ export class QueueCell {
       return { returns: null, invalidates: emptyInvalidates() };
     }
     this.#storage.close();
-    return { returns: null, invalidates: this.#diff(this.#snapshot()) };
+    // Close touches only `closed`; head is unchanged.
+    return { returns: null, invalidates: this.#diff(this.#snapshot(), false) };
   }
 
   // -- reader-kind reads (current state, non-mutating) ----------------------
 
-  /** Current head value, or `null` when empty. */
+  /**
+   * Current head value, or `null` when empty. `peek` is an optional storage
+   * capability: a backend without it (a raw channel) has no `head` reader, so
+   * this returns `null` — exactly as an unbounded backend's `isFull` is always
+   * `false`.
+   */
   head() {
-    return this.#storage.peek();
+    return this.#storage.peek?.() ?? null;
   }
 
   /** Number of buffered elements. */
@@ -281,7 +313,7 @@ export class QueueCell {
    * for an unbounded backend.
    */
   isFull() {
-    const cap = this.#storage.capacity();
+    const cap = this.#storage.capacity?.() ?? null;
     return cap !== null && this.#storage.len() >= cap;
   }
 
@@ -292,7 +324,7 @@ export class QueueCell {
 
   /** The backend's capacity, or `null` if unbounded. */
   capacity() {
-    return this.#storage.capacity();
+    return this.#storage.capacity?.() ?? null;
   }
 
   /**
@@ -335,20 +367,4 @@ export class QueueCell {
 /** @returns {QueueInvalidates} */
 function emptyInvalidates() {
   return { head: false, len: false, is_empty: false, is_full: false, closed: false };
-}
-
-function deepEqual(a, b) {
-  if (a === b) {
-    return true;
-  }
-  if (a === null || b === null || typeof a !== "object" || typeof b !== "object") {
-    return false;
-  }
-  const aKeys = Object.keys(a);
-  const bKeys = Object.keys(b);
-  return (
-    aKeys.length === bKeys.length &&
-    aKeys.every((k) => Object.is(aKeys[k], bKeys[k])) &&
-    aKeys.every((k) => deepEqual(a[k], b[k]))
-  );
 }

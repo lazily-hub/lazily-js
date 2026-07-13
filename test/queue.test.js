@@ -317,3 +317,62 @@ test("QueueCell: reader-kind independence — push to non-empty spares head", ()
   assert.equal(pop1.returns, "a");
   assert.equal(pop1.invalidates.head, true, "pop always changes head");
 });
+
+// ---------------------------------------------------------------------------
+// Minimal contract (Phase 0, #relaycell): a raw-channel-style backend that
+// implements ONLY tryPush / tryPop / len / isClosed / close — no peek, no
+// capacity — is fully conforming; it just has no head/isFull reader.
+// ---------------------------------------------------------------------------
+
+class MinimalFifoStorage {
+  #elements = [];
+  #closed = false;
+  tryPush(value) {
+    if (this.#closed) return QueuePushError.Closed;
+    this.#elements.push(value);
+    return null;
+  }
+  tryPop() {
+    if (this.#elements.length === 0) {
+      return this.#closed ? QueuePopError.Closed : QueuePopError.Empty;
+    }
+    return this.#elements.shift();
+  }
+  len() {
+    return this.#elements.length;
+  }
+  isClosed() {
+    return this.#closed;
+  }
+  close() {
+    this.#closed = true;
+  }
+  // NB: no peek(), no capacity().
+}
+
+test("QueueCell: raw-channel backend conforms to the minimal contract", () => {
+  const q = new QueueCell({}, new MinimalFifoStorage());
+
+  assert.equal(q.isEmpty(), true);
+  const p1 = q.tryPush(1);
+  assert.equal(p1.returns, null);
+  assert.equal(p1.invalidates.head, true, "push to empty changes head");
+  q.tryPush(2);
+  assert.equal(q.len(), 2);
+
+  // No peek capability → head reader is trivially null; no capacity → not full.
+  assert.equal(q.head(), null, "no peek → no head reader");
+  assert.equal(q.isFull(), false, "unbounded → never full");
+  assert.equal(q.capacity(), null);
+
+  // FIFO drain from tryPop alone.
+  assert.equal(q.tryPop().returns, 1);
+  assert.equal(q.tryPop().returns, 2);
+  assert.equal(q.isEmpty(), true);
+
+  // Closure lifecycle: Closed distinct from Empty; push-after-close rejected.
+  q.close();
+  assert.equal(q.isClosed(), true);
+  assert.equal(q.tryPush(3).returns, "Closed");
+  assert.equal(q.tryPop().returns, "Closed");
+});

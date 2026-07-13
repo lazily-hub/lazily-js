@@ -267,8 +267,15 @@ export class Context {
       if (this.#isBatching()) {
         this.#batchedCells.add(id);
       } else {
-        this.#invalidateCellDependentsNow(id);
-        this.#flushEffects();
+        // Store-without-cascade: the new value is stored above (so a late
+        // subscriber reads it glitch-free) and lazy Slot dependents are
+        // dirty-marked, but the effect flush runs ONLY when the dependent cone
+        // actually contains an Effect. A cell with no active reactor pays no
+        // flush — the write side of the merge cost law
+        // (relaycell-backpressure-analysis.md §4.0 / §5).
+        if (this.#invalidateCellDependentsNow(id)) {
+          this.#flushEffects();
+        }
       }
     }
   }
@@ -461,28 +468,40 @@ export class Context {
 
   // -- Internals: invalidation propagation ------------------------------
 
+  /**
+   * Mark a cell's dependent cone dirty. Returns `true` iff at least one Effect
+   * was scheduled — a `false` result is the store-without-cascade fast path (no
+   * active reactor, so no flush is owed).
+   * @returns {boolean}
+   */
   #invalidateCellDependentsNow(id) {
     const node = this.#nodes.get(id);
-    if (!(node instanceof CellNode)) {
-      return;
+    if (!(node instanceof CellNode) || node.dependents.size === 0) {
+      return false;
     }
+    let scheduled = false;
     for (const d of [...node.dependents]) {
-      this.#invalidateDependentFromChangedValue(d);
+      if (this.#invalidateDependentFromChangedValue(d)) {
+        scheduled = true;
+      }
     }
+    return scheduled;
   }
 
+  /** @returns {boolean} whether an Effect was scheduled. */
   #invalidateDependentFromChangedValue(id) {
     if (this.#nodes.get(id) instanceof EffectNode) {
       this.#scheduleEffect(id, true);
-    } else {
-      this.#markSlotDirty(id, true);
+      return true;
     }
+    return this.#markSlotDirty(id, true);
   }
 
+  /** @returns {boolean} whether an Effect was scheduled during this walk. */
   #markSlotDirty(id, force) {
     const node = this.#nodes.get(id);
     if (!(node instanceof SlotNode)) {
-      return;
+      return false;
     }
     const shouldPropagate = !node.dirty || (force && !node.forceRecompute);
     node.dirty = true;
@@ -490,15 +509,18 @@ export class Context {
       node.forceRecompute = true;
     }
     if (!shouldPropagate) {
-      return;
+      return false;
     }
+    let scheduled = false;
     for (const d of [...node.dependents]) {
       if (this.#nodes.get(d) instanceof EffectNode) {
         this.#scheduleEffect(d, false);
-      } else {
-        this.#markSlotDirty(d, false);
+        scheduled = true;
+      } else if (this.#markSlotDirty(d, false)) {
+        scheduled = true;
       }
     }
+    return scheduled;
   }
 
   // -- Internals: effect scheduling / flush ------------------------------
