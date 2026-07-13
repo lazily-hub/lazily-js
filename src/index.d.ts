@@ -449,19 +449,39 @@ export class ResyncCoordinator {
 }
 
 export interface DurableOutbox {
-  append(epoch: number, msg: IpcMessage): void;
-  ackThrough(epoch: number): void;
+  append(epoch: number, msg: IpcMessage): void | Promise<void>;
+  ackThrough(epoch: number): void | Promise<void>;
   replayFrom(cursor: number): Array<[number, IpcMessage]>;
   retainedEpochs(): number[];
 }
 
-export class InMemoryOutbox implements DurableOutbox {
+export interface OutboxStore {
+  put(epoch: number, frame: Uint8Array): void | Promise<void>;
+  deleteThrough(epoch: number): void | Promise<void>;
+  scanAfter(cursor: number): Array<[number, Uint8Array]>;
+  loadCursor(): number;
+  saveCursor(epoch: number): void | Promise<void>;
+}
+
+export class Outbox<S extends OutboxStore = OutboxStore> implements DurableOutbox {
+  constructor(store: S);
+  readonly store: S;
   ackedThrough: number;
-  append(epoch: number, msg: IpcMessage): void;
-  ackThrough(epoch: number): void;
+  append(epoch: number, msg: IpcMessage): void | Promise<void>;
+  ackThrough(epoch: number): void | Promise<void>;
   replayFrom(cursor: number): Array<[number, IpcMessage]>;
   retainedEpochs(): number[];
 }
+
+export class InMemoryStore implements OutboxStore {
+  put(epoch: number, frame: Uint8Array): void;
+  deleteThrough(epoch: number): void;
+  scanAfter(cursor: number): Array<[number, Uint8Array]>;
+  loadCursor(): number;
+  saveCursor(epoch: number): void;
+}
+
+export class InMemoryOutbox extends Outbox<InMemoryStore> {}
 
 export class OrSet {
   add(tag: string): void;

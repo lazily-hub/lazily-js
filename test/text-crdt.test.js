@@ -8,10 +8,18 @@ import { TextCrdt } from "../src/text-crdt.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const specCollections = join(here, "..", "..", "lazily-spec", "conformance", "collections");
+const specCrdtTree = join(here, "..", "..", "lazily-spec", "conformance", "crdt-tree");
+const localCrdtTree = join(here, "conformance", "crdt-tree");
 
 function loadFixture(name) {
   const path = join(specCollections, name);
   assert.ok(existsSync(path), `missing spec fixture ${name}`);
+  return JSON.parse(readFileSync(path, "utf8"));
+}
+
+function loadCrdtTreeFixture(name) {
+  const specPath = join(specCrdtTree, name);
+  const path = existsSync(specPath) ? specPath : join(localCrdtTree, name);
   return JSON.parse(readFileSync(path, "utf8"));
 }
 
@@ -61,6 +69,57 @@ test("delta apply is idempotent (#lztextsync)", () => {
   assert.equal(b.applyDelta(delta), true);
   assert.equal(b.applyDelta(delta), false, "re-applying a delta is a no-op");
   assert.equal(b.text(), a.text());
+});
+
+test("CrdtTree surface delegates to TextCrdt join and value", () => {
+  const left = TextCrdt.fromStr(1, "base");
+  const right = left.fork(2);
+  right.insertStr(right.len(), "!");
+  assert.equal(left.mergeFrom(right), true);
+  assert.equal(left.value(), "base!");
+  assert.equal(left.mergeFrom(right), false, "merge replay is idempotent");
+});
+
+test("CrdtTree: algebra.json canonical fixture", () => {
+  const fixture = loadCrdtTreeFixture("algebra.json");
+  assert.equal(fixture.kind, "CrdtTree");
+
+  const mergeScenario = fixture.scenarios[0];
+  const base = TextCrdt.fromStr(mergeScenario.seed.peer, mergeScenario.seed.text);
+  const replicas = new Map(mergeScenario.replicas.map((definition) => {
+    const replica = base.fork(definition.peer);
+    replica.insertStr(replica.len(), definition.insert);
+    return [definition.name, replica];
+  }));
+  const folds = mergeScenario.merge_orders.map((order, index) => {
+    const folded = base.fork(100 + index);
+    for (const name of order) folded.mergeFrom(replicas.get(name));
+    return folded;
+  });
+  for (const folded of folds.slice(1)) {
+    assert.equal(folded.value(), folds[0].value());
+    assert.deepEqual(folded.versionVector(), folds[0].versionVector());
+  }
+
+  const snapshotScenario = fixture.scenarios[1];
+  const canonical = TextCrdt.fromStr(snapshotScenario.seed.peer, snapshotScenario.seed.text);
+  const snapshot = canonical.deltaSince({});
+  const restored = new TextCrdt(snapshotScenario.restore_peer);
+  assert.equal(restored.applyDelta(snapshot), true);
+  assert.equal(restored.value(), canonical.value());
+  assert.deepEqual(restored.deltaSince({}), snapshot, "snapshot preserves operation identity");
+  canonical.insertStr(canonical.len(), "A");
+  restored.insertStr(restored.len(), "B");
+  canonical.applyDelta(restored.deltaSince(canonical.versionVector()));
+  restored.applyDelta(canonical.deltaSince(restored.versionVector()));
+  assert.equal(canonical.value(), restored.value());
+  assert.equal(canonical.len(), snapshotScenario.seed.text.length + 2);
+
+  const steadyScenario = fixture.scenarios[2];
+  const steady = TextCrdt.fromStr(steadyScenario.seed.peer, steadyScenario.seed.text);
+  const empty = steady.deltaSince(steady.versionVector());
+  assert.deepEqual(empty, steadyScenario.expect.delta);
+  assert.equal(steady.applyDelta(empty), steadyScenario.expect.apply_changed);
 });
 
 test("concurrent inserts at same spot converge deterministically", () => {

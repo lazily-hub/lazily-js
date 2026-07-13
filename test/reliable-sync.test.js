@@ -10,8 +10,10 @@ import {
   DriverError,
   IpcMessage,
   InMemoryOutbox,
+  InMemoryStore,
   OrSet,
   OutboxAck,
+  Outbox,
   Progress,
   ResyncAction,
   ResyncCoordinator,
@@ -54,6 +56,56 @@ test("reliable-sync: OutboxAck round-trips JSON", () => {
   const text = JSON.stringify(m.toWire());
   assert.equal(text, '{"OutboxAck":{"through_epoch":41}}');
   assert.deepEqual(IpcMessage.decodeJson(text).toWire(), m.toWire());
+});
+
+test("reliable-sync: generic Outbox owns cursor, prune, and replay", () => {
+  const store = new InMemoryStore();
+  const first = new Outbox(store);
+  const one = IpcMessage.delta(new Delta({ baseEpoch: 0, epoch: 1 }));
+  const two = IpcMessage.delta(new Delta({ baseEpoch: 1, epoch: 2 }));
+  first.append(1, one);
+  first.append(2, two);
+  first.ackThrough(1);
+
+  const reopened = new Outbox(store);
+  assert.equal(reopened.ackedThrough, 1);
+  assert.deepEqual(reopened.retainedEpochs(), [2]);
+  assert.deepEqual(reopened.replayFrom(0).map(([epoch, msg]) => [epoch, msg.toWire()]), [
+    [2, two.toWire()],
+  ]);
+});
+
+test("reliable-sync: outbox_store_protocol.json", () => {
+  const fixture = loadFixture("outbox_store_protocol.json");
+  assert.equal(fixture.model, "OutboxStore");
+
+  for (const entry of fixture.scenarios) {
+    const store = new InMemoryStore();
+    const outbox = new Outbox(store);
+    for (const epoch of entry.put_epochs) {
+      outbox.append(epoch, IpcMessage.delta(new Delta({ baseEpoch: epoch - 1, epoch })));
+    }
+    if (entry.scan_after !== undefined) {
+      assert.deepEqual(
+        outbox.replayFrom(entry.scan_after).map(([epoch]) => epoch),
+        entry.expect.epochs,
+        entry.name,
+      );
+    }
+    for (const epoch of entry.ack_through ?? []) outbox.ackThrough(epoch);
+    const observed = entry.restart ? new Outbox(store) : outbox;
+    if (entry.expect.cursor !== undefined) assert.equal(observed.ackedThrough, entry.expect.cursor, entry.name);
+    if (entry.expect.loaded_cursor !== undefined) {
+      assert.equal(observed.ackedThrough, entry.expect.loaded_cursor, entry.name);
+    }
+    if (entry.expect.retained !== undefined) {
+      assert.deepEqual(observed.retainedEpochs(), entry.expect.retained, entry.name);
+    }
+    const expectedReplay = entry.expect.replay_from_zero ?? entry.expect.replay;
+    if (expectedReplay !== undefined) {
+      assert.deepEqual(observed.replayFrom(0).map(([epoch]) => epoch), expectedReplay, entry.name);
+    }
+  }
 });
 
 // -- multi_epoch_delta.json -------------------------------------------------

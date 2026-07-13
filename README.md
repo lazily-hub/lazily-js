@@ -347,7 +347,10 @@ registers for value, position, and deletion, so a move is one position
 assignment rather than delete plus reinsert. `TextCrdt` is a Fugue/RGA
 character CRDT: concurrent same-point inserts are preserved, deletes are sticky
 tombstones, and merge is commutative / associative / idempotent. Both expose
-tombstone GC behind caller-supplied causal-stability watermarks.
+tombstone GC behind caller-supplied causal-stability watermarks. `TextCrdt`
+also satisfies the `CrdtTree` document contract: its snapshot is the delta from
+an empty frontier, so full hydration and incremental exchange preserve the same
+identity-bearing state.
 
 ```js
 import { SeqCrdt } from "@lazily-hub/lazily-js/seq-crdt";
@@ -362,6 +365,16 @@ const peer = text.fork(2);
 peer.insert(2, "!");
 text.merge(peer); // converges
 ```
+
+## Durable outbox stores
+
+The root `Outbox` class owns one append/ack/prune/replay protocol over the
+five-operation `OutboxStore` boundary. `InMemoryStore` exercises that path in
+tests. Browsers can open an `IndexedDbStore` from
+`@lazily-hub/lazily-js/indexeddb-outbox`; await `append` before transport send
+and `ackThrough` before treating an acknowledgement as committed. Reopening the
+same database and channel restores the durable cursor and only unacknowledged
+frames.
 
 ## IPC wire types and capability negotiation
 

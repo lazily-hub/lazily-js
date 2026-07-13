@@ -213,6 +213,16 @@ export class TextCrdt {
     return this.text() !== before;
   }
 
+  // CrdtTree materialized-value surface.
+  value() {
+    return this.text();
+  }
+
+  // CrdtTree state-join surface.
+  mergeFrom(other) {
+    return this.merge(other);
+  }
+
   // Tombstone GC: collect a stable deleted element only when nothing references
   // it as a left origin. Bottom-up: pass 1 collects unreferenced leaf
   // tombstones, removing a leaf un-references its origin, so further passes

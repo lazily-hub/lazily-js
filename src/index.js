@@ -1269,29 +1269,85 @@ export class ResyncCoordinator {
   }
 }
 
-// In-memory durable outbox — correct within a process lifetime; the default.
-// A DurableOutbox is any object with append/ackThrough/replayFrom/retainedEpochs.
-export class InMemoryOutbox {
-  constructor() {
-    this.entries = []; // [epoch, IpcMessage]
-    this.ackedThrough = 0;
+// A byte-oriented OutboxStore is any object with
+// put/deleteThrough/scanAfter/loadCursor/saveCursor. Stores are deliberately
+// protocol-dumb; Outbox is the one append/ack/replay implementation.
+export class Outbox {
+  constructor(store) {
+    this.store = store;
+    this.ackedThrough = store.loadCursor();
   }
 
   append(epoch, msg) {
-    this.entries.push([epoch, msg]);
+    return this.store.put(epoch, msg.encodeJson());
   }
 
   ackThrough(epoch) {
-    if (epoch > this.ackedThrough) this.ackedThrough = epoch;
-    this.entries = this.entries.filter(([e]) => e > this.ackedThrough);
+    if (epoch <= this.ackedThrough) return undefined;
+    const finish = () => {
+      this.ackedThrough = Math.max(this.ackedThrough, epoch);
+    };
+    const remove = () => this.store.deleteThrough(epoch);
+    const saved = this.store.saveCursor(epoch);
+    if (saved && typeof saved.then === "function") {
+      return saved.then(remove).then(finish);
+    }
+    const removed = remove();
+    if (removed && typeof removed.then === "function") {
+      return removed.then(finish);
+    }
+    finish();
+    return undefined;
   }
 
   replayFrom(cursor) {
-    return this.entries.filter(([e]) => e > cursor).sort((a, b) => a[0] - b[0]);
+    return this.store
+      .scanAfter(Math.max(cursor, this.ackedThrough))
+      .sort((a, b) => a[0] - b[0])
+      .map(([epoch, frame]) => [epoch, IpcMessage.decodeJson(frame)]);
   }
 
   retainedEpochs() {
-    return this.entries.map(([e]) => e).sort((a, b) => a - b);
+    return this.store.scanAfter(this.ackedThrough).map(([epoch]) => epoch).sort((a, b) => a - b);
+  }
+}
+
+export class InMemoryStore {
+  constructor() {
+    this.entries = new Map();
+    this.cursor = 0;
+  }
+
+  put(epoch, frame) {
+    this.entries.set(epoch, Uint8Array.from(frame));
+  }
+
+  deleteThrough(epoch) {
+    for (const key of this.entries.keys()) {
+      if (key <= epoch) this.entries.delete(key);
+    }
+  }
+
+  scanAfter(epoch) {
+    return [...this.entries]
+      .filter(([key]) => key > epoch)
+      .sort((a, b) => a[0] - b[0])
+      .map(([key, frame]) => [key, Uint8Array.from(frame)]);
+  }
+
+  loadCursor() {
+    return this.cursor;
+  }
+
+  saveCursor(epoch) {
+    this.cursor = Math.max(this.cursor, epoch);
+  }
+}
+
+// Process-local default, routed through the same protocol as persistent stores.
+export class InMemoryOutbox extends Outbox {
+  constructor() {
+    super(new InMemoryStore());
   }
 }
 
