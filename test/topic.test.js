@@ -71,6 +71,10 @@ test("TopicCell conformance: ephemeral lifecycle", () => {
   runFixture(loadFixture("topiccell_ephemeral_lifecycle.json"));
 });
 
+test("TopicCell conformance: offline and tail bounds", () => {
+  runFixture(loadFixture("topiccell_offline_tail_bounds.json"));
+});
+
 test("TopicCell snapshot round-trip preserves durable cursors", () => {
   const topic = new TopicCell();
   topic.subscribe("durable", TopicDurability.Durable);

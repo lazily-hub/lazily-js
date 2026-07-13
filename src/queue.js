@@ -384,10 +384,16 @@ export class TopicCell {
       if (raw.durability !== TopicDurability.Durable && raw.durability !== TopicDurability.Ephemeral) {
         throw new TypeError(`invalid TopicCell durability for ${id}`);
       }
+      if (typeof raw.connected !== "boolean") {
+        throw new TypeError(`TopicCell connected flag for ${id} must be boolean`);
+      }
+      if (raw.durability === TopicDurability.Ephemeral && !raw.connected) {
+        throw new TypeError(`disconnected ephemeral TopicCell subscription ${id} must be removed`);
+      }
       this.#subscriptions.set(id, {
         cursor: raw.cursor,
         durability: raw.durability,
-        connected: Boolean(raw.connected),
+        connected: raw.connected,
       });
     }
   }
