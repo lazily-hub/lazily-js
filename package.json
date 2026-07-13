@@ -1,6 +1,6 @@
 {
   "name": "@lazily-hub/lazily-js",
-  "version": "0.17.2",
+  "version": "0.18.0",
   "description": "Native JavaScript port of the lazily reactive core: a full reactive graph (Cell/Slot/Signal/Effect), sync/async/thread-safe keyed reactive maps (ReactiveMap/CellMap/SlotMap), the lazily-spec IPC wire types + C-ABI FFI boundary (isomorphic channel + Node native binding), keyed cell collections + LIS reconciliation, the memoized semantic tree, the move-aware sequence CRDT, the Fugue/RGA text CRDT, manufactured text identity, full-Harel state charts, an FFI state-projection consumer, and an in-library instrumentation/benchmark API.",
   "license": "MIT",
   "repository": {
