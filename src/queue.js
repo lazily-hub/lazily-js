@@ -546,8 +546,196 @@ export class TopicCell {
   }
 }
 
-// WorkQueueCell remains separate future work: exclusive handoff across N
-// consumers requires an authority to serialize assignment.
+// ---------------------------------------------------------------------------
+// WorkQueueCell — competing consumers with exclusive leases (#lzworkqueue)
+// ---------------------------------------------------------------------------
+
+export const WorkQueueDeadLetterReason = Object.freeze({
+  Nack: "nack",
+  Expired: "expired",
+});
+
+/**
+ * Pull-based competing-consumer work queue.
+ *
+ * This is the portable local-authority lifecycle. The owning instance
+ * serializes `claim`; a distributed/HA host puts that decision behind its
+ * leader or consensus log while preserving the same operation outcomes.
+ */
+export class WorkQueueCell {
+  /** @param {{visibility_timeout: number, max_deliveries: number}} config */
+  constructor(config) {
+    if (!config || !Number.isSafeInteger(config.visibility_timeout) || config.visibility_timeout <= 0) {
+      throw new RangeError("visibility_timeout must be a positive safe integer");
+    }
+    if (!Number.isSafeInteger(config.max_deliveries) || config.max_deliveries < 1) {
+      throw new RangeError("max_deliveries must be at least one");
+    }
+    this.#visibilityTimeout = config.visibility_timeout;
+    this.#maxDeliveries = config.max_deliveries;
+  }
+
+  #visibilityTimeout;
+  #maxDeliveries;
+  #pending = [];
+  #inFlight = new Map();
+  #deadLetters = [];
+  #nextItemId = 0;
+  #nextDeliveryId = 0;
+
+  #counts() {
+    return {
+      pending: this.#pending.length,
+      in_flight: this.#inFlight.size,
+      dead_letters: this.#deadLetters.length,
+    };
+  }
+
+  #invalidates(before) {
+    const after = this.#counts();
+    return {
+      pending_len: before.pending !== after.pending,
+      is_empty: (before.pending === 0) !== (after.pending === 0),
+      in_flight_len: before.in_flight !== after.in_flight,
+      dead_letter_len: before.dead_letters !== after.dead_letters,
+    };
+  }
+
+  #unchanged() {
+    return {
+      pending_len: false,
+      is_empty: false,
+      in_flight_len: false,
+      dead_letter_len: false,
+    };
+  }
+
+  #validateNow(now) {
+    if (!Number.isSafeInteger(now) || now < 0) {
+      throw new RangeError("now must be a non-negative safe integer");
+    }
+  }
+
+  #fail(delivery, reason) {
+    if (delivery.attempt < this.#maxDeliveries) {
+      this.#pending.push({
+        item_id: delivery.item_id,
+        value: delivery.value,
+        attempts: delivery.attempt,
+      });
+    } else {
+      this.#deadLetters.push({
+        item_id: delivery.item_id,
+        value: delivery.value,
+        attempts: delivery.attempt,
+        reason,
+      });
+    }
+  }
+
+  /** Append a pending item and return its stable item id. */
+  push(value) {
+    const before = this.#counts();
+    if (this.#nextItemId >= Number.MAX_SAFE_INTEGER) throw new RangeError("item id exhausted");
+    const itemId = this.#nextItemId;
+    this.#nextItemId += 1;
+    this.#pending.push({ item_id: itemId, value, attempts: 0 });
+    return { returns: itemId, invalidates: this.#invalidates(before) };
+  }
+
+  /** Claim the oldest pending item for one worker. */
+  claim(worker, now) {
+    this.#validateNow(now);
+    if (this.#pending.length === 0) {
+      return { returns: null, invalidates: this.#unchanged() };
+    }
+    if (this.#nextDeliveryId >= Number.MAX_SAFE_INTEGER) throw new RangeError("delivery id exhausted");
+    const before = this.#counts();
+    const item = this.#pending.shift();
+    const deliveryId = this.#nextDeliveryId;
+    this.#nextDeliveryId += 1;
+    const delivery = {
+      delivery_id: deliveryId,
+      item_id: item.item_id,
+      value: item.value,
+      worker,
+      attempt: item.attempts + 1,
+      deadline: Math.min(Number.MAX_SAFE_INTEGER, now + this.#visibilityTimeout),
+    };
+    this.#inFlight.set(deliveryId, delivery);
+    return { returns: { ...delivery }, invalidates: this.#invalidates(before) };
+  }
+
+  /** Ack only the exact current delivery owned by `worker`. */
+  ack(worker, deliveryId) {
+    const delivery = this.#inFlight.get(deliveryId);
+    if (!delivery || delivery.worker !== worker) {
+      return { returns: false, invalidates: this.#unchanged() };
+    }
+    const before = this.#counts();
+    this.#inFlight.delete(deliveryId);
+    return { returns: true, invalidates: this.#invalidates(before) };
+  }
+
+  /** Nack a delivery, requeueing at the tail or dead-lettering at the limit. */
+  nack(worker, deliveryId) {
+    const delivery = this.#inFlight.get(deliveryId);
+    if (!delivery || delivery.worker !== worker) {
+      return { returns: false, invalidates: this.#unchanged() };
+    }
+    const before = this.#counts();
+    this.#inFlight.delete(deliveryId);
+    this.#fail(delivery, WorkQueueDeadLetterReason.Nack);
+    return { returns: true, invalidates: this.#invalidates(before) };
+  }
+
+  /** Expire every lease with `deadline < now`, in delivery-id order. */
+  reapExpired(now) {
+    this.#validateNow(now);
+    const expired = Array.from(this.#inFlight.values())
+      .filter((delivery) => delivery.deadline < now)
+      .sort((a, b) => a.delivery_id - b.delivery_id);
+    if (expired.length === 0) {
+      return { returns: 0, invalidates: this.#unchanged() };
+    }
+    const before = this.#counts();
+    for (const delivery of expired) {
+      this.#inFlight.delete(delivery.delivery_id);
+      this.#fail(delivery, WorkQueueDeadLetterReason.Expired);
+    }
+    return { returns: expired.length, invalidates: this.#invalidates(before) };
+  }
+
+  pendingLen() {
+    return this.#pending.length;
+  }
+
+  isEmpty() {
+    return this.#pending.length === 0;
+  }
+
+  inFlightLen() {
+    return this.#inFlight.size;
+  }
+
+  deadLetterLen() {
+    return this.#deadLetters.length;
+  }
+
+  pendingItems() {
+    return this.#pending.map((item) => ({ ...item }));
+  }
+
+  inFlightDeliveries() {
+    return Array.from(this.#inFlight.values(), (delivery) => ({ ...delivery })).sort(
+      (a, b) => a.delivery_id - b.delivery_id,
+    );
+  }
+
+  deadLetterItems() {
+    return this.#deadLetters.map((item) => ({ ...item }));
+  }
+}
 
 // ---------------------------------------------------------------------------
 // helpers

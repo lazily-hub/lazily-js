@@ -136,5 +136,52 @@ endOffset(): number;
 elements(): unknown[];
 subscription(id: string): TopicSubscriptionSnapshot | null;
 subscriptions(): Record<string, TopicSubscriptionSnapshot>;
-snapshot(): Required<TopicInitial>;
+  snapshot(): Required<TopicInitial>;
+}
+
+export type WorkQueueInvalidates = {
+  pending_len: boolean;
+  is_empty: boolean;
+  in_flight_len: boolean;
+  dead_letter_len: boolean;
+};
+
+export type WorkQueueItem<T = unknown> = {item_id: number; value: T; attempts: number};
+
+export type WorkQueueDelivery<T = unknown> = {
+  delivery_id: number;
+  item_id: number;
+  value: T;
+  worker: string;
+  attempt: number;
+  deadline: number;
+};
+
+export type WorkQueueDeadLetter<T = unknown> = {
+  item_id: number;
+  value: T;
+  attempts: number;
+  reason: "nack" | "expired";
+};
+
+export const WorkQueueDeadLetterReason: Readonly<{Nack: "nack"; Expired: "expired"}>;
+
+/** Pull-based competing-consumer work queue with exclusive delivery leases. */
+export class WorkQueueCell<T = unknown> {
+  constructor(config: {visibility_timeout: number; max_deliveries: number});
+  push(value: T): {returns: number; invalidates: WorkQueueInvalidates};
+  claim(worker: string, now: number): {
+    returns: WorkQueueDelivery<T> | null;
+    invalidates: WorkQueueInvalidates;
+  };
+  ack(worker: string, deliveryId: number): {returns: boolean; invalidates: WorkQueueInvalidates};
+  nack(worker: string, deliveryId: number): {returns: boolean; invalidates: WorkQueueInvalidates};
+  reapExpired(now: number): {returns: number; invalidates: WorkQueueInvalidates};
+  pendingLen(): number;
+  isEmpty(): boolean;
+  inFlightLen(): number;
+  deadLetterLen(): number;
+  pendingItems(): WorkQueueItem<T>[];
+  inFlightDeliveries(): WorkQueueDelivery<T>[];
+  deadLetterItems(): WorkQueueDeadLetter<T>[];
 }

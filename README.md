@@ -52,6 +52,7 @@ notes and platform carve-outs lives in
 | Stable-id alignment (manufactured identity) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Reactive queue (`QueueCell` SPSC/MPSC + `QueueStorage` adapter) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Broadcast topic (`TopicCell`) — independent cursors + durable replay + safe GC (`#lztopiccell`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Competing-consumer work queue (`WorkQueueCell`) — exclusive leases + ack/nack + redelivery + DLQ (`#lzworkqueue`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Merge algebra + `MergeCell` — associative `MergePolicy` (`KeepLatest`/`Sum`/`Max`/`SetUnion`/`RawFifo`), `Cell ≡ MergeCell<KeepLatest>`, `Reactive`/`Source` split (`#relaycell`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | RelayCell — conflating relay + `BackpressurePolicy` + `SpillStore` + `Transport` + Inbox/Outbox + Rate/Window/Expiry/Priority/keyed policies (`#relaycell`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Free-text character CRDT (`TextCrdt`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
@@ -339,6 +340,26 @@ const tree = new SemTree(ctx, rootSpec, (value, children) =>
 tree.value(); // 1
 tree.setValue("leaf", 99); // only the ancestor chain recomputes
 ```
+
+## Competing-consumer work queue
+
+The `queue` package exports `WorkQueueCell`, a pull-based local authority with
+exclusive FIFO claims, stable item IDs, fresh delivery IDs per attempt,
+worker-owned ack/nack, strict visibility-timeout redelivery, bounded attempts,
+and DLQ routing. Every mutation reports exact `pending_len` / `is_empty` /
+`in_flight_len` / `dead_letter_len` invalidation metadata.
+
+```js
+import { WorkQueueCell } from "@lazily-hub/lazily-js/queue";
+
+const work = new WorkQueueCell({ visibility_timeout: 30, max_deliveries: 3 });
+work.push("render-report");
+const delivery = work.claim("worker-a", 100).returns;
+work.ack("worker-a", delivery.delivery_id);
+```
+
+The instance serializes local claims; distributed/HA assignment still requires
+a leader or consensus-committed assignment log.
 
 ## CRDTs
 
