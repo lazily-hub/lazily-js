@@ -69,6 +69,10 @@
       "types": "./src/queue.d.ts",
       "default": "./src/queue.js"
     },
+    "./merge": {
+      "types": "./src/merge.d.ts",
+      "default": "./src/merge.js"
+    },
     "./sem-tree": {
       "types": "./src/sem-tree.d.ts",
       "default": "./src/sem-tree.js"
@@ -103,7 +107,7 @@
     }
   },
   "scripts": {
-    "build": "node --check src/index.js && node --check src/transport.js && node --check src/shm-backend.js && node --check src/reactive.js && node --check src/reactive-async.js && node --check src/reactive-family.js && node --check src/async-reactive-family.js && node --check src/thread-safe.js && node --check src/thread-safe-reactive-family.js && node --check src/ffi.js && node --check src/ffi-node.js && node --check src/instrumentation.js && node --check src/state-machine.js && node --check src/statechart.js && node --check src/collections.js && node --check src/queue.js && node --check src/sem-tree.js && node --check src/stable-id.js && node --check src/seq-crdt.js && node --check src/text-crdt.js && node --check src/utf8-offsets.js && node --check src/lossless-tree-crdt.js && node --check src/state-projection.js && node --check src/graph-view.js && node --check src/signaling.js && node --check src/distributed.js",
+    "build": "node --check src/index.js && node --check src/transport.js && node --check src/shm-backend.js && node --check src/reactive.js && node --check src/reactive-async.js && node --check src/reactive-family.js && node --check src/async-reactive-family.js && node --check src/thread-safe.js && node --check src/thread-safe-reactive-family.js && node --check src/ffi.js && node --check src/ffi-node.js && node --check src/instrumentation.js && node --check src/state-machine.js && node --check src/statechart.js && node --check src/collections.js && node --check src/queue.js && node --check src/merge.js && node --check src/sem-tree.js && node --check src/stable-id.js && node --check src/seq-crdt.js && node --check src/text-crdt.js && node --check src/utf8-offsets.js && node --check src/lossless-tree-crdt.js && node --check src/state-projection.js && node --check src/graph-view.js && node --check src/signaling.js && node --check src/distributed.js",
     "test:formal": "node scripts/formal-check.mjs",
     "bench": "node bench/context.bench.mjs",
     "bench:scale": "node --max-old-space-size=8192 bench/scale.bench.mjs",
