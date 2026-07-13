@@ -87,5 +87,54 @@ export class QueueCell {
   isFull(): boolean;
   isClosed(): boolean;
   capacity(): number | null;
-  elements(): unknown[];
+elements(): unknown[];
+}
+
+export type TopicDurabilityLabel = "durable" | "ephemeral";
+export const TopicDurability: Readonly<{ Durable: "durable"; Ephemeral: "ephemeral" }>;
+
+export type TopicSubscribeOutcomeLabel = "Created" | "Reconnected" | "AlreadyConnected";
+export const TopicSubscribeOutcome: Readonly<{
+Created: "Created";
+Reconnected: "Reconnected";
+AlreadyConnected: "AlreadyConnected";
+}>;
+
+export type TopicSubscriptionSnapshot = {
+cursor: number;
+durability: TopicDurabilityLabel;
+connected: boolean;
+};
+
+export type TopicInitial = {
+base_offset?: number;
+elements?: unknown[];
+subscriptions?: Record<string, TopicSubscriptionSnapshot>;
+};
+
+export type TopicMutationResult = {
+returns: unknown;
+invalidates: Record<string, boolean>;
+offset?: number;
+};
+
+/** Broadcast log with independent, non-destructive subscriber cursors. */
+export class TopicCell {
+constructor(initial?: TopicInitial);
+static from(initial?: TopicInitial): TopicCell;
+subscribe(id: string, durability: TopicDurabilityLabel): TopicMutationResult;
+reconnect(id: string): TopicMutationResult;
+disconnect(id: string): TopicMutationResult;
+publish(value: unknown): TopicMutationResult;
+readStream(id: string): unknown[];
+read(id: string): unknown;
+advance(id: string): TopicMutationResult;
+restart(id: string): TopicMutationResult;
+gc(): TopicMutationResult;
+baseOffset(): number;
+endOffset(): number;
+elements(): unknown[];
+subscription(id: string): TopicSubscriptionSnapshot | null;
+subscriptions(): Record<string, TopicSubscriptionSnapshot>;
+snapshot(): Required<TopicInitial>;
 }

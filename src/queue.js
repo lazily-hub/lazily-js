@@ -342,23 +342,206 @@ export class QueueCell {
 }
 
 // ---------------------------------------------------------------------------
-// Future primitives (stubs) — documented, not in v1 conformance.
+// TopicCell — broadcast log with independent subscriber cursors (#lztopiccell)
 // ---------------------------------------------------------------------------
-//
-// TopicCell (SPMC broadcast / MPMC pub-sub) and WorkQueueCell (true MPMC with
-// exclusive handoff) are genuinely distinct primitives — they differ in
-// *invalidation model and handoff semantics*, not producer/consumer
-// cardinality (see `lazily-spec/cell-model.md` § "Future queue primitives").
-//
-// - TopicCell — every subscriber receives every pushed element; each subscriber
-//   keeps its own cursor; GC bounded by the slowest cursor. Lands with the
-//   distributed-queue PRD Phase 3. Formal stub: lazily-formal/TopicCell.lean.
-//
-// - WorkQueueCell — N consumers compete for elements; each element delivered to
-//   exactly one consumer (exclusive handoff). Requires an authority (leader) to
-//   serialize pop-assignment; pure CRDT cannot provide it. Lands with the
-//   distributed-queue PRD Phase 2 (consensus core). Formal stub:
-//   lazily-formal/WorkQueueCell.lean.
+
+export const TopicDurability = Object.freeze({
+  Durable: "durable",
+  Ephemeral: "ephemeral",
+});
+
+export const TopicSubscribeOutcome = Object.freeze({
+  Created: "Created",
+  Reconnected: "Reconnected",
+  AlreadyConnected: "AlreadyConnected",
+});
+
+/**
+ * Broadcast topic: every subscriber receives every published element using an
+ * independent, non-destructive cursor. Mutating operations return the exact
+ * per-subscriber invalidation matrix used by the canonical fixtures.
+ */
+export class TopicCell {
+  /**
+   * @param {{
+   *   base_offset?: number,
+   *   elements?: unknown[],
+   *   subscriptions?: Record<string, {cursor: number, durability: "durable" | "ephemeral", connected: boolean}>
+   * }} [initial]
+   */
+  constructor(initial = {}) {
+    this.#baseOffset = initial.base_offset ?? 0;
+    this.#elements = Array.from(initial.elements ?? []);
+    this.#subscriptions = new Map();
+    if (!Number.isSafeInteger(this.#baseOffset) || this.#baseOffset < 0) {
+      throw new RangeError("TopicCell base_offset must be a non-negative safe integer");
+    }
+    const end = this.endOffset();
+    for (const [id, raw] of Object.entries(initial.subscriptions ?? {})) {
+      if (!Number.isSafeInteger(raw.cursor) || raw.cursor < this.#baseOffset || raw.cursor > end) {
+        throw new RangeError(`TopicCell cursor for ${id} is outside the retained offset range`);
+      }
+      if (raw.durability !== TopicDurability.Durable && raw.durability !== TopicDurability.Ephemeral) {
+        throw new TypeError(`invalid TopicCell durability for ${id}`);
+      }
+      this.#subscriptions.set(id, {
+        cursor: raw.cursor,
+        durability: raw.durability,
+        connected: Boolean(raw.connected),
+      });
+    }
+  }
+
+  #baseOffset;
+  #elements;
+  #subscriptions;
+
+  static from(initial = {}) {
+    return new TopicCell(initial);
+  }
+
+  #allFalse() {
+    return Object.fromEntries(Array.from(this.#subscriptions.keys(), (id) => [id, false]));
+  }
+
+  #only(id, changed) {
+    const invalidates = this.#allFalse();
+    invalidates[id] = changed;
+    return invalidates;
+  }
+
+  /** Create at tail, or reconnect an existing durable identity in place. */
+  subscribe(id, durability) {
+    const existing = this.#subscriptions.get(id);
+    if (existing) {
+      if (existing.connected) {
+        return {
+          returns: TopicSubscribeOutcome.AlreadyConnected,
+          invalidates: this.#allFalse(),
+        };
+      }
+      existing.connected = true;
+      return {
+        returns: TopicSubscribeOutcome.Reconnected,
+        invalidates: this.#only(id, true),
+      };
+    }
+    if (durability !== TopicDurability.Durable && durability !== TopicDurability.Ephemeral) {
+      throw new TypeError(`invalid TopicCell durability for ${id}`);
+    }
+    this.#subscriptions.set(id, {
+      cursor: this.endOffset(),
+      durability,
+      connected: true,
+    });
+    return { returns: TopicSubscribeOutcome.Created, invalidates: this.#only(id, true) };
+  }
+
+  /** Reconnect a durable identity; unknown ids are created at the current tail. */
+  reconnect(id) {
+    return this.subscribe(id, TopicDurability.Durable);
+  }
+
+  /** Durable ids remain offline; ephemeral ids are removed. */
+  disconnect(id) {
+    const sub = this.#subscriptions.get(id);
+    if (!sub || !sub.connected) {
+      return { returns: null, invalidates: this.#allFalse() };
+    }
+    const invalidates = this.#only(id, true);
+    if (sub.durability === TopicDurability.Ephemeral) {
+      this.#subscriptions.delete(id);
+    } else {
+      sub.connected = false;
+    }
+    return { returns: null, invalidates };
+  }
+
+  /** Append one element without moving any cursor. */
+  publish(value) {
+    const offset = this.endOffset();
+    this.#elements.push(value);
+    const invalidates = Object.fromEntries(
+      Array.from(this.#subscriptions, ([id, sub]) => [
+        id,
+        sub.connected && sub.cursor <= offset,
+      ]),
+    );
+    return { returns: null, offset, invalidates };
+  }
+
+  /** Unread suffix for a connected subscriber. */
+  readStream(id) {
+    const sub = this.#subscriptions.get(id);
+    if (!sub || !sub.connected) return [];
+    return this.#elements.slice(Math.max(0, sub.cursor - this.#baseOffset));
+  }
+
+  /** Element at a subscriber cursor, or null at the tail/offline. */
+  read(id) {
+    return this.readStream(id)[0] ?? null;
+  }
+
+  /** Advance only the named connected cursor by one. */
+  advance(id) {
+    const sub = this.#subscriptions.get(id);
+    if (!sub || !sub.connected || sub.cursor >= this.endOffset()) {
+      return { returns: null, invalidates: this.#allFalse() };
+    }
+    const value = this.#elements[sub.cursor - this.#baseOffset];
+    sub.cursor += 1;
+    return { returns: value, invalidates: this.#only(id, true) };
+  }
+
+  /** Process restart is observational: persisted durable state is unchanged. */
+  restart(_id) {
+    return { returns: null, invalidates: this.#allFalse() };
+  }
+
+  /** Remove only the prefix below the minimum durable absolute cursor. */
+  gc() {
+    const durable = Array.from(this.#subscriptions.values())
+      .filter((sub) => sub.durability === TopicDurability.Durable)
+      .map((sub) => sub.cursor);
+    const frontier = durable.length === 0 ? this.endOffset() : Math.min(...durable);
+    const removed = frontier - this.#baseOffset;
+    this.#elements.splice(0, removed);
+    this.#baseOffset = frontier;
+    return { returns: removed, invalidates: this.#allFalse() };
+  }
+
+  baseOffset() {
+    return this.#baseOffset;
+  }
+
+  endOffset() {
+    return this.#baseOffset + this.#elements.length;
+  }
+
+  elements() {
+    return Array.from(this.#elements);
+  }
+
+  subscription(id) {
+    const sub = this.#subscriptions.get(id);
+    return sub ? { ...sub } : null;
+  }
+
+  subscriptions() {
+    return Object.fromEntries(Array.from(this.#subscriptions, ([id, sub]) => [id, { ...sub }]));
+  }
+
+  snapshot() {
+    return {
+      base_offset: this.#baseOffset,
+      elements: this.elements(),
+      subscriptions: this.subscriptions(),
+    };
+  }
+}
+
+// WorkQueueCell remains separate future work: exclusive handoff across N
+// consumers requires an authority to serialize assignment.
 
 // ---------------------------------------------------------------------------
 // helpers
