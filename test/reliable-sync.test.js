@@ -81,6 +81,13 @@ test("reliable-sync: outbox_store_protocol.json", () => {
 
   for (const entry of fixture.scenarios) {
     const store = new InMemoryStore();
+    if (entry.save_cursor !== undefined) {
+      const handles = { stale: new Outbox(store), current: new Outbox(store) };
+      for (const write of entry.save_cursor) handles[write.handle].ackThrough(write.epoch);
+      const observed = new Outbox(store);
+      assert.equal(observed.ackedThrough, entry.expect.loaded_cursor, entry.name);
+      continue;
+    }
     const outbox = new Outbox(store);
     for (const epoch of entry.put_epochs) {
       outbox.append(epoch, IpcMessage.delta(new Delta({ baseEpoch: epoch - 1, epoch })));

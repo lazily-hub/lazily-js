@@ -101,9 +101,16 @@ export class IndexedDbStore {
   saveCursor(epoch) {
     const previous = this.#cursorWrites.catch(() => undefined);
     const write = previous.then(async () => {
-      const next = Math.max(this.#cursor, epoch);
+      let next = Math.max(this.#cursor, epoch);
       await this.#transaction("cursors", "readwrite", (store) => {
-        store.put({ channel: this.#channel, epoch: next });
+        // IndexedDB serializes readwrite transactions that overlap this store.
+        // Reading and writing inside one transaction makes this a database-wide
+        // max, not merely a per-JavaScript-handle max.
+        const request = store.get(this.#channel);
+        request.onsuccess = () => {
+          next = Math.max(request.result?.epoch ?? 0, this.#cursor, epoch);
+          store.put({ channel: this.#channel, epoch: next });
+        };
       });
       this.#cursor = next;
     });

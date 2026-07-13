@@ -1284,10 +1284,11 @@ export class Outbox {
 
   ackThrough(epoch) {
     if (epoch <= this.ackedThrough) return undefined;
+    const target = () => Math.max(this.ackedThrough, epoch, this.store.loadCursor());
     const finish = () => {
-      this.ackedThrough = Math.max(this.ackedThrough, epoch);
+      this.ackedThrough = target();
     };
-    const remove = () => this.store.deleteThrough(epoch);
+    const remove = () => this.store.deleteThrough(target());
     const saved = this.store.saveCursor(epoch);
     if (saved && typeof saved.then === "function") {
       return saved.then(remove).then(finish);

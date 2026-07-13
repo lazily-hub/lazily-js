@@ -41,3 +41,21 @@ test("IndexedDbStore keeps concurrent acknowledgements monotone", async () => {
   assert.deepEqual(reopened.replayFrom(0), []);
   reopenedStore.close();
 });
+
+test("IndexedDbStore stale handle cannot regress serialized cursor", async () => {
+  const database = `lazily-outbox-stale-${Date.now()}-${Math.random()}`;
+  const staleStore = await IndexedDbStore.open({ channel: "doc", database, indexedDB });
+  const currentStore = await IndexedDbStore.open({ channel: "doc", database, indexedDB });
+  const stale = new Outbox(staleStore);
+  const current = new Outbox(currentStore);
+
+  await current.ackThrough(9);
+  await stale.ackThrough(3);
+  assert.equal(stale.ackedThrough, 9);
+  staleStore.close();
+  currentStore.close();
+
+  const reopenedStore = await IndexedDbStore.open({ channel: "doc", database, indexedDB });
+  assert.equal(new Outbox(reopenedStore).ackedThrough, 9);
+  reopenedStore.close();
+});
