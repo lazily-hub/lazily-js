@@ -38,7 +38,7 @@ notes and platform carve-outs lives in
 <!-- coverage-table:start -->
 | Feature | Rust | Python | Kotlin | JS | Dart | Zig | Go | C++ |
 | --------- | :----: | :------: | :------: | :--: | :----: | :---: | :--: | :---: |
-| Reactive graph — `Cell` / `Slot` / `Signal` / `Effect` / memo / batch | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Reactive graph — core `Cell` / `Slot` / `Effect` (+ derived `Signal` = `Slot.eager`) / memo / batch | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Keyed-map materialization (`SlotMap`) — mint-on-access derived slots: transparency + deferral (`#lzmatmode`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Thread-safe keyed map (`ThreadSafeSlotMap`) — `Send + Sync` + materialization confluence (`#lzmatmode`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Async keyed map (`AsyncSlotMap`) — eventual transparency (`#lzmatmode`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
@@ -78,6 +78,14 @@ notes and platform carve-outs lives in
 | Permission boundary (`PeerPermissions` / `RemoteOp`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Capability negotiation (`SessionHandshake`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Instrumentation / benchmarks | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Temporal sources — `TimerCell` / `IntervalCell` / `CronCell` / `DeadlineCell` over a logical clock (`#lztime`) | ✅ | — | ✅ | ✅ | — | — | — | — |
+| Rate-shaping operators — `DebounceCell` / `ThrottleCell` / `SampleCell` / `ProbabilisticSampleCell` (`#lzrateshape`) | ✅ | — | ✅ | ✅ | — | — | — | — |
+| Membership + failure detection — `MembershipCell` (SWIM + Phi-accrual) / `PeerSet` / `PeerChangeEvent` (`#lzmemb`) | ✅ | — | ✅ | ✅ | — | — | — | — |
+| Distributed coordination — `LeaseCell` / `LeaderCell` / `LockCell` / `SemaphoreCell` / `BarrierCell`+`QuorumCell` (`#lzcoord`) | ✅ | — | ✅ | ✅ | — | — | — | — |
+| Presence + ephemeral plane — `PresenceCell` / `AwarenessCell` / `EphemeralCell` + `Ephemeral`/`Durable` markers (`#lzpresence`) | ✅ | — | ✅ | ✅ | — | — | — | — |
+| Stream windowing — `TumblingWindow` / `SlidingWindow` / `SessionWindow` over the merge algebra (`#lzwindow`) | ✅ | — | ✅ | ✅ | — | — | — | — |
+| Fault tolerance — `CircuitBreakerCell` / `RetryPolicyCell` / `BulkheadCell` / `TimeoutCell` (`#lzresilience`) | ✅ | — | ✅ | ✅ | — | — | — | — |
+| Embedded-service plane — `HealthCell` / `ReadinessCell` / `DiscoveryCell` / `ServiceRegistry` (`#lzservice`) | ✅ | — | ✅ | ✅ | — | — | — | — |
 <!-- coverage-table:end -->
 
 Two JS ✅ marks are backed by runtime-specific mechanisms while keeping the core isomorphic:
@@ -119,9 +127,11 @@ JavaScript. The family is:
 
 - **Slot** - lazy, memoized derived value;
 - **Cell** - mutable source value;
-- **Signal** - eager derived value that re-materializes as soon as a dependency
-  invalidates;
 - **Effect** - side-effecting observer with cleanup.
+
+The core primitives are **Cell** / **Slot** / **Effect**. **`Signal` is a
+derived construct, not a core primitive** — `Signal ≡ Slot.eager`, a memo Slot
+plus a puller Effect that re-materializes as soon as a dependency invalidates.
 
 Dependencies are discovered dynamically while a slot/effect/signal computes.
 Invalidation is pull-based and glitch-free; `memo`/`Signal` use equality guards
