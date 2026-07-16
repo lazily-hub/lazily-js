@@ -19,7 +19,7 @@ like-for-like single-process counterpart here and are intentionally omitted.
 
 <!-- benchmark-results:start -->
 
-Generated for package `@lazily-hub/lazily-js` version `0.6.0`.
+Generated for package `@lazily-hub/lazily-js` version `0.19.0`.
 
 Environment: Node.js `26.4.0` on `linux x64`.
 
@@ -33,16 +33,16 @@ Mean wall-clock time per iteration; 95% CI half-width from the standard error.
 
 | Group | Case | Mean | 95% CI | p75 | p99 | Samples |
 |---|---|---:|---:|---:|---:|---:|
-| cached_reads | context | 57.798 ns | ± 20.941 ns | 46.398 ns | 124.744 ns | 100 |
-| cold_first_get | context | 669.220 ns | ± 8.630 ns | 670.000 ns | 802.610 ns | 100 |
-| dependency_fan_out | context / 32 | 7.448 us | ± 824.968 ns | 6.783 us | 34.205 us | 100 |
-| dependency_fan_out | context / 256 | 43.766 us | ± 1.064 us | 43.270 us | 49.513 us | 100 |
-| set_cell_invalidation | high_fan_out / 512 | 10.737 us | ± 376.524 ns | 10.113 us | 17.141 us | 100 |
-| memo_equality_suppression | context | 2.387 us | ± 193.801 ns | 2.310 us | 2.864 us | 100 |
-| effect_flushing | context | 211.187 ns | ± 20.150 ns | 221.482 ns | 524.491 ns | 100 |
-| batch_storms | context / 64 | 30.430 us | ± 1.295 us | 30.815 us | 49.775 us | 99 |
-| typed_cache_reads | context_cell | 31.325 ns | ± 1.052 ns | 30.255 ns | 58.102 ns | 100 |
-| typed_cache_reads | context_slot | 120.262 ns | ± 4.805 ns | 118.099 ns | 220.409 ns | 100 |
+| cached_reads | context | 31.707 ns | ± 1.826 ns | 29.867 ns | 78.222 ns | 100 |
+| cold_first_get | context | 698.810 ns | ± 46.591 ns | 600.000 ns | 1.410 us | 100 |
+| dependency_fan_out | context / 32 | 5.263 us | ± 858.863 ns | 4.753 us | 16.289 us | 100 |
+| dependency_fan_out | context / 256 | 47.575 us | ± 3.908 us | 45.595 us | 132.218 us | 100 |
+| set_cell_invalidation | high_fan_out / 512 | 6.692 us | ± 3.311 us | 5.840 us | 111.143 us | 100 |
+| memo_equality_suppression | context | 2.546 us | ± 256.417 ns | 2.553 us | 5.435 us | 100 |
+| effect_flushing | context | 129.166 ns | ± 11.208 ns | 131.217 ns | 406.377 ns | 100 |
+| batch_storms | context / 64 | 12.092 us | ± 123.522 ns | 12.286 us | 14.168 us | 100 |
+| typed_cache_reads | context_cell | 33.701 ns | ± 2.005 ns | 32.755 ns | 55.480 ns | 100 |
+| typed_cache_reads | context_slot | 42.440 ns | ± 2.855 ns | 40.074 ns | 106.268 ns | 100 |
 
 <!-- benchmark-results:end -->
 

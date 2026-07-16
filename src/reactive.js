@@ -36,8 +36,7 @@ function defaultEqual(a, b) {
   const bKeys = Object.keys(b);
   return (
     aKeys.length === bKeys.length &&
-    aKeys.every((k) => Object.is(aKeys[k], bKeys[k])) &&
-    aKeys.every((k) => defaultEqual(a[k], b[k]))
+    aKeys.every((k) => k in b && defaultEqual(a[k], b[k]))
   );
 }
 
@@ -74,10 +73,31 @@ export class SignalHandle {
 
 // -- Context -----------------------------------------------------------------
 
+function edgeInsert(edges, id) {
+  for (let i = 0; i < edges.length; i++) {
+    if (edges[i] === id) {
+      return false;
+    }
+  }
+  edges.push(id);
+  return true;
+}
+
+function edgeRemove(edges, id) {
+  for (let i = 0; i < edges.length; i++) {
+    if (edges[i] === id) {
+      edges[i] = edges[edges.length - 1];
+      edges.pop();
+      return true;
+    }
+  }
+  return false;
+}
+
 class CellNode {
   constructor(value) {
     this.value = value;
-    this.dependents = new Set();
+    this.dependents = [];
   }
 }
 
@@ -87,8 +107,8 @@ class SlotNode {
     this.hasValue = false;
     this.memo = memo;
     this.compute = compute;
-    this.dependencies = new Set();
-    this.dependents = new Set();
+    this.dependencies = [];
+    this.dependents = [];
     this.dirty = false;
     this.forceRecompute = false;
     this.inProgress = false;
@@ -98,18 +118,19 @@ class SlotNode {
 class EffectNode {
   constructor(run) {
     this.run = run;
-    this.dependencies = new Set();
+    this.dependencies = [];
     this.cleanup = null;
     this.forceRun = false;
   }
 }
 
 export class Context {
-  #nodes = new Map();
+  #nodes = [];
   #nextId = 1;
   #freeIds = [];
   #trackingStack = [];
   #pendingEffects = [];
+  #pendingHead = 0;
   #scheduledEffects = new Set();
   #flushingEffects = false;
   #batchDepth = 0;
@@ -167,7 +188,7 @@ export class Context {
 
   #cellAny(value) {
     const id = this.#allocId();
-    this.#nodes.set(id, new CellNode(value));
+    this.#nodes[id] = new CellNode(value);
     return id;
   }
 
@@ -185,7 +206,7 @@ export class Context {
 
   #slotAny(memo, compute) {
     const id = this.#allocId();
-    this.#nodes.set(id, new SlotNode(compute, memo));
+    this.#nodes[id] = new SlotNode(compute, memo);
     return id;
   }
 
@@ -206,7 +227,7 @@ export class Context {
     const id = this.#allocId();
     const node = new EffectNode(run);
     node.forceRun = true; // force the initial run on registration
-    this.#nodes.set(id, node);
+    this.#nodes[id] = node;
     this.#scheduleEffect(id, false);
     this.#flushEffects();
     return id;
@@ -232,7 +253,7 @@ export class Context {
       this.#registerDependency(id, frame);
     }
     this.#refreshSlot(id);
-    const node = this.#nodes.get(id);
+    const node = this.#nodes[id];
     if (!(node instanceof SlotNode) || !node.hasValue) {
       throw new Error(`slot ${id} has no value`);
     }
@@ -244,7 +265,7 @@ export class Context {
     if (frame !== undefined) {
       this.#registerDependency(id, frame);
     }
-    const node = this.#nodes.get(id);
+    const node = this.#nodes[id];
     if (!(node instanceof CellNode)) {
       throw new Error(`get_cell on non-cell id ${id}`);
     }
@@ -258,7 +279,7 @@ export class Context {
   }
 
   #setCellAny(id, value) {
-    const node = this.#nodes.get(id);
+    const node = this.#nodes[id];
     if (!(node instanceof CellNode)) {
       throw new Error(`set_cell on non-cell id ${id}`);
     }
@@ -302,10 +323,20 @@ export class Context {
   }
 
   #flushBatched() {
-    const cells = [...this.#batchedCells];
-    this.#batchedCells.clear();
+    const cells = this.#batchedCells;
+    this.#batchedCells = new Set();
+    const roots = [];
     for (const id of cells) {
-      this.#invalidateCellDependentsNow(id);
+      const node = this.#nodes[id];
+      if (node instanceof CellNode) {
+        for (const d of node.dependents) {
+          roots.push(d);
+        }
+      }
+    }
+    const effects = this.#markFrontier(roots);
+    for (let i = 0; i < effects.length; i++) {
+      this.#scheduleEffect(effects[i][0], effects[i][1]);
     }
     this.#flushEffects();
   }
@@ -318,18 +349,18 @@ export class Context {
 
   disposeEffect(handle) {
     const id = handle.id;
-    const idx = this.#pendingEffects.indexOf(id);
+    const idx = this.#pendingEffects.indexOf(id, this.#pendingHead);
     if (idx !== -1) {
       this.#pendingEffects.splice(idx, 1);
     }
     this.#scheduledEffects.delete(id);
-    const node = this.#nodes.get(id);
+    const node = this.#nodes[id];
     if (!(node instanceof EffectNode)) {
       return;
     }
-    this.#nodes.delete(id);
+    this.#nodes[id] = undefined;
     this.#freeIds.push(id);
-    for (const dep of [...node.dependencies]) {
+    for (const dep of node.dependencies) {
       this.#removeDependentEdge(dep, id);
     }
     if (node.cleanup) {
@@ -338,7 +369,7 @@ export class Context {
   }
 
   isEffectActive(handle) {
-    return this.#nodes.get(handle.id) instanceof EffectNode;
+    return this.#nodes[handle.id] instanceof EffectNode;
   }
 
   disposeSignal(handle) {
@@ -350,7 +381,7 @@ export class Context {
   }
 
   isSet(handle) {
-    const node = this.#nodes.get(handle.id);
+    const node = this.#nodes[handle.id];
     if (!(node instanceof SlotNode)) {
       return false;
     }
@@ -371,34 +402,37 @@ export class Context {
   }
 
   #registerDependency(depId, parentId) {
-    const dep = this.#nodes.get(depId);
+    const dep = this.#nodes[depId];
     if (dep instanceof CellNode || dep instanceof SlotNode) {
-      if (this.#instrument && !dep.dependents.has(parentId)) {
+      const added = edgeInsert(dep.dependents, parentId);
+      if (this.#instrument && added) {
         this.#counters.dependencyEdgesAdded++;
       }
-      dep.dependents.add(parentId);
     }
-    const parent = this.#nodes.get(parentId);
+    const parent = this.#nodes[parentId];
     if (parent instanceof SlotNode || parent instanceof EffectNode) {
-      parent.dependencies.add(depId);
+      edgeInsert(parent.dependencies, depId);
     }
   }
 
   #removeDependentEdge(depId, parentId) {
-    const dep = this.#nodes.get(depId);
+    const dep = this.#nodes[depId];
     if (dep instanceof CellNode || dep instanceof SlotNode) {
-      if (this.#instrument && dep.dependents.has(parentId)) {
+      const removed = edgeRemove(dep.dependents, parentId);
+      if (this.#instrument && removed) {
         this.#counters.dependencyEdgesRemoved++;
       }
-      dep.dependents.delete(parentId);
     }
   }
 
   // -- Internals: refresh / recompute (pull-based, glitch-free) ----------
 
   #refreshSlot(id) {
-    const node = this.#nodes.get(id);
+    const node = this.#nodes[id];
     if (!(node instanceof SlotNode)) {
+      return false;
+    }
+    if (node.hasValue && !node.dirty && !node.forceRecompute) {
       return false;
     }
     if (node.inProgress) {
@@ -409,8 +443,8 @@ export class Context {
     node.inProgress = true;
     try {
       let dependencyChanged = false;
-      for (const dep of [...node.dependencies]) {
-        if (this.#nodes.get(dep) instanceof SlotNode && this.#refreshSlot(dep)) {
+      for (const dep of node.dependencies) {
+        if (this.#nodes[dep] instanceof SlotNode && this.#refreshSlot(dep)) {
           dependencyChanged = true;
         }
       }
@@ -430,10 +464,11 @@ export class Context {
     if (this.#instrument) {
       this.#counters.slotRecomputes++;
     }
-    for (const dep of [...node.dependencies]) {
+    const oldDeps = node.dependencies;
+    node.dependencies = [];
+    for (const dep of oldDeps) {
       this.#removeDependentEdge(dep, id);
     }
-    node.dependencies.clear();
     this.#trackingStack.push(id);
     let result;
     try {
@@ -457,13 +492,7 @@ export class Context {
   }
 
   #notifySlotValueChanged(id) {
-    const node = this.#nodes.get(id);
-    if (!(node instanceof SlotNode)) {
-      return;
-    }
-    for (const d of [...node.dependents]) {
-      this.#invalidateDependentFromChangedValue(d);
-    }
+    this.#invalidateDependentsNow(id);
   }
 
   // -- Internals: invalidation propagation ------------------------------
@@ -475,58 +504,67 @@ export class Context {
    * @returns {boolean}
    */
   #invalidateCellDependentsNow(id) {
-    const node = this.#nodes.get(id);
-    if (!(node instanceof CellNode) || node.dependents.size === 0) {
-      return false;
-    }
-    let scheduled = false;
-    for (const d of [...node.dependents]) {
-      if (this.#invalidateDependentFromChangedValue(d)) {
-        scheduled = true;
-      }
-    }
-    return scheduled;
+    return this.#invalidateDependentsNow(id);
   }
 
-  /** @returns {boolean} whether an Effect was scheduled. */
-  #invalidateDependentFromChangedValue(id) {
-    if (this.#nodes.get(id) instanceof EffectNode) {
-      this.#scheduleEffect(id, true);
-      return true;
+  #invalidateDependentsNow(id) {
+    const node = this.#nodes[id];
+    let roots;
+    if (node instanceof CellNode) {
+      if (node.dependents.length === 0) {
+        return false;
+      }
+      roots = node.dependents;
+    } else if (node instanceof SlotNode) {
+      if (node.dependents.length === 0) {
+        return false;
+      }
+      roots = node.dependents;
+    } else {
+      return false;
     }
-    return this.#markSlotDirty(id, true);
+    const effects = this.#markFrontier(roots);
+    for (let i = 0; i < effects.length; i++) {
+      this.#scheduleEffect(effects[i][0], effects[i][1]);
+    }
+    return effects.length > 0;
   }
 
-  /** @returns {boolean} whether an Effect was scheduled during this walk. */
-  #markSlotDirty(id, force) {
-    const node = this.#nodes.get(id);
-    if (!(node instanceof SlotNode)) {
-      return false;
+  #markFrontier(roots) {
+    const effects = [];
+    const stack = [];
+    const forceStack = [];
+    for (const root of roots) {
+      stack.push(root);
+      forceStack.push(true);
     }
-    const shouldPropagate = !node.dirty || (force && !node.forceRecompute);
-    node.dirty = true;
-    if (force) {
-      node.forceRecompute = true;
-    }
-    if (!shouldPropagate) {
-      return false;
-    }
-    let scheduled = false;
-    for (const d of [...node.dependents]) {
-      if (this.#nodes.get(d) instanceof EffectNode) {
-        this.#scheduleEffect(d, false);
-        scheduled = true;
-      } else if (this.#markSlotDirty(d, false)) {
-        scheduled = true;
+    while (stack.length > 0) {
+      const id = stack.pop();
+      const force = forceStack.pop();
+      const node = this.#nodes[id];
+      if (node instanceof SlotNode) {
+        const shouldPropagate = !node.dirty || (force && !node.forceRecompute);
+        node.dirty = true;
+        if (force) {
+          node.forceRecompute = true;
+        }
+        if (shouldPropagate) {
+          for (const depId of node.dependents) {
+            stack.push(depId);
+            forceStack.push(false);
+          }
+        }
+      } else if (node instanceof EffectNode) {
+        effects.push([id, force]);
       }
     }
-    return scheduled;
+    return effects;
   }
 
   // -- Internals: effect scheduling / flush ------------------------------
 
   #scheduleEffect(id, force) {
-    const node = this.#nodes.get(id);
+    const node = this.#nodes[id];
     if (!(node instanceof EffectNode)) {
       return;
     }
@@ -537,8 +575,9 @@ export class Context {
       this.#pendingEffects.push(id);
       if (this.#instrument) {
         this.#counters.effectQueuePushes++;
-        if (this.#pendingEffects.length > this.#counters.maxEffectQueueDepth) {
-          this.#counters.maxEffectQueueDepth = this.#pendingEffects.length;
+        const depth = this.#pendingEffects.length - this.#pendingHead;
+        if (depth > this.#counters.maxEffectQueueDepth) {
+          this.#counters.maxEffectQueueDepth = depth;
         }
       }
     }
@@ -551,8 +590,10 @@ export class Context {
     this.#flushingEffects = true;
     try {
       while (true) {
-        const id = this.#pendingEffects.shift();
+        const id = this.#pendingEffects[this.#pendingHead++];
         if (id === undefined) {
+          this.#pendingEffects = [];
+          this.#pendingHead = 0;
           return;
         }
         this.#scheduledEffects.delete(id);
@@ -567,12 +608,12 @@ export class Context {
     if (!this.#effectShouldRun(id)) {
       return;
     }
-    const node = this.#nodes.get(id);
+    const node = this.#nodes[id];
     if (!(node instanceof EffectNode)) {
       return;
     }
-    const oldDeps = [...node.dependencies];
-    node.dependencies.clear();
+    const oldDeps = node.dependencies;
+    node.dependencies = [];
     const cleanup = node.cleanup;
     node.cleanup = null;
     node.forceRun = false;
@@ -589,7 +630,7 @@ export class Context {
     } finally {
       this.#trackingStack.pop();
     }
-    const current = this.#nodes.get(id);
+    const current = this.#nodes[id];
     if (current instanceof EffectNode) {
       current.cleanup = typeof nextCleanup === "function" ? nextCleanup : null;
     } else if (typeof nextCleanup === "function") {
@@ -598,7 +639,7 @@ export class Context {
   }
 
   #effectShouldRun(id) {
-    const node = this.#nodes.get(id);
+    const node = this.#nodes[id];
     if (!(node instanceof EffectNode)) {
       return false;
     }
@@ -606,7 +647,7 @@ export class Context {
       return true;
     }
     for (const dep of node.dependencies) {
-      if (this.#nodes.get(dep) instanceof SlotNode && this.#refreshSlot(dep)) {
+      if (this.#nodes[dep] instanceof SlotNode && this.#refreshSlot(dep)) {
         return true;
       }
     }
