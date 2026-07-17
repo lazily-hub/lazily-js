@@ -65,10 +65,15 @@ export class EphemeralCell {
 // ---------------------------------------------------------------------------
 
 function mapEquals(a, b) {
+  // #lzjsshalloweq: shallow key->value equality with an index loop (no
+  // closure). Short-circuits on the first mismatched value.
   const ak = Object.keys(a);
   const bk = Object.keys(b);
   if (ak.length !== bk.length) return false;
-  for (const k of ak) if (a[k] !== b[k]) return false;
+  for (let i = 0; i < ak.length; i++) {
+    const k = ak[i];
+    if (a[k] !== b[k]) return false;
+  }
   return true;
 }
 

@@ -34,13 +34,35 @@ function defaultEqual(a, b) {
     }
     return true;
   }
+  // #lzjsshalloweq: fast path for plain arrays — Array.isArray + length check
+  // before Object.keys, index loop, no closure allocation.
+  if (Array.isArray(a) && Array.isArray(b)) {
+    const n = a.length;
+    if (n !== b.length) {
+      return false;
+    }
+    for (let i = 0; i < n; i++) {
+      if (!defaultEqual(a[i], b[i])) {
+        return false;
+      }
+    }
+    return true;
+  }
   const aKeys = Object.keys(a);
   const bKeys = Object.keys(b);
-  return (
-    aKeys.length === bKeys.length &&
-    aKeys.every((k) => Object.prototype.hasOwnProperty.call(b, k)) &&
-    aKeys.every((k) => defaultEqual(a[k], b[k]))
-  );
+  if (aKeys.length !== bKeys.length) {
+    return false;
+  }
+  for (let i = 0; i < aKeys.length; i++) {
+    const k = aKeys[i];
+    if (
+      !Object.prototype.hasOwnProperty.call(b, k) ||
+      !defaultEqual(a[k], b[k])
+    ) {
+      return false;
+    }
+  }
+  return true;
 }
 
 // -- Handles -----------------------------------------------------------------
@@ -99,10 +121,35 @@ function makeNotifier() {
 
 // -- Nodes -------------------------------------------------------------------
 
+// #lzjsasyncarrays: per-node dependency/dependent sets replaced by dedup'd
+// arrays (mirrors the sync `reactive.js` core). A Set costs meaningfully more
+// per instance than a small array; async graphs rarely have wide fan-out per
+// node, so the array + linear dedup wins on allocation.
+function edgeInsert(edges, id) {
+  for (let i = 0; i < edges.length; i++) {
+    if (edges[i] === id) {
+      return false;
+    }
+  }
+  edges.push(id);
+  return true;
+}
+
+function edgeRemove(edges, id) {
+  for (let i = 0; i < edges.length; i++) {
+    if (edges[i] === id) {
+      edges[i] = edges[edges.length - 1];
+      edges.pop();
+      return true;
+    }
+  }
+  return false;
+}
+
 class AsyncCellNode {
   constructor(value) {
     this.value = value;
-    this.dependents = new Set();
+    this.dependents = [];
   }
 }
 
@@ -118,15 +165,15 @@ class AsyncSlotNode {
     this.token = null; // current in-flight token { revision, aborted }
     this.abort = null; // AbortController for the in-flight compute
     this.notifier = null; // completion notifier for the in-flight compute
-    this.dependencies = new Set();
-    this.dependents = new Set();
+    this.dependencies = [];
+    this.dependents = [];
   }
 }
 
 class AsyncEffectNode {
   constructor(run) {
     this.run = run;
-    this.dependencies = new Set();
+    this.dependencies = [];
     this.cleanup = null; // cleanup fn from the last completed body
     this.abort = null; // AbortController for the in-flight body
     this.pending = false; // a rerun is queued
@@ -137,8 +184,12 @@ class AsyncEffectNode {
 // -- Context -----------------------------------------------------------------
 
 export class AsyncContext {
-  #nodes = new Map();
+  // #lzjsasyncarrays: nodes backed by a sparse array + recycled id stack
+  // (mirrors the sync core) instead of a Map. Array index lookup is faster than
+  // Map.get and avoids per-entry Map bucket allocation.
+  #nodes = [];
   #nextId = 1;
+  #freeIds = [];
   #inflight = new Map(); // slotId -> Promise of the current compute task
   #effectRuns = new Set(); // in-flight effect run-loop promises
   #batchDepth = 0;
@@ -148,41 +199,38 @@ export class AsyncContext {
 
   cell(value) {
     const id = this.#allocId();
-    this.#nodes.set(id, new AsyncCellNode(value));
+    this.#nodes[id] = new AsyncCellNode(value);
     return new AsyncCellHandle(id);
   }
 
   computedAsync(compute) {
     const id = this.#allocId();
-    this.#nodes.set(id, new AsyncSlotNode(compute, false));
+    this.#nodes[id] = new AsyncSlotNode(compute, false);
     return new AsyncSlotHandle(id);
   }
 
   memoAsync(compute) {
     const id = this.#allocId();
-    this.#nodes.set(id, new AsyncSlotNode(compute, true));
+    this.#nodes[id] = new AsyncSlotNode(compute, true);
     return new AsyncSlotHandle(id);
   }
 
   effectAsync(run) {
     const id = this.#allocId();
-    this.#nodes.set(id, new AsyncEffectNode(run));
+    this.#nodes[id] = new AsyncEffectNode(run);
     this.#scheduleEffect(id);
     return new AsyncEffectHandle(id);
   }
 
   signalAsync(compute) {
     const slotId = this.#allocId();
-    this.#nodes.set(slotId, new AsyncSlotNode(compute, true));
+    this.#nodes[slotId] = new AsyncSlotNode(compute, true);
     const slot = new AsyncSlotHandle(slotId);
     const effectId = this.#allocId();
-    this.#nodes.set(
-      effectId,
-      new AsyncEffectNode(async (cctx) => {
-        await cctx.getAsync(slot);
-        return null;
-      }),
-    );
+    this.#nodes[effectId] = new AsyncEffectNode(async (cctx) => {
+      await cctx.getAsync(slot);
+      return null;
+    });
     this.#scheduleEffect(effectId);
     return new AsyncSignalHandle(slot, new AsyncEffectHandle(effectId));
   }
@@ -190,7 +238,7 @@ export class AsyncContext {
   // -- Cells (synchronous input layer) -----------------------------------
 
   getCell(handle) {
-    const node = this.#nodes.get(handle.id);
+    const node = this.#nodes[handle.id];
     if (!(node instanceof AsyncCellNode)) {
       throw new Error(`get_cell on non-cell id ${handle.id}`);
     }
@@ -198,7 +246,7 @@ export class AsyncContext {
   }
 
   setCell(handle, value) {
-    const node = this.#nodes.get(handle.id);
+    const node = this.#nodes[handle.id];
     if (!(node instanceof AsyncCellNode)) {
       throw new Error(`set_cell on non-cell id ${handle.id}`);
     }
@@ -217,7 +265,7 @@ export class AsyncContext {
 
   /** Synchronous snapshot: the resolved value, or `undefined` if not resolved. */
   get(handle) {
-    const node = this.#nodes.get(handle.id);
+    const node = this.#nodes[handle.id];
     if (node instanceof AsyncSlotNode && node.state === "resolved") {
       return node.value;
     }
@@ -225,13 +273,13 @@ export class AsyncContext {
   }
 
   isResolved(handle) {
-    const node = this.#nodes.get(handle.id);
+    const node = this.#nodes[handle.id];
     return node instanceof AsyncSlotNode && node.state === "resolved";
   }
 
   /** Public projection of the slot state machine (AsyncSlotStateView). */
   slotState(handle) {
-    const node = this.#nodes.get(handle.id);
+    const node = this.#nodes[handle.id];
     if (!(node instanceof AsyncSlotNode)) {
       return "none";
     }
@@ -249,7 +297,7 @@ export class AsyncContext {
     // Outer re-resolve loop: slot state is authoritative.
     // eslint-disable-next-line no-constant-condition
     while (true) {
-      const node = this.#nodes.get(id);
+      const node = this.#nodes[id];
       if (!(node instanceof AsyncSlotNode)) {
         throw new Error(`get_async on non-slot id ${id}`);
       }
@@ -286,7 +334,7 @@ export class AsyncContext {
 
   async disposeAsyncEffect(handle) {
     const id = handle.id;
-    const node = this.#nodes.get(id);
+    const node = this.#nodes[id];
     if (!(node instanceof AsyncEffectNode)) {
       return;
     }
@@ -300,7 +348,7 @@ export class AsyncContext {
     while (node.kicking) {
       await Promise.resolve();
       // Re-fetch: dispose may race the loop's own completion.
-      if (!(this.#nodes.get(id) instanceof AsyncEffectNode)) {
+      if (!(this.#nodes[id] instanceof AsyncEffectNode)) {
         return;
       }
     }
@@ -309,14 +357,15 @@ export class AsyncContext {
     }
     const cleanup = node.cleanup;
     node.cleanup = null;
-    this.#nodes.delete(id);
+    this.#nodes[id] = undefined;
+    this.#freeIds.push(id);
     if (typeof cleanup === "function") {
       await cleanup();
     }
   }
 
   isEffectActive(handle) {
-    return this.#nodes.get(handle.id) instanceof AsyncEffectNode;
+    return this.#nodes[handle.id] instanceof AsyncEffectNode;
   }
 
   disposeSignal(handle) {
@@ -330,7 +379,12 @@ export class AsyncContext {
   /** Dispose the whole context: abort every in-flight compute and effect body,
    * then await all active effect cleanups. */
   async dispose() {
-    for (const [id, node] of this.#nodes) {
+    const nodes = this.#nodes;
+    for (let id = 0; id < nodes.length; id++) {
+      const node = nodes[id];
+      if (node === undefined) {
+        continue;
+      }
       if (node instanceof AsyncSlotNode && node.state === "computing") {
         node.token.aborted = true;
         if (node.abort) {
@@ -347,7 +401,8 @@ export class AsyncContext {
     }
     await this.settle();
     const cleanups = [];
-    for (const node of this.#nodes.values()) {
+    for (let id = 0; id < nodes.length; id++) {
+      const node = nodes[id];
       if (node instanceof AsyncEffectNode && typeof node.cleanup === "function") {
         cleanups.push(node.cleanup);
         node.cleanup = null;
@@ -388,24 +443,24 @@ export class AsyncContext {
   // -- Internals: ids + edges -------------------------------------------
 
   #allocId() {
-    return this.#nextId++;
+    return this.#freeIds.pop() ?? this.#nextId++;
   }
 
   #registerDependency(depId, ownerId) {
-    const dep = this.#nodes.get(depId);
+    const dep = this.#nodes[depId];
     if (dep instanceof AsyncCellNode || dep instanceof AsyncSlotNode) {
-      dep.dependents.add(ownerId);
+      edgeInsert(dep.dependents, ownerId);
     }
-    const owner = this.#nodes.get(ownerId);
+    const owner = this.#nodes[ownerId];
     if (owner instanceof AsyncSlotNode || owner instanceof AsyncEffectNode) {
-      owner.dependencies.add(depId);
+      edgeInsert(owner.dependencies, depId);
     }
   }
 
   #removeDependentEdge(depId, ownerId) {
-    const dep = this.#nodes.get(depId);
+    const dep = this.#nodes[depId];
     if (dep instanceof AsyncCellNode || dep instanceof AsyncSlotNode) {
-      dep.dependents.delete(ownerId);
+      edgeRemove(dep.dependents, ownerId);
     }
   }
 
@@ -434,12 +489,12 @@ export class AsyncContext {
   // -- Internals: slot compute ------------------------------------------
 
   #spawnCompute(id) {
-    const node = this.#nodes.get(id);
+    const node = this.#nodes[id];
     // Clear old dependency edges; they are rediscovered live during compute.
     for (const dep of [...node.dependencies]) {
       this.#removeDependentEdge(dep, id);
     }
-    node.dependencies.clear();
+    node.dependencies.length = 0;
 
     const token = { revision: node.revision, aborted: false };
     const controller = new AbortController();
@@ -465,7 +520,7 @@ export class AsyncContext {
   }
 
   #publishResolved(id, token, notifier, value) {
-    const node = this.#nodes.get(id);
+    const node = this.#nodes[id];
     if (!(node instanceof AsyncSlotNode) || token.aborted || node.revision !== token.revision) {
       // Stale completion: discard, never publish. Waiters re-resolve.
       notifier.settle({ kind: "superseded" });
@@ -488,7 +543,7 @@ export class AsyncContext {
   }
 
   #publishError(id, token, notifier, error) {
-    const node = this.#nodes.get(id);
+    const node = this.#nodes[id];
     if (!(node instanceof AsyncSlotNode) || token.aborted || node.revision !== token.revision) {
       notifier.settle({ kind: "superseded" });
       return;
@@ -505,7 +560,7 @@ export class AsyncContext {
   // -- Internals: invalidation ------------------------------------------
 
   #invalidateCellDependents(id) {
-    const node = this.#nodes.get(id);
+    const node = this.#nodes[id];
     if (!(node instanceof AsyncCellNode)) {
       return;
     }
@@ -515,7 +570,7 @@ export class AsyncContext {
   }
 
   #invalidateDependent(id) {
-    const node = this.#nodes.get(id);
+    const node = this.#nodes[id];
     if (node instanceof AsyncEffectNode) {
       this.#scheduleEffect(id);
     } else if (node instanceof AsyncSlotNode) {
@@ -524,7 +579,7 @@ export class AsyncContext {
   }
 
   #invalidateSlot(id) {
-    const node = this.#nodes.get(id);
+    const node = this.#nodes[id];
     if (!(node instanceof AsyncSlotNode)) {
       return;
     }
@@ -553,7 +608,7 @@ export class AsyncContext {
   // -- Internals: async effects (serialized, cleanup-before-body) --------
 
   #scheduleEffect(id) {
-    const node = this.#nodes.get(id);
+    const node = this.#nodes[id];
     if (!(node instanceof AsyncEffectNode)) {
       return;
     }
@@ -569,7 +624,7 @@ export class AsyncContext {
     // `pending` flag before the body runs, so a batch triggers exactly one rerun.
     const run = Promise.resolve().then(async () => {
       try {
-        while (node.pending && this.#nodes.get(id) === node) {
+        while (node.pending && this.#nodes[id] === node) {
           node.pending = false;
           await this.#runEffectOnce(id);
         }
@@ -582,7 +637,7 @@ export class AsyncContext {
   }
 
   async #runEffectOnce(id) {
-    const node = this.#nodes.get(id);
+    const node = this.#nodes[id];
     if (!(node instanceof AsyncEffectNode)) {
       return;
     }
@@ -592,13 +647,13 @@ export class AsyncContext {
       node.cleanup = null;
       await cleanup();
     }
-    if (this.#nodes.get(id) !== node) {
+    if (this.#nodes[id] !== node) {
       return; // disposed during cleanup
     }
     for (const dep of [...node.dependencies]) {
       this.#removeDependentEdge(dep, id);
     }
-    node.dependencies.clear();
+    node.dependencies.length = 0;
     const controller = new AbortController();
     node.abort = controller;
     const cctx = this.#makeComputeContext(id, controller.signal);
@@ -615,7 +670,7 @@ export class AsyncContext {
         node.abort = null;
       }
     }
-    const current = this.#nodes.get(id);
+    const current = this.#nodes[id];
     if (current instanceof AsyncEffectNode) {
       current.cleanup = typeof nextCleanup === "function" ? nextCleanup : null;
     } else if (typeof nextCleanup === "function") {

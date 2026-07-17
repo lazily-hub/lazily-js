@@ -15,13 +15,32 @@ function deepEqual(a, b) {
   if (a === null || b === null || typeof a !== "object" || typeof b !== "object") {
     return false;
   }
+  // #lzjsshalloweq: fast path for plain arrays — Array.isArray + length check
+  // before Object.keys, index loop, no closure allocation.
+  if (Array.isArray(a) && Array.isArray(b)) {
+    const n = a.length;
+    if (n !== b.length) {
+      return false;
+    }
+    for (let i = 0; i < n; i++) {
+      if (!deepEqual(a[i], b[i])) {
+        return false;
+      }
+    }
+    return true;
+  }
   const aKeys = Object.keys(a);
   const bKeys = Object.keys(b);
-  return (
-    aKeys.length === bKeys.length &&
-    aKeys.every((k) => Object.is(aKeys[k], bKeys[k])) &&
-    aKeys.every((k) => deepEqual(a[k], b[k]))
-  );
+  if (aKeys.length !== bKeys.length) {
+    return false;
+  }
+  for (let i = 0; i < aKeys.length; i++) {
+    const k = aKeys[i];
+    if (!Object.is(aKeys[k], bKeys[k]) || !deepEqual(a[k], b[k])) {
+      return false;
+    }
+  }
+  return true;
 }
 
 function indexOfKey(order, key) {

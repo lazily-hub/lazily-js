@@ -14,7 +14,7 @@
 //   re-materialized by the time the invalidating `setCell`/`batch` returns.
 // - Effects rerun after any tracked dependency invalidates.
 
-function defaultEqual(a, b) {
+export function defaultEqual(a, b) {
   if (a === b) {
     return true;
   }
@@ -32,12 +32,32 @@ function defaultEqual(a, b) {
     }
     return true;
   }
+  // #lzjsshalloweq: fast path for plain arrays — Array.isArray + length check
+  // before Object.keys, index loop, no closure allocation.
+  if (Array.isArray(a) && Array.isArray(b)) {
+    const n = a.length;
+    if (n !== b.length) {
+      return false;
+    }
+    for (let i = 0; i < n; i++) {
+      if (!defaultEqual(a[i], b[i])) {
+        return false;
+      }
+    }
+    return true;
+  }
   const aKeys = Object.keys(a);
   const bKeys = Object.keys(b);
-  return (
-    aKeys.length === bKeys.length &&
-    aKeys.every((k) => k in b && defaultEqual(a[k], b[k]))
-  );
+  if (aKeys.length !== bKeys.length) {
+    return false;
+  }
+  for (let i = 0; i < aKeys.length; i++) {
+    const k = aKeys[i];
+    if (!(k in b) || !defaultEqual(a[k], b[k])) {
+      return false;
+    }
+  }
+  return true;
 }
 
 // -- Handles -----------------------------------------------------------------
@@ -97,7 +117,7 @@ function edgeRemove(edges, id) {
 class CellNode {
   constructor(value) {
     this.value = value;
-    this.dependents = [];
+    this.dependents = null; // #lzjslazyedges: allocated on first edge
   }
 }
 
@@ -107,8 +127,8 @@ class SlotNode {
     this.hasValue = false;
     this.memo = memo;
     this.compute = compute;
-    this.dependencies = [];
-    this.dependents = [];
+    this.dependencies = null; // #lzjslazyedges: allocated on first edge
+    this.dependents = null; // #lzjslazyedges: allocated on first edge
     this.dirty = false;
     this.forceRecompute = false;
     this.inProgress = false;
@@ -118,7 +138,7 @@ class SlotNode {
 class EffectNode {
   constructor(run) {
     this.run = run;
-    this.dependencies = [];
+    this.dependencies = null; // #lzjslazyedges: allocated on first edge
     this.cleanup = null;
     this.forceRun = false;
   }
@@ -135,6 +155,13 @@ export class Context {
   #flushingEffects = false;
   #batchDepth = 0;
   #batchedCells = new Set();
+  // Reusable scratch buffers for #markFrontier (#lzjsscratchfrontier): avoid
+  // per-invalidation array allocation by clearing in place. Safe under
+  // reentrancy because callers fully consume the returned effects array before
+  // #flushEffects can re-enter #markFrontier (guarded by #flushingEffects).
+  #frontierEffects = [];
+  #frontierStack = [];
+  #frontierForceStack = [];
   // Opt-in instrumentation (off by default → zero steady-state overhead, so the
   // committed BENCHMARKS.md numbers are unperturbed). Mirrors the counter subset
   // of lazily-rs's `InstrumentationSnapshot` that is meaningful single-threaded.
@@ -329,8 +356,11 @@ export class Context {
     for (const id of cells) {
       const node = this.#nodes[id];
       if (node instanceof CellNode) {
-        for (const d of node.dependents) {
-          roots.push(d);
+        const deps = node.dependents;
+        if (deps !== null) {
+          for (const d of deps) {
+            roots.push(d);
+          }
         }
       }
     }
@@ -360,8 +390,11 @@ export class Context {
     }
     this.#nodes[id] = undefined;
     this.#freeIds.push(id);
-    for (const dep of node.dependencies) {
-      this.#removeDependentEdge(dep, id);
+    const deps = node.dependencies;
+    if (deps !== null) {
+      for (const dep of deps) {
+        this.#removeDependentEdge(dep, id);
+      }
     }
     if (node.cleanup) {
       node.cleanup();
@@ -404,6 +437,9 @@ export class Context {
   #registerDependency(depId, parentId) {
     const dep = this.#nodes[depId];
     if (dep instanceof CellNode || dep instanceof SlotNode) {
+      if (dep.dependents === null) {
+        dep.dependents = [];
+      }
       const added = edgeInsert(dep.dependents, parentId);
       if (this.#instrument && added) {
         this.#counters.dependencyEdgesAdded++;
@@ -411,6 +447,9 @@ export class Context {
     }
     const parent = this.#nodes[parentId];
     if (parent instanceof SlotNode || parent instanceof EffectNode) {
+      if (parent.dependencies === null) {
+        parent.dependencies = [];
+      }
       edgeInsert(parent.dependencies, depId);
     }
   }
@@ -418,6 +457,9 @@ export class Context {
   #removeDependentEdge(depId, parentId) {
     const dep = this.#nodes[depId];
     if (dep instanceof CellNode || dep instanceof SlotNode) {
+      if (dep.dependents === null) {
+        return;
+      }
       const removed = edgeRemove(dep.dependents, parentId);
       if (this.#instrument && removed) {
         this.#counters.dependencyEdgesRemoved++;
@@ -443,9 +485,12 @@ export class Context {
     node.inProgress = true;
     try {
       let dependencyChanged = false;
-      for (const dep of node.dependencies) {
-        if (this.#nodes[dep] instanceof SlotNode && this.#refreshSlot(dep)) {
-          dependencyChanged = true;
+      const deps = node.dependencies;
+      if (deps !== null) {
+        for (const dep of deps) {
+          if (this.#nodes[dep] instanceof SlotNode && this.#refreshSlot(dep)) {
+            dependencyChanged = true;
+          }
         }
       }
       const needsRecompute = !node.hasValue || node.forceRecompute || dependencyChanged;
@@ -464,10 +509,17 @@ export class Context {
     if (this.#instrument) {
       this.#counters.slotRecomputes++;
     }
+    // #lzjslazyedges: clear in place rather than null + realloc. Toggling the
+    // field null↔Array on every recompute makes V8 mark it polymorphic and
+    // slows the whole refresh cascade; clearing the backing array keeps the
+    // field monomorphic while still reusing it. (The lazy-init win is for nodes
+    // that never acquire an edge — those stay null.)
     const oldDeps = node.dependencies;
-    node.dependencies = [];
-    for (const dep of oldDeps) {
-      this.#removeDependentEdge(dep, id);
+    if (oldDeps !== null) {
+      for (const dep of oldDeps) {
+        this.#removeDependentEdge(dep, id);
+      }
+      oldDeps.length = 0;
     }
     this.#trackingStack.push(id);
     let result;
@@ -511,12 +563,12 @@ export class Context {
     const node = this.#nodes[id];
     let roots;
     if (node instanceof CellNode) {
-      if (node.dependents.length === 0) {
+      if (node.dependents === null) {
         return false;
       }
       roots = node.dependents;
     } else if (node instanceof SlotNode) {
-      if (node.dependents.length === 0) {
+      if (node.dependents === null) {
         return false;
       }
       roots = node.dependents;
@@ -531,9 +583,12 @@ export class Context {
   }
 
   #markFrontier(roots) {
-    const effects = [];
-    const stack = [];
-    const forceStack = [];
+    const effects = this.#frontierEffects;
+    const stack = this.#frontierStack;
+    const forceStack = this.#frontierForceStack;
+    effects.length = 0;
+    stack.length = 0;
+    forceStack.length = 0;
     for (const root of roots) {
       stack.push(root);
       forceStack.push(true);
@@ -549,9 +604,12 @@ export class Context {
           node.forceRecompute = true;
         }
         if (shouldPropagate) {
-          for (const depId of node.dependents) {
-            stack.push(depId);
-            forceStack.push(false);
+          const ddeps = node.dependents;
+          if (ddeps !== null) {
+            for (const depId of ddeps) {
+              stack.push(depId);
+              forceStack.push(false);
+            }
           }
         }
       } else if (node instanceof EffectNode) {
@@ -612,13 +670,17 @@ export class Context {
     if (!(node instanceof EffectNode)) {
       return;
     }
+    // #lzjslazyedges: clear in place (see #recomputeSlotNow) to keep the field
+    // monomorphic once allocated.
     const oldDeps = node.dependencies;
-    node.dependencies = [];
     const cleanup = node.cleanup;
     node.cleanup = null;
     node.forceRun = false;
-    for (const dep of oldDeps) {
-      this.#removeDependentEdge(dep, id);
+    if (oldDeps !== null) {
+      for (const dep of oldDeps) {
+        this.#removeDependentEdge(dep, id);
+      }
+      oldDeps.length = 0;
     }
     if (cleanup) {
       cleanup();
@@ -646,9 +708,12 @@ export class Context {
     if (node.forceRun) {
       return true;
     }
-    for (const dep of node.dependencies) {
-      if (this.#nodes[dep] instanceof SlotNode && this.#refreshSlot(dep)) {
-        return true;
+    const deps = node.dependencies;
+    if (deps !== null) {
+      for (const dep of deps) {
+        if (this.#nodes[dep] instanceof SlotNode && this.#refreshSlot(dep)) {
+          return true;
+        }
       }
     }
     return false;

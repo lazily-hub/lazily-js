@@ -10,7 +10,7 @@
 // comparable. Constants mirror `benches/context.rs` exactly.
 
 import { bench, blackBox, run } from "./harness.mjs";
-import { Context } from "../src/reactive.js";
+import { Context, defaultEqual } from "../src/reactive.js";
 
 const FAN_OUT_WIDTHS = [32, 256];
 const MEMO_CHAIN_DEPTH = 32;
@@ -173,6 +173,38 @@ bench.batched(
   const cell = ctx.cell(99);
   bench("typed_cache_reads", "context_cell", () => blackBox(ctx.getCell(blackBox(cell))));
 }
+
+// --- default_equal: structural object comparison (#lzjsshalloweq) -----------
+// Times the equality guard hot path on its own (object + array shapes). The
+// inline Array.isArray fast path + index loop is the Phase 2 win.
+{
+  const a = { id: 42, name: "alice", tags: ["x", "y", "z"], n: 7, active: true };
+  const b = { id: 42, name: "alice", tags: ["x", "y", "z"], n: 7, active: true };
+  bench("default_equal", "object", () => blackBox(defaultEqual(a, b)));
+}
+{
+  const a = [1, 2, 3, 4, 5, 6, 7, 8];
+  const b = [1, 2, 3, 4, 5, 6, 7, 8];
+  bench("default_equal", "array", () => blackBox(defaultEqual(a, b)));
+}
+
+// --- node_allocation: node creation at scale (#lzjslazyedges) ---------------
+// Allocates a mix of cells, memos, and effects (no edges) so the per-node
+// constructor cost — now free of eager [] edge arrays — is what is timed.
+// The lazy-edges win is primarily RSS; this case guards the constructor
+// time regression and surfaces the allocation speedup.
+const ALLOC_NODES = 4096;
+bench.batched(
+  "node_allocation",
+  `scale / ${ALLOC_NODES}`,
+  () => ({ ctx: new Context() }),
+  ({ ctx }) => {
+    for (let i = 0; i < ALLOC_NODES; i++) {
+      ctx.cell(i);
+    }
+    blackBox(ctx);
+  },
+);
 
 await run({
   format: process.env.BENCH_FORMAT === "json" ? "json" : "markdown",

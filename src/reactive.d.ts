@@ -2,6 +2,14 @@ export type ComputeFn<T> = () => T;
 export type EffectRun = () => (() => void) | null | undefined;
 export type EqualFn<T> = (a: T, b: T) => boolean;
 
+/**
+ * Default structural equality used by cells and memos: identity, then
+ * byte-wise `Uint8Array`, then `Array` index recursion, then a key-wise
+ * shallow/deep object comparison. Exposed so consumers can reuse the canonical
+ * equality in custom {@link EqualFn} composition and benchmarks.
+ */
+export declare function defaultEqual<T>(a: T, b: T): boolean;
+
 export class SlotHandle<T = unknown> {
   /** @internal */ constructor(id: number);
   readonly id: number;

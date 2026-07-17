@@ -34,6 +34,10 @@ const GROUP_ORDER = {
   effect_flushing: 5,
   batch_storms: 6,
   typed_cache_reads: 7,
+  // Phase 2 perf-win benches (#lzjsshalloweq, #lzjslazyedges): equality guard
+  // on its own + per-node allocation cost at scale.
+  default_equal: 8,
+  node_allocation: 9,
   // CRDT-plane benches (Phase 1 #lztextordcache / #lztextinsertchain /
   // #lzopidkeytuple / #lzseqstringifyeq). Kept in regression-gated suite so
   // algorithmic regressions surface at PR time.
