@@ -19,7 +19,7 @@ like-for-like single-process counterpart here and are intentionally omitted.
 
 <!-- benchmark-results:start -->
 
-Generated for package `@lazily-hub/lazily-js` version `0.19.0`.
+Generated for package `@lazily-hub/lazily-js` version `0.20.0`.
 
 Environment: Node.js `26.4.0` on `linux x64`.
 
@@ -33,16 +33,34 @@ Mean wall-clock time per iteration; 95% CI half-width from the standard error.
 
 | Group | Case | Mean | 95% CI | p75 | p99 | Samples |
 |---|---|---:|---:|---:|---:|---:|
-| cached_reads | context | 31.707 ns | ± 1.826 ns | 29.867 ns | 78.222 ns | 100 |
-| cold_first_get | context | 698.810 ns | ± 46.591 ns | 600.000 ns | 1.410 us | 100 |
-| dependency_fan_out | context / 32 | 5.263 us | ± 858.863 ns | 4.753 us | 16.289 us | 100 |
-| dependency_fan_out | context / 256 | 47.575 us | ± 3.908 us | 45.595 us | 132.218 us | 100 |
-| set_cell_invalidation | high_fan_out / 512 | 6.692 us | ± 3.311 us | 5.840 us | 111.143 us | 100 |
-| memo_equality_suppression | context | 2.546 us | ± 256.417 ns | 2.553 us | 5.435 us | 100 |
-| effect_flushing | context | 129.166 ns | ± 11.208 ns | 131.217 ns | 406.377 ns | 100 |
-| batch_storms | context / 64 | 12.092 us | ± 123.522 ns | 12.286 us | 14.168 us | 100 |
-| typed_cache_reads | context_cell | 33.701 ns | ± 2.005 ns | 32.755 ns | 55.480 ns | 100 |
-| typed_cache_reads | context_slot | 42.440 ns | ± 2.855 ns | 40.074 ns | 106.268 ns | 100 |
+| cached_reads | context | 31.966 ns | ± 1.575 ns | 30.743 ns | 70.839 ns | 100 |
+| cold_first_get | context | 742.710 ns | ± 126.218 ns | 612.500 ns | 1.899 us | 100 |
+| dependency_fan_out | context / 32 | 6.129 us | ± 1.563 us | 5.023 us | 41.656 us | 100 |
+| dependency_fan_out | context / 256 | 48.997 us | ± 3.461 us | 47.868 us | 130.607 us | 100 |
+| set_cell_invalidation | high_fan_out / 512 | 5.482 us | ± 1.327 us | 6.410 us | 18.184 us | 100 |
+| memo_equality_suppression | context | 2.191 us | ± 356.052 ns | 3.813 us | 4.961 us | 100 |
+| effect_flushing | context | 149.841 ns | ± 15.108 ns | 148.815 ns | 452.666 ns | 100 |
+| batch_storms | context / 64 | 13.088 us | ± 281.500 ns | 13.352 us | 17.526 us | 100 |
+| typed_cache_reads | context_cell | 29.928 ns | ± 0.847 ns | 29.585 ns | 46.606 ns | 100 |
+| typed_cache_reads | context_slot | 46.437 ns | ± 5.381 ns | 39.915 ns | 179.573 ns | 100 |
+| textcrdt_insert_str | 64 | 8.939 us | ± 2.581 us | 7.678 us | 50.727 us | 100 |
+| textcrdt_insert_str | 256 | 28.383 us | ± 1.991 us | 25.568 us | 63.137 us | 100 |
+| textcrdt_insert_str | 1024 | 111.611 us | ± 6.489 us | 124.136 us | 205.387 us | 100 |
+| textcrdt_repeated_text | 64 | 40.149 us | ± 2.146 us | 36.146 us | 74.301 us | 100 |
+| textcrdt_repeated_text | 256 | 181.856 us | ± 13.068 us | 187.465 us | 331.261 us | 100 |
+| textcrdt_repeated_text | 1024 | 864.585 us | ± 45.266 us | 996.343 us | 1.519 ms | 100 |
+| textcrdt_merge | 64 | 12.103 us | ± 798.827 ns | 12.955 us | 24.361 us | 100 |
+| textcrdt_merge | 256 | 53.192 us | ± 4.002 us | 52.265 us | 143.726 us | 100 |
+| textcrdt_merge | 1024 | 270.364 us | ± 17.669 us | 268.422 us | 593.144 us | 100 |
+| textcrdt_delta_sync | 64 | 19.106 us | ± 1.372 us | 20.792 us | 29.232 us | 100 |
+| textcrdt_delta_sync | 256 | 67.860 us | ± 5.469 us | 62.273 us | 196.534 us | 100 |
+| textcrdt_delta_sync | 1024 | 262.078 us | ± 11.701 us | 257.410 us | 473.407 us | 100 |
+| seqcrdt_insert_back | 64 | 82.803 us | ± 7.276 us | 79.240 us | 226.953 us | 100 |
+| seqcrdt_insert_back | 256 | 1.561 ms | ± 57.393 us | 1.724 ms | 2.313 ms | 100 |
+| seqcrdt_insert_back | 1024 | 43.643 ms | ± 971.721 us | 44.688 ms | 50.468 ms | 20 |
+| seqcrdt_merge | 64 | 7.361 us | ± 624.875 ns | 8.053 us | 19.173 us | 100 |
+| seqcrdt_merge | 256 | 26.977 us | ± 2.251 us | 30.373 us | 73.848 us | 100 |
+| seqcrdt_merge | 1024 | 113.428 us | ± 6.981 us | 121.168 us | 252.144 us | 100 |
 
 <!-- benchmark-results:end -->
 

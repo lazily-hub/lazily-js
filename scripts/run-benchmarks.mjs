@@ -34,9 +34,18 @@ const GROUP_ORDER = {
   effect_flushing: 5,
   batch_storms: 6,
   typed_cache_reads: 7,
+  // CRDT-plane benches (Phase 1 #lztextordcache / #lztextinsertchain /
+  // #lzopidkeytuple / #lzseqstringifyeq). Kept in regression-gated suite so
+  // algorithmic regressions surface at PR time.
+  textcrdt_insert_str: 10,
+  textcrdt_repeated_text: 11,
+  textcrdt_merge: 12,
+  textcrdt_delta_sync: 13,
+  seqcrdt_insert_back: 14,
+  seqcrdt_merge: 15,
 };
 
-const BENCH_FILES = ["bench/context.bench.mjs"];
+const BENCH_FILES = ["bench/context.bench.mjs", "bench/crdt.bench.mjs"];
 
 function caseKey(group, caseLabel) {
   // Extract trailing numeric param (e.g. "context / 32" -> 32) so widths sort

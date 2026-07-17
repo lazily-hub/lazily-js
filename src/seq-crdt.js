@@ -93,6 +93,13 @@ export class LwwRegister {
   }
 }
 
+// Structural deep equality (#lzseqstringifyeq): replaces JSON.stringify-based
+// comparison (one of V8's slowest paths) with a typed dispatch that handles the
+// common cases — primitives, Position, arrays, plain objects — without
+// allocating a serialized string per side per comparison. Behavior is
+// equivalent to JSON.stringify equality for plain JSON values, while skipping
+// JSON's NaN/Infinity/null coercion and toJSON dispatch (neither is exercised
+// by the values stored in SeqCrdt registers today).
 function valuesEqual(a, b) {
   if (a === b) {
     return true;
@@ -103,7 +110,32 @@ function valuesEqual(a, b) {
   if (a === null || b === null || typeof a !== "object" || typeof b !== "object") {
     return a === b;
   }
-  return JSON.stringify(a) === JSON.stringify(b);
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) {
+      return false;
+    }
+    for (let i = 0; i < a.length; i++) {
+      if (!valuesEqual(a[i], b[i])) {
+        return false;
+      }
+    }
+    return true;
+  }
+  const ka = Object.keys(a);
+  const kb = Object.keys(b);
+  if (ka.length !== kb.length) {
+    return false;
+  }
+  for (let i = 0; i < ka.length; i++) {
+    const k = ka[i];
+    if (!Object.prototype.hasOwnProperty.call(b, k)) {
+      return false;
+    }
+    if (!valuesEqual(a[k], b[k])) {
+      return false;
+    }
+  }
+  return true;
 }
 
 // Position: fractional-index byte key + originating peer.
