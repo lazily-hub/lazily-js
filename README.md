@@ -101,7 +101,7 @@ and JSON Schemas in `lazily-spec` and the Lean models in `lazily-formal`.
 |--------|------------|
 | `@lazily-hub/lazily-js` | `lazily-spec` IPC wire types: `Snapshot`, `Delta`, `DeltaOp`, `IpcMessage` (`Snapshot` / `Delta` / `CrdtSync`), `NodeState`, `IpcValue`, `PeerPermissions`, `SessionHandshake`, `BINDING_CAPABILITIES` |
 | `@lazily-hub/lazily-js/transport` | Cross-process zero-copy transport (`#lzzcpy`): `ShmBlobArena`, `InProcessBackend` / `ArrowBackend`, `BlobRouter`, `spillMessage` / `resolveValue`, and the FFI-gated `createShmBackend` (Node/Bun/Deno). Isomorphic — no FFI import; browser-safe |
-| `@lazily-hub/lazily-js/reactive` | Reactive dependency graph: `Context`, `Cell`, `Slot`, `Signal`, `Effect` |
+| `@lazily-hub/lazily-js/reactive` | Reactive dependency graph: `createContext` (alias `Context`), `Cell`, `Slot`, `Signal`, `Effect`. Closure-based core (#lzjsclosure) — 2-8x faster reads than the prior class implementation |
 | `@lazily-hub/lazily-js/reactive-async` | Async reactive graph: `AsyncContext` — Promise-driven slots/effects with revision-guarded stale-completion discard, in-flight dedup, and cancellation |
 | `@lazily-hub/lazily-js/reactive-family` | Unified keyed reactive map: `ReactiveMap<K,V,H>` (reactive membership/order, `getOrInsertWith` mint-on-access, `remove`, `move`) + `CellMap` (adds cell-only `set` + eager `entry`/`entryWith`) and `SlotMap` (lazy `getOrInsertWith` + eager `materializeAll`; no `set`) specializations. No eager/lazy mode flag (`#reactivemap`) |
 | `@lazily-hub/lazily-js/async-reactive-family` | Async keyed reactive map: `AsyncReactiveMap` + `AsyncCellMap` / `AsyncSlotMap` over `AsyncContext` — eventual transparency (a pending slot observes `undefined` and resolves to the canonical value; eager ≡ lazy once resolved) (`#reactivemap`) |
@@ -122,8 +122,18 @@ and JSON Schemas in `lazily-spec` and the Lean models in `lazily-formal`.
 
 ## Reactive graph
 
-`Context` mirrors the single-threaded lazily-rs `Context` semantics in native
-JavaScript. The family is:
+`Context` (alias `createContext`, from `@lazily-hub/lazily-js/reactive`) mirrors
+the single-threaded lazily-rs `Context` semantics in native JavaScript. The
+reactive core is implemented with the **closure factory technique** (#lzjsclosure,
+rmemo-style): `createContext()` returns an object whose methods close over
+captured graph state, and nodes are plain objects with a numeric discriminator
+replacing `instanceof`. V8 inlines these small monomorphic closures more
+aggressively than `class` + `#private` methods, so the read/invalidate hot paths
+run 2-8x faster than the prior class implementation (see `bench/context.bench.mjs`
+and `BENCHMARKS.md`). Both `createContext()` and the historical `new Context()`
+are the same function — an alias, not a wrapper.
+
+The family is:
 
 - **Slot** - lazy, memoized derived value;
 - **Cell** - mutable source value;
@@ -139,9 +149,9 @@ to suppress downstream work when a recompute produces the same value. `batch`
 coalesces invalidations and effect reruns.
 
 ```js
-import { Context } from "@lazily-hub/lazily-js/reactive";
+import { Context, createContext } from "@lazily-hub/lazily-js/reactive";
 
-const ctx = new Context();
+const ctx = createContext(); // idiomatic; `new Context()` is the same call
 const a = ctx.cell(2);
 const b = ctx.cell(3);
 
@@ -649,6 +659,37 @@ make bench-scale    # scale suite at N = 1,000,000
 npm run benchmark-update   # refresh BENCHMARKS.md's generated micro-bench table
 npm run benchmark-check    # CI gate: exit 1 if the micro-bench row set is stale
 ```
+
+## Bundle size
+
+`@lazily-hub/lazily-js` ships as pure ES modules with `"sideEffects": false` and
+one file per subpath export, so bundlers tree-shake to exactly what you import.
+The budgets below are enforced in CI by `npm run test:size` (size-limit); the
+table is regenerated on every `npm run build` so it cannot drift from the
+shipped bytes.
+
+<!-- size-limits:start -->
+
+Generated for package `@lazily-hub/lazily-js` version `0.23.0`. Every entry is **minified + brotlied, tree-shaken to the named import** (`size-limit` + esbuild, the same pipeline Webpack/Rollup/Vite apply via `"sideEffects": false`).
+
+Refresh command:
+
+```bash
+npm run build            # regenerates this table as part of every build
+npm run test:size        # gate: fails CI if any entry exceeds its budget
+```
+
+| Import | Size | Budget |
+|---|---:|---:|
+| reactive: Context | 2.03 KB ✓ | 2.10 KB |
+| reactive: Context + handles + defaultEqual | 2.04 KB ✓ | 2.15 KB |
+| state-machine: StateMachine | 265 B ✓ | 300 B |
+| sem-tree: SemTree | 505 B ✓ | 550 B |
+| stable-id: contentHash | 152 B ✓ | 200 B |
+| collections: CellMap + CellTree + reconcileCollections | 1.65 KB ✓ | 1.75 KB |
+| index: PROTOCOL_ID + Snapshot (tree-shaken kitchen sink) | 2.41 KB ✓ | 2.50 KB |
+
+<!-- size-limits:end -->
 
 ## See also
 

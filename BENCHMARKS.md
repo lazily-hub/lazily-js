@@ -19,7 +19,7 @@ like-for-like single-process counterpart here and are intentionally omitted.
 
 <!-- benchmark-results:start -->
 
-Generated for package `@lazily-hub/lazily-js` version `0.21.0`.
+Generated for package `@lazily-hub/lazily-js` version `0.22.0`.
 
 Environment: Node.js `26.4.0` on `linux x64`.
 
@@ -33,37 +33,37 @@ Mean wall-clock time per iteration; 95% CI half-width from the standard error.
 
 | Group | Case | Mean | 95% CI | p75 | p99 | Samples |
 |---|---|---:|---:|---:|---:|---:|
-| cached_reads | context | 44.006 ns | ± 3.227 ns | 58.744 ns | 106.606 ns | 100 |
-| cold_first_get | context | 1.065 us | ± 71.314 ns | 960.000 ns | 2.392 us | 100 |
-| dependency_fan_out | context / 32 | 11.744 us | ± 3.051 us | 12.153 us | 68.307 us | 100 |
-| dependency_fan_out | context / 256 | 91.122 us | ± 13.843 us | 96.606 us | 454.991 us | 100 |
-| set_cell_invalidation | high_fan_out / 512 | 5.836 us | ± 301.125 ns | 6.403 us | 10.753 us | 100 |
-| memo_equality_suppression | context | 10.621 us | ± 5.207 us | 9.832 us | 31.479 us | 100 |
-| effect_flushing | context | 577.398 ns | ± 121.105 ns | 666.770 ns | 2.112 us | 100 |
-| batch_storms | context / 64 | 23.888 us | ± 1.842 us | 25.909 us | 64.983 us | 92 |
-| typed_cache_reads | context_cell | 39.468 ns | ± 2.461 ns | 43.692 ns | 78.920 ns | 100 |
-| typed_cache_reads | context_slot | 45.984 ns | ± 3.323 ns | 58.362 ns | 118.292 ns | 100 |
-| default_equal | array | 37.294 ns | ± 2.011 ns | 38.003 ns | 61.372 ns | 100 |
-| default_equal | object | 123.486 ns | ± 8.412 ns | 139.781 ns | 240.550 ns | 100 |
-| node_allocation | scale / 4096 | 214.268 us | ± 24.794 us | 218.650 us | 629.258 us | 100 |
-| textcrdt_insert_str | 64 | 11.507 us | ± 4.073 us | 9.795 us | 129.694 us | 100 |
-| textcrdt_insert_str | 256 | 30.880 us | ± 2.432 us | 27.548 us | 74.019 us | 100 |
-| textcrdt_insert_str | 1024 | 104.378 us | ± 4.965 us | 100.971 us | 190.551 us | 100 |
-| textcrdt_repeated_text | 64 | 199.349 us | ± 136.818 us | 81.500 us | 3.827 ms | 100 |
-| textcrdt_repeated_text | 256 | 377.168 us | ± 75.080 us | 372.493 us | 1.650 ms | 100 |
-| textcrdt_repeated_text | 1024 | 1.666 ms | ± 197.562 us | 1.866 ms | 5.390 ms | 100 |
-| textcrdt_merge | 64 | 14.532 us | ± 1.758 us | 13.980 us | 26.721 us | 100 |
-| textcrdt_merge | 256 | 123.013 us | ± 14.603 us | 158.889 us | 432.190 us | 100 |
-| textcrdt_merge | 1024 | 299.847 us | ± 12.080 us | 338.107 us | 481.018 us | 100 |
-| textcrdt_delta_sync | 64 | 20.996 us | ± 1.864 us | 23.378 us | 28.550 us | 100 |
-| textcrdt_delta_sync | 256 | 116.797 us | ± 15.467 us | 119.754 us | 485.695 us | 100 |
-| textcrdt_delta_sync | 1024 | 290.045 us | ± 17.798 us | 287.037 us | 546.865 us | 100 |
-| seqcrdt_insert_back | 64 | 93.465 us | ± 32.678 us | 96.908 us | 260.850 us | 100 |
-| seqcrdt_insert_back | 256 | 2.669 ms | ± 181.207 us | 2.922 ms | 6.607 ms | 100 |
-| seqcrdt_insert_back | 1024 | 54.492 ms | ± 3.469 ms | 58.995 ms | 71.439 ms | 20 |
-| seqcrdt_merge | 64 | 10.173 us | ± 1.284 us | 10.620 us | 24.711 us | 100 |
-| seqcrdt_merge | 256 | 36.588 us | ± 3.567 us | 42.157 us | 99.064 us | 100 |
-| seqcrdt_merge | 1024 | 121.410 us | ± 14.236 us | 118.046 us | 423.983 us | 100 |
+| cached_reads | context | 8.061 ns | ± 0.779 ns | 8.427 ns | 26.939 ns | 100 |
+| cold_first_get | context | 423.300 ns | ± 43.318 ns | 342.500 ns | 1.373 us | 100 |
+| dependency_fan_out | context / 32 | 3.771 us | ± 173.255 ns | 3.800 us | 7.261 us | 100 |
+| dependency_fan_out | context / 256 | 47.978 us | ± 1.173 us | 47.323 us | 66.724 us | 100 |
+| set_cell_invalidation | high_fan_out / 512 | 3.424 us | ± 84.646 ns | 3.410 us | 5.966 us | 100 |
+| memo_equality_suppression | context | 2.783 us | ± 561.495 ns | 4.138 us | 13.663 us | 100 |
+| effect_flushing | context | 188.019 ns | ± 8.596 ns | 191.316 ns | 376.753 ns | 100 |
+| batch_storms | context / 64 | 14.257 us | ± 614.920 ns | 14.799 us | 26.218 us | 70 |
+| typed_cache_reads | context_cell | 4.742 ns | ± 0.403 ns | 5.609 ns | 8.350 ns | 100 |
+| typed_cache_reads | context_slot | 42.333 ns | ± 35.346 ns | 19.026 ns | 188.015 ns | 100 |
+| default_equal | array | 34.602 ns | ± 2.774 ns | 30.943 ns | 99.200 ns | 100 |
+| default_equal | object | 94.251 ns | ± 3.295 ns | 93.296 ns | 161.861 ns | 100 |
+| node_allocation | scale / 4096 | 163.011 us | ± 8.360 us | 159.941 us | 322.151 us | 100 |
+| textcrdt_insert_str | 64 | 9.882 us | ± 3.182 us | 8.358 us | 59.799 us | 100 |
+| textcrdt_insert_str | 256 | 28.812 us | ± 2.264 us | 25.503 us | 65.357 us | 100 |
+| textcrdt_insert_str | 1024 | 97.365 us | ± 5.110 us | 91.328 us | 166.233 us | 100 |
+| textcrdt_repeated_text | 64 | 40.114 us | ± 1.467 us | 37.831 us | 64.145 us | 100 |
+| textcrdt_repeated_text | 256 | 159.171 us | ± 8.707 us | 171.325 us | 335.391 us | 100 |
+| textcrdt_repeated_text | 1024 | 915.084 us | ± 45.457 us | 1.025 ms | 1.667 ms | 100 |
+| textcrdt_merge | 64 | 13.957 us | ± 1.733 us | 14.396 us | 22.914 us | 100 |
+| textcrdt_merge | 256 | 65.644 us | ± 5.379 us | 69.226 us | 130.124 us | 100 |
+| textcrdt_merge | 1024 | 297.418 us | ± 16.007 us | 319.127 us | 535.482 us | 100 |
+| textcrdt_delta_sync | 64 | 21.147 us | ± 2.856 us | 21.657 us | 42.016 us | 100 |
+| textcrdt_delta_sync | 256 | 64.549 us | ± 3.040 us | 64.218 us | 151.264 us | 100 |
+| textcrdt_delta_sync | 1024 | 252.134 us | ± 11.758 us | 248.660 us | 496.058 us | 100 |
+| seqcrdt_insert_back | 64 | 174.152 us | ± 173.997 us | 108.671 us | 227.421 us | 100 |
+| seqcrdt_insert_back | 256 | 1.645 ms | ± 70.745 us | 1.836 ms | 2.722 ms | 100 |
+| seqcrdt_insert_back | 1024 | 43.273 ms | ± 2.036 ms | 44.806 ms | 55.153 ms | 20 |
+| seqcrdt_merge | 64 | 7.911 us | ± 1.244 us | 7.920 us | 23.291 us | 100 |
+| seqcrdt_merge | 256 | 27.352 us | ± 2.299 us | 31.073 us | 66.754 us | 100 |
+| seqcrdt_merge | 1024 | 117.426 us | ± 8.835 us | 127.046 us | 355.789 us | 100 |
 
 <!-- benchmark-results:end -->
 

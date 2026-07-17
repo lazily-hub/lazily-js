@@ -40,8 +40,15 @@ export interface InstrumentationSnapshot {
   maxEffectQueueDepth: number;
 }
 
-export class Context {
-  constructor(opts?: { instrument?: boolean });
+/**
+ * A reactive context: the graph owning all Cell/Slot/Signal/Effect nodes.
+ *
+ * Declared as an interface so it can be used as a type
+ * (`import type { Context }`) while the runtime value is the newable
+ * {@link Context} function below (declaration merging: same name, a type side
+ * and a value side). New code may prefer {@link createContext}.
+ */
+export interface Context {
   cell<T>(value: T): CellHandle<T>;
   computed<T>(compute: ComputeFn<T>): SlotHandle<T>;
   slot<T>(compute: ComputeFn<T>): SlotHandle<T>;
@@ -63,3 +70,19 @@ export class Context {
   /** Zero the instrumentation counters (no-op when instrumentation is off). */
   resetInstrumentation(): void;
 }
+
+/**
+ * Create a reactive {@link Context} — the idiomatic entry point.
+ *
+ * Implemented with the closure factory technique (#lzjsclosure): graph state is
+ * captured in closure bindings rather than class instance fields, so V8 inlines
+ * the hot paths more aggressively than the prior `class` + `#private` version.
+ */
+export declare function createContext(opts?: { instrument?: boolean }): Context;
+
+/**
+ * Backwards-compatible newable wrapper around {@link createContext}. Existing
+ * `new Context(opts)` call sites keep working unchanged; new code may call
+ * `createContext(opts)` directly. Both return the same reactive context.
+ */
+export declare function Context(opts?: { instrument?: boolean }): Context;

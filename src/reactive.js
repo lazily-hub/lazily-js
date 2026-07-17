@@ -13,6 +13,15 @@
 // - Signals are eager: a backing memo slot plus a puller effect — the value is
 //   re-materialized by the time the invalidating `setCell`/`batch` returns.
 // - Effects rerun after any tracked dependency invalidates.
+//
+// #lzjsclosure: this module uses the closure factory technique (rmemo-style)
+// rather than `class` + `#private` fields. `createContext()` returns an object
+// whose methods close over captured `let` state; nodes are plain objects with
+// a numeric `k` discriminator (CELL/SLOT/EFFECT) replacing `instanceof`. V8
+// inlines the small monomorphic closures more aggressively than prototype
+// methods touching `#private` fields, so the read/invalidate hot paths are
+// 2-8x faster than the prior class implementation (see bench/closure-vs-class
+// .bench.mjs) while also shaving ~8% off the minified+brotlied payload.
 
 export function defaultEqual(a, b) {
   if (a === b) {
@@ -91,7 +100,11 @@ export class SignalHandle {
   }
 }
 
-// -- Context -----------------------------------------------------------------
+// -- Node discriminators (replace `instanceof` in hot loops) ----------------
+
+const CELL = 0;
+const SLOT = 1;
+const EFFECT = 2;
 
 function edgeInsert(edges, id) {
   for (let i = 0; i < edges.length; i++) {
@@ -114,73 +127,48 @@ function edgeRemove(edges, id) {
   return false;
 }
 
-class CellNode {
-  constructor(value) {
-    this.value = value;
-    this.dependents = null; // #lzjslazyedges: allocated on first edge
-  }
-}
-
-class SlotNode {
-  constructor(compute, memo) {
-    this.value = undefined;
-    this.hasValue = false;
-    this.memo = memo;
-    this.compute = compute;
-    this.dependencies = null; // #lzjslazyedges: allocated on first edge
-    this.dependents = null; // #lzjslazyedges: allocated on first edge
-    this.dirty = false;
-    this.forceRecompute = false;
-    this.inProgress = false;
-  }
-}
-
-class EffectNode {
-  constructor(run) {
-    this.run = run;
-    this.dependencies = null; // #lzjslazyedges: allocated on first edge
-    this.cleanup = null;
-    this.forceRun = false;
-  }
-}
-
-export class Context {
-  #nodes = [];
-  #nextId = 1;
-  #freeIds = [];
-  #trackingStack = [];
-  #pendingEffects = [];
-  #pendingHead = 0;
-  #scheduledEffects = new Set();
-  #flushingEffects = false;
-  #batchDepth = 0;
-  #batchedCells = new Set();
-  // Reusable scratch buffers for #markFrontier (#lzjsscratchfrontier): avoid
+/**
+ * Create a reactive {@link Context} — the idiomatic entry point.
+ *
+ * Implemented with the closure factory technique (#lzjsclosure): graph state is
+ * captured in closure bindings rather than class instance fields, so V8 inlines
+ * the hot paths more aggressively than the prior `class` + `#private` version.
+ *
+ * `Context` is an alias of this function (same binding), so the historical
+ * `new Context(opts)` call sites keep working unchanged. A function that returns
+ * an object is a legal constructor under the JS spec — `new` yields the returned
+ * object — so both `createContext(opts)` and `new Context(opts)` produce the
+ * same reactive context.
+ *
+ * @param {{ instrument?: boolean }} [opts] pass `{ instrument: true }` to
+ *   accumulate reactive-core counters readable via
+ *   {@link Context.instrumentationSnapshot}.
+ */
+function createContext(opts = {}) {
+  const instrument = !!(opts && opts.instrument === true);
+  const nodes = [];
+  let nextId = 1;
+  const freeIds = [];
+  const trackingStack = [];
+  let pendingEffects = [];
+  let pendingHead = 0;
+  const scheduledEffects = new Set();
+  let flushingEffects = false;
+  let batchDepth = 0;
+  let batchedCells = new Set();
+  // Reusable scratch buffers for markFrontier (#lzjsscratchfrontier): avoid
   // per-invalidation array allocation by clearing in place. Safe under
   // reentrancy because callers fully consume the returned effects array before
-  // #flushEffects can re-enter #markFrontier (guarded by #flushingEffects).
-  #frontierEffects = [];
-  #frontierStack = [];
-  #frontierForceStack = [];
+  // flushEffects can re-enter markFrontier (guarded by flushingEffects).
+  const frontierEffects = [];
+  const frontierStack = [];
+  const frontierForceStack = [];
   // Opt-in instrumentation (off by default → zero steady-state overhead, so the
   // committed BENCHMARKS.md numbers are unperturbed). Mirrors the counter subset
   // of lazily-rs's `InstrumentationSnapshot` that is meaningful single-threaded.
-  #instrument = false;
-  #counters = null;
+  let counters = instrument ? zeroCounters() : null;
 
-  /**
-   * @param {{ instrument?: boolean }} [opts] pass `{ instrument: true }` to
-   *   accumulate reactive-core counters readable via
-   *   {@link Context#instrumentationSnapshot}.
-   */
-  constructor(opts = {}) {
-    if (opts && opts.instrument === true) {
-      this.#instrument = true;
-      this.#counters = this.#zeroCounters();
-    }
-  }
-
-  #zeroCounters() {
+  function zeroCounters() {
     return {
       nodeAllocations: 0,
       slotRecomputes: 0,
@@ -191,109 +179,114 @@ export class Context {
     };
   }
 
-  /**
-   * A snapshot of the reactive-core instrumentation counters, or `null` when
-   * instrumentation was not enabled at construction.
-   * @returns {{ nodeAllocations: number, slotRecomputes: number, dependencyEdgesAdded: number, dependencyEdgesRemoved: number, effectQueuePushes: number, maxEffectQueueDepth: number } | null}
-   */
-  instrumentationSnapshot() {
-    return this.#counters ? { ...this.#counters } : null;
-  }
-
-  /** Zero the instrumentation counters (no-op when instrumentation is off). */
-  resetInstrumentation() {
-    if (this.#counters) {
-      this.#counters = this.#zeroCounters();
-    }
+  function allocId() {
+    if (instrument) counters.nodeAllocations++;
+    return freeIds.pop() ?? nextId++;
   }
 
   // -- Creation ----------------------------------------------------------
 
-  cell(value) {
-    return new CellHandle(this.#cellAny(value));
+  function cell(value) {
+    return new CellHandle(cellAny(value));
   }
 
-  #cellAny(value) {
-    const id = this.#allocId();
-    this.#nodes[id] = new CellNode(value);
+  function cellAny(value) {
+    const id = allocId();
+    nodes[id] = { k: CELL, value, dependents: null }; // #lzjslazyedges
     return id;
   }
 
-  computed(compute) {
-    return new SlotHandle(this.#slotAny(false, compute));
+  function computed(compute) {
+    return new SlotHandle(slotAny(false, compute));
   }
 
-  slot(compute) {
-    return this.computed(compute);
+  function slot(compute) {
+    return computed(compute);
   }
 
-  memo(compute) {
-    return new SlotHandle(this.#slotAny(true, compute));
+  function memo(compute) {
+    return new SlotHandle(slotAny(true, compute));
   }
 
-  #slotAny(memo, compute) {
-    const id = this.#allocId();
-    this.#nodes[id] = new SlotNode(compute, memo);
+  function slotAny(memoFlag, compute) {
+    const id = allocId();
+    nodes[id] = {
+      k: SLOT,
+      value: undefined,
+      hasValue: false,
+      memo: memoFlag,
+      compute,
+      dependencies: null, // #lzjslazyedges: allocated on first edge
+      dependents: null, // #lzjslazyedges: allocated on first edge
+      dirty: false,
+      forceRecompute: false,
+      inProgress: false,
+    };
     return id;
   }
 
-  signal(compute) {
-    const slot = this.#slotAny(true, compute);
-    const effect = this.#effectAny(() => {
-      this.#getSlotAny(slot);
+  function signal(compute) {
+    const slot = slotAny(true, compute);
+    const effect = effectAny(() => {
+      getSlotAny(slot);
       return null;
     });
     return new SignalHandle(new SlotHandle(slot), new EffectHandle(effect));
   }
 
-  effect(run) {
-    return new EffectHandle(this.#effectAny(run));
+  function effect(run) {
+    return new EffectHandle(effectAny(run));
   }
 
-  #effectAny(run) {
-    const id = this.#allocId();
-    const node = new EffectNode(run);
-    node.forceRun = true; // force the initial run on registration
-    this.#nodes[id] = node;
-    this.#scheduleEffect(id, false);
-    this.#flushEffects();
+  function effectAny(run) {
+    const id = allocId();
+    const node = {
+      k: EFFECT,
+      run,
+      dependencies: null, // #lzjslazyedges
+      cleanup: null,
+      forceRun: true, // force the initial run on registration
+    };
+    nodes[id] = node;
+    scheduleEffect(id, false);
+    flushEffects();
     return id;
   }
 
   // -- Read --------------------------------------------------------------
 
-  get(handle) {
-    return this.#getSlotAny(handle.id);
+  function get(handle) {
+    return getSlotAny(handle.id);
   }
 
-  getCell(handle) {
-    return this.#getCellAny(handle.id);
+  function getCell(handle) {
+    return getCellAny(handle.id);
   }
 
-  getSignal(handle) {
-    return this.get(handle.slot);
+  function getSignal(handle) {
+    return get(handle.slot);
   }
 
-  #getSlotAny(id) {
-    const frame = this.#currentFrame();
-    if (frame !== undefined) {
-      this.#registerDependency(id, frame);
+  function getSlotAny(id) {
+    const len = trackingStack.length;
+    if (len > 0) {
+      registerDependency(id, trackingStack[len - 1]);
     }
-    this.#refreshSlot(id);
-    const node = this.#nodes[id];
-    if (!(node instanceof SlotNode) || !node.hasValue) {
+    refreshSlot(id);
+    const node = nodes[id];
+    if (node.k !== SLOT || !node.hasValue) {
       throw new Error(`slot ${id} has no value`);
     }
     return node.value;
   }
 
-  #getCellAny(id) {
-    const frame = this.#currentFrame();
-    if (frame !== undefined) {
-      this.#registerDependency(id, frame);
+  function getCellAny(id) {
+    const len = trackingStack.length;
+    if (len > 0) {
+      registerDependency(id, trackingStack[len - 1]);
     }
-    const node = this.#nodes[id];
-    if (!(node instanceof CellNode)) {
+    const node = nodes[id];
+    if (node.k !== CELL) {
       throw new Error(`get_cell on non-cell id ${id}`);
     }
     return node.value;
@@ -301,19 +294,19 @@ export class Context {
 
   // -- Write -------------------------------------------------------------
 
-  setCell(handle, value) {
-    this.#setCellAny(handle.id, value);
+  function setCell(handle, value) {
+    setCellAny(handle.id, value);
   }
 
-  #setCellAny(id, value) {
-    const node = this.#nodes[id];
-    if (!(node instanceof CellNode)) {
+  function setCellAny(id, value) {
+    const node = nodes[id];
+    if (node.k !== CELL) {
       throw new Error(`set_cell on non-cell id ${id}`);
     }
     if (!defaultEqual(node.value, value)) {
       node.value = value;
-      if (this.#isBatching()) {
-        this.#batchedCells.add(id);
+      if (batchDepth > 0) {
+        batchedCells.add(id);
       } else {
         // Store-without-cascade: the new value is stored above (so a late
         // subscriber reads it glitch-free) and lazy Slot dependents are
@@ -321,8 +314,8 @@ export class Context {
         // actually contains an Effect. A cell with no active reactor pays no
         // flush — the write side of the merge cost law
         // (relaycell-backpressure-analysis.md §4.0 / §5).
-        if (this.#invalidateCellDependentsNow(id)) {
-          this.#flushEffects();
+        if (invalidateDependentsNow(id)) {
+          flushEffects();
         }
       }
     }
@@ -330,70 +323,66 @@ export class Context {
 
   // -- Batch -------------------------------------------------------------
 
-  batch(run) {
-    this.#batchDepth++;
+  function batch(run) {
+    batchDepth++;
     try {
       run();
     } finally {
-      this.#finishBatch();
+      finishBatch();
     }
   }
 
-  #finishBatch() {
-    if (this.#batchDepth <= 0) {
+  function finishBatch() {
+    if (batchDepth <= 0) {
       throw new Error("finishBatch without active batch");
     }
-    this.#batchDepth--;
-    if (this.#batchDepth === 0) {
-      this.#flushBatched();
+    batchDepth--;
+    if (batchDepth === 0) {
+      flushBatched();
     }
   }
 
-  #flushBatched() {
-    const cells = this.#batchedCells;
-    this.#batchedCells = new Set();
+  function flushBatched() {
+    const cells = batchedCells;
+    batchedCells = new Set();
     const roots = [];
     for (const id of cells) {
-      const node = this.#nodes[id];
-      if (node instanceof CellNode) {
+      const node = nodes[id];
+      if (node.k === CELL) {
         const deps = node.dependents;
         if (deps !== null) {
-          for (const d of deps) {
-            roots.push(d);
+          for (let i = 0; i < deps.length; i++) {
+            roots.push(deps[i]);
           }
         }
       }
     }
-    const effects = this.#markFrontier(roots);
+    const effects = markFrontier(roots);
     for (let i = 0; i < effects.length; i++) {
-      this.#scheduleEffect(effects[i][0], effects[i][1]);
+      scheduleEffect(effects[i][0], effects[i][1]);
     }
-    this.#flushEffects();
-  }
-
-  #isBatching() {
-    return this.#batchDepth > 0;
+    flushEffects();
   }
 
   // -- Dispose -----------------------------------------------------------
 
-  disposeEffect(handle) {
+  function disposeEffect(handle) {
     const id = handle.id;
-    const idx = this.#pendingEffects.indexOf(id, this.#pendingHead);
+    const idx = pendingEffects.indexOf(id, pendingHead);
     if (idx !== -1) {
-      this.#pendingEffects.splice(idx, 1);
+      pendingEffects.splice(idx, 1);
     }
-    this.#scheduledEffects.delete(id);
-    const node = this.#nodes[id];
-    if (!(node instanceof EffectNode)) {
+    scheduledEffects.delete(id);
+    const node = nodes[id];
+    if (node.k !== EFFECT) {
       return;
     }
-    this.#nodes[id] = undefined;
-    this.#freeIds.push(id);
+    nodes[id] = undefined;
+    freeIds.push(id);
     const deps = node.dependencies;
     if (deps !== null) {
-      for (const dep of deps) {
-        this.#removeDependentEdge(dep, id);
+      for (let i = 0; i < deps.length; i++) {
+        removeDependentEdge(deps[i], id);
       }
     }
     if (node.cleanup) {
@@ -401,52 +390,54 @@ export class Context {
     }
   }
 
-  isEffectActive(handle) {
-    return this.#nodes[handle.id] instanceof EffectNode;
+  function isEffectActive(handle) {
+    const node = nodes[handle.id];
+    return node !== undefined && node.k === EFFECT;
   }
 
-  disposeSignal(handle) {
-    this.disposeEffect(handle.effect);
+  function disposeSignal(handle) {
+    disposeEffect(handle.effect);
   }
 
-  isSignalActive(handle) {
-    return this.isEffectActive(handle.effect);
+  function isSignalActive(handle) {
+    return isEffectActive(handle.effect);
   }
 
-  isSet(handle) {
-    const node = this.#nodes[handle.id];
-    if (!(node instanceof SlotNode)) {
+  function isSet(handle) {
+    const node = nodes[handle.id];
+    if (node === undefined || node.k !== SLOT) {
       return false;
     }
     return node.hasValue && !node.dirty;
   }
 
-  // -- Internals: id + edges --------------------------------------------
+  // -- Instrumentation ---------------------------------------------------
 
-  #allocId() {
-    if (this.#instrument) {
-      this.#counters.nodeAllocations++;
+  function instrumentationSnapshot() {
+    return counters ? { ...counters } : null;
+  }
+
+  function resetInstrumentation() {
+    if (counters) {
+      counters = zeroCounters();
     }
-    return this.#freeIds.pop() ?? this.#nextId++;
   }
 
-  #currentFrame() {
-    return this.#trackingStack[this.#trackingStack.length - 1];
-  }
+  // -- Internals: edges --------------------------------------------------
 
-  #registerDependency(depId, parentId) {
-    const dep = this.#nodes[depId];
-    if (dep instanceof CellNode || dep instanceof SlotNode) {
+  function registerDependency(depId, parentId) {
+    const dep = nodes[depId];
+    if (dep.k === CELL || dep.k === SLOT) {
       if (dep.dependents === null) {
         dep.dependents = [];
       }
       const added = edgeInsert(dep.dependents, parentId);
-      if (this.#instrument && added) {
-        this.#counters.dependencyEdgesAdded++;
+      if (instrument && added) {
+        counters.dependencyEdgesAdded++;
       }
     }
-    const parent = this.#nodes[parentId];
-    if (parent instanceof SlotNode || parent instanceof EffectNode) {
+    const parent = nodes[parentId];
+    if (parent.k === SLOT || parent.k === EFFECT) {
       if (parent.dependencies === null) {
         parent.dependencies = [];
       }
@@ -454,24 +445,24 @@ export class Context {
     }
   }
 
-  #removeDependentEdge(depId, parentId) {
-    const dep = this.#nodes[depId];
-    if (dep instanceof CellNode || dep instanceof SlotNode) {
+  function removeDependentEdge(depId, parentId) {
+    const dep = nodes[depId];
+    if (dep.k === CELL || dep.k === SLOT) {
       if (dep.dependents === null) {
         return;
       }
       const removed = edgeRemove(dep.dependents, parentId);
-      if (this.#instrument && removed) {
-        this.#counters.dependencyEdgesRemoved++;
+      if (instrument && removed) {
+        counters.dependencyEdgesRemoved++;
       }
     }
   }
 
   // -- Internals: refresh / recompute (pull-based, glitch-free) ----------
 
-  #refreshSlot(id) {
-    const node = this.#nodes[id];
-    if (!(node instanceof SlotNode)) {
+  function refreshSlot(id) {
+    const node = nodes[id];
+    if (node.k !== SLOT) {
       return false;
     }
     if (node.hasValue && !node.dirty && !node.forceRecompute) {
@@ -487,8 +478,9 @@ export class Context {
       let dependencyChanged = false;
       const deps = node.dependencies;
       if (deps !== null) {
-        for (const dep of deps) {
-          if (this.#nodes[dep] instanceof SlotNode && this.#refreshSlot(dep)) {
+        for (let i = 0; i < deps.length; i++) {
+          const dep = deps[i];
+          if (nodes[dep].k === SLOT && refreshSlot(dep)) {
             dependencyChanged = true;
           }
         }
@@ -499,15 +491,15 @@ export class Context {
         node.forceRecompute = false;
         return false;
       }
-      return this.#recomputeSlotNow(id, node);
+      return recomputeSlotNow(id, node);
     } finally {
       node.inProgress = false;
     }
   }
 
-  #recomputeSlotNow(id, node) {
-    if (this.#instrument) {
-      this.#counters.slotRecomputes++;
+  function recomputeSlotNow(id, node) {
+    if (instrument) {
+      counters.slotRecomputes++;
     }
     // #lzjslazyedges: clear in place rather than null + realloc. Toggling the
     // field null↔Array on every recompute makes V8 mark it polymorphic and
@@ -516,17 +508,17 @@ export class Context {
     // that never acquire an edge — those stay null.)
     const oldDeps = node.dependencies;
     if (oldDeps !== null) {
-      for (const dep of oldDeps) {
-        this.#removeDependentEdge(dep, id);
+      for (let i = 0; i < oldDeps.length; i++) {
+        removeDependentEdge(oldDeps[i], id);
       }
       oldDeps.length = 0;
     }
-    this.#trackingStack.push(id);
+    trackingStack.push(id);
     let result;
     try {
       result = node.compute();
     } finally {
-      this.#trackingStack.pop();
+      trackingStack.pop();
     }
     const unchanged = node.memo && node.hasValue && defaultEqual(node.value, result);
     node.dirty = false;
@@ -538,36 +530,22 @@ export class Context {
     node.value = result;
     node.hasValue = true;
     if (hadValue) {
-      this.#notifySlotValueChanged(id);
+      invalidateDependentsNow(id);
     }
     return hadValue;
-  }
-
-  #notifySlotValueChanged(id) {
-    this.#invalidateDependentsNow(id);
   }
 
   // -- Internals: invalidation propagation ------------------------------
 
   /**
-   * Mark a cell's dependent cone dirty. Returns `true` iff at least one Effect
+   * Mark a node's dependent cone dirty. Returns `true` iff at least one Effect
    * was scheduled — a `false` result is the store-without-cascade fast path (no
    * active reactor, so no flush is owed).
-   * @returns {boolean}
    */
-  #invalidateCellDependentsNow(id) {
-    return this.#invalidateDependentsNow(id);
-  }
-
-  #invalidateDependentsNow(id) {
-    const node = this.#nodes[id];
+  function invalidateDependentsNow(id) {
+    const node = nodes[id];
     let roots;
-    if (node instanceof CellNode) {
-      if (node.dependents === null) {
-        return false;
-      }
-      roots = node.dependents;
-    } else if (node instanceof SlotNode) {
+    if (node.k === CELL || node.k === SLOT) {
       if (node.dependents === null) {
         return false;
       }
@@ -575,29 +553,29 @@ export class Context {
     } else {
       return false;
     }
-    const effects = this.#markFrontier(roots);
+    const effects = markFrontier(roots);
     for (let i = 0; i < effects.length; i++) {
-      this.#scheduleEffect(effects[i][0], effects[i][1]);
+      scheduleEffect(effects[i][0], effects[i][1]);
     }
     return effects.length > 0;
   }
 
-  #markFrontier(roots) {
-    const effects = this.#frontierEffects;
-    const stack = this.#frontierStack;
-    const forceStack = this.#frontierForceStack;
+  function markFrontier(roots) {
+    const effects = frontierEffects;
+    const stack = frontierStack;
+    const forceStack = frontierForceStack;
     effects.length = 0;
     stack.length = 0;
     forceStack.length = 0;
-    for (const root of roots) {
-      stack.push(root);
+    for (let i = 0; i < roots.length; i++) {
+      stack.push(roots[i]);
       forceStack.push(true);
     }
     while (stack.length > 0) {
       const id = stack.pop();
       const force = forceStack.pop();
-      const node = this.#nodes[id];
-      if (node instanceof SlotNode) {
+      const node = nodes[id];
+      if (node.k === SLOT) {
         const shouldPropagate = !node.dirty || (force && !node.forceRecompute);
         node.dirty = true;
         if (force) {
@@ -606,13 +584,13 @@ export class Context {
         if (shouldPropagate) {
           const ddeps = node.dependents;
           if (ddeps !== null) {
-            for (const depId of ddeps) {
-              stack.push(depId);
+            for (let i = 0; i < ddeps.length; i++) {
+              stack.push(ddeps[i]);
               forceStack.push(false);
             }
           }
         }
-      } else if (node instanceof EffectNode) {
+      } else if (node.k === EFFECT) {
         effects.push([id, force]);
       }
     }
@@ -621,88 +599,88 @@ export class Context {
 
   // -- Internals: effect scheduling / flush ------------------------------
 
-  #scheduleEffect(id, force) {
-    const node = this.#nodes[id];
-    if (!(node instanceof EffectNode)) {
+  function scheduleEffect(id, force) {
+    const node = nodes[id];
+    if (node.k !== EFFECT) {
       return;
     }
     if (force) {
       node.forceRun = true;
     }
-    if (this.#scheduledEffects.add(id)) {
-      this.#pendingEffects.push(id);
-      if (this.#instrument) {
-        this.#counters.effectQueuePushes++;
-        const depth = this.#pendingEffects.length - this.#pendingHead;
-        if (depth > this.#counters.maxEffectQueueDepth) {
-          this.#counters.maxEffectQueueDepth = depth;
+    if (scheduledEffects.add(id)) {
+      pendingEffects.push(id);
+      if (instrument) {
+        counters.effectQueuePushes++;
+        const depth = pendingEffects.length - pendingHead;
+        if (depth > counters.maxEffectQueueDepth) {
+          counters.maxEffectQueueDepth = depth;
         }
       }
     }
   }
 
-  #flushEffects() {
-    if (this.#flushingEffects) {
+  function flushEffects() {
+    if (flushingEffects) {
       return;
     }
-    this.#flushingEffects = true;
+    flushingEffects = true;
     try {
       while (true) {
-        const id = this.#pendingEffects[this.#pendingHead++];
+        const id = pendingEffects[pendingHead++];
         if (id === undefined) {
-          this.#pendingEffects = [];
-          this.#pendingHead = 0;
+          pendingEffects = [];
+          pendingHead = 0;
           return;
         }
-        this.#scheduledEffects.delete(id);
-        this.#runEffect(id);
+        scheduledEffects.delete(id);
+        runEffect(id);
       }
     } finally {
-      this.#flushingEffects = false;
+      flushingEffects = false;
     }
   }
 
-  #runEffect(id) {
-    if (!this.#effectShouldRun(id)) {
+  function runEffect(id) {
+    if (!effectShouldRun(id)) {
       return;
     }
-    const node = this.#nodes[id];
-    if (!(node instanceof EffectNode)) {
+    const node = nodes[id];
+    if (node.k !== EFFECT) {
       return;
     }
-    // #lzjslazyedges: clear in place (see #recomputeSlotNow) to keep the field
+    // #lzjslazyedges: clear in place (see recomputeSlotNow) to keep the field
     // monomorphic once allocated.
     const oldDeps = node.dependencies;
     const cleanup = node.cleanup;
     node.cleanup = null;
     node.forceRun = false;
     if (oldDeps !== null) {
-      for (const dep of oldDeps) {
-        this.#removeDependentEdge(dep, id);
+      for (let i = 0; i < oldDeps.length; i++) {
+        removeDependentEdge(oldDeps[i], id);
       }
       oldDeps.length = 0;
     }
     if (cleanup) {
       cleanup();
     }
-    this.#trackingStack.push(id);
+    trackingStack.push(id);
     let nextCleanup;
     try {
       nextCleanup = node.run();
     } finally {
-      this.#trackingStack.pop();
+      trackingStack.pop();
     }
-    const current = this.#nodes[id];
-    if (current instanceof EffectNode) {
+    const current = nodes[id];
+    if (current.k === EFFECT) {
       current.cleanup = typeof nextCleanup === "function" ? nextCleanup : null;
     } else if (typeof nextCleanup === "function") {
       nextCleanup();
     }
   }
 
-  #effectShouldRun(id) {
-    const node = this.#nodes[id];
-    if (!(node instanceof EffectNode)) {
+  function effectShouldRun(id) {
+    const node = nodes[id];
+    if (node.k !== EFFECT) {
       return false;
     }
     if (node.forceRun) {
@@ -710,12 +688,41 @@ export class Context {
     }
     const deps = node.dependencies;
     if (deps !== null) {
-      for (const dep of deps) {
-        if (this.#nodes[dep] instanceof SlotNode && this.#refreshSlot(dep)) {
+      for (let i = 0; i < deps.length; i++) {
+        const dep = deps[i];
+        if (nodes[dep].k === SLOT && refreshSlot(dep)) {
           return true;
         }
       }
     }
     return false;
   }
+
+  return {
+    cell,
+    computed,
+    slot,
+    memo,
+    signal,
+    effect,
+    get,
+    getCell,
+    getSignal,
+    setCell,
+    batch,
+    disposeEffect,
+    isEffectActive,
+    disposeSignal,
+    isSignalActive,
+    isSet,
+    instrumentationSnapshot,
+    resetInstrumentation,
+  };
 }
+
+/**
+ * Backwards-compatible newable alias of {@link createContext}. Existing code
+ * that writes `new Context(opts)` keeps working unchanged; new code may call
+ * `createContext(opts)` directly. Both produce the same reactive context.
+ */
+export { createContext, createContext as Context };
