@@ -403,6 +403,55 @@ function createContext(opts = {}) {
     return isEffectActive(handle.effect);
   }
 
+  // Tear down a lazy derived node (slot/computed/memo). A slot is both a consumer
+  // (it has `dependencies` — the cells/slots it reads) and a producer (it has
+  // `dependents` — the slots/effects that read it), so both edge sets must be
+  // detached: upstream so invalidation no longer reaches this node, downstream so
+  // a later rerun of a former dependent never dereferences the freed id (see
+  // `removeDependentEdge`, which reads `nodes[depId].k`). Safe to call on an
+  // already-disposed handle or the wrong kind (no-op).
+  function disposeSlot(handle) {
+    const id = handle.id;
+    const node = nodes[id];
+    if (node === undefined || node.k !== SLOT) {
+      return;
+    }
+    const deps = node.dependencies;
+    if (deps !== null) {
+      for (let i = 0; i < deps.length; i++) {
+        removeDependentEdge(deps[i], id);
+      }
+    }
+    const dependents = node.dependents;
+    if (dependents !== null) {
+      for (let i = 0; i < dependents.length; i++) {
+        removeDependencyEdge(dependents[i], id);
+      }
+    }
+    nodes[id] = undefined;
+    freeIds.push(id);
+  }
+
+  // Tear down a source cell. Cells have no `dependencies` (pure source), so only
+  // the downstream edges are detached. Callers must ensure nothing still reads the
+  // cell in a live compute — disposing a cell a live slot reads will throw on that
+  // slot's next recompute (same contract as disposing any still-referenced node).
+  function disposeCell(handle) {
+    const id = handle.id;
+    const node = nodes[id];
+    if (node === undefined || node.k !== CELL) {
+      return;
+    }
+    const dependents = node.dependents;
+    if (dependents !== null) {
+      for (let i = 0; i < dependents.length; i++) {
+        removeDependencyEdge(dependents[i], id);
+      }
+    }
+    nodes[id] = undefined;
+    freeIds.push(id);
+  }
+
   function isSet(handle) {
     const node = nodes[handle.id];
     if (node === undefined || node.k !== SLOT) {
@@ -452,6 +501,26 @@ function createContext(opts = {}) {
         return;
       }
       const removed = edgeRemove(dep.dependents, parentId);
+      if (instrument && removed) {
+        counters.dependencyEdgesRemoved++;
+      }
+    }
+  }
+
+  // Symmetric to {@link removeDependentEdge}: remove `depId` from
+  // `nodes[parentId].dependencies` (the consumer-side edge list). Only SLOT and
+  // EFFECT nodes carry a `dependencies` list; cells are pure sources. Used by the
+  // downstream teardown in {@link disposeSlot}/{@link disposeCell}.
+  function removeDependencyEdge(parentId, depId) {
+    const parent = nodes[parentId];
+    if (parent === undefined) {
+      return;
+    }
+    if (parent.k === SLOT || parent.k === EFFECT) {
+      if (parent.dependencies === null) {
+        return;
+      }
+      const removed = edgeRemove(parent.dependencies, depId);
       if (instrument && removed) {
         counters.dependencyEdgesRemoved++;
       }
@@ -714,6 +783,8 @@ function createContext(opts = {}) {
     isEffectActive,
     disposeSignal,
     isSignalActive,
+    disposeSlot,
+    disposeCell,
     isSet,
     instrumentationSnapshot,
     resetInstrumentation,

@@ -64,6 +64,19 @@ export interface Context {
   isEffectActive(handle: EffectHandle): boolean;
   disposeSignal(handle: SignalHandle<unknown>): void;
   isSignalActive(handle: SignalHandle<unknown>): boolean;
+  /**
+   * Tear down a lazy derived node (slot/computed/memo): detach its upstream and
+   * downstream dependency edges, free the node, and recycle its id. No-op on an
+   * already-disposed handle or the wrong kind. Callers must ensure no live compute
+   * still reads the slot.
+   */
+  disposeSlot<T>(handle: SlotHandle<T>): void;
+  /**
+   * Tear down a source cell: detach its downstream edges, free the node, and
+   * recycle its id. No-op on an already-disposed handle or the wrong kind. Callers
+   * must ensure no live slot still reads the cell (its next recompute would throw).
+   */
+  disposeCell<T>(handle: CellHandle<T>): void;
   isSet<T>(handle: SlotHandle<T>): boolean;
   /** Instrumentation counters, or `null` if not enabled at construction. */
   instrumentationSnapshot(): InstrumentationSnapshot | null;

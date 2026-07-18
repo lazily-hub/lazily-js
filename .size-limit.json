@@ -3,42 +3,42 @@
     "name": "reactive: Context",
     "path": "src/reactive.js",
     "import": "{ Context }",
-    "limit": "2.1 KB"
+    "limit": "2108 B"
   },
   {
     "name": "reactive: Context + handles + defaultEqual",
     "path": "src/reactive.js",
     "import": "{ Context, CellHandle, SlotHandle, SignalHandle, EffectHandle, defaultEqual }",
-    "limit": "2.15 KB"
+    "limit": "2120 B"
   },
   {
     "name": "state-machine: StateMachine",
     "path": "src/state-machine.js",
     "import": "{ StateMachine }",
-    "limit": "300 B"
+    "limit": "267 B"
   },
   {
     "name": "sem-tree: SemTree",
     "path": "src/sem-tree.js",
     "import": "{ SemTree }",
-    "limit": "550 B"
+    "limit": "505 B"
   },
   {
     "name": "stable-id: contentHash",
     "path": "src/stable-id.js",
     "import": "{ contentHash }",
-    "limit": "200 B"
+    "limit": "152 B"
   },
   {
     "name": "collections: CellMap + CellTree + reconcileCollections",
     "path": "src/collections.js",
     "import": "{ CellMap, CellTree, reconcileCollections }",
-    "limit": "1.75 KB"
+    "limit": "1645 B"
   },
   {
     "name": "index: PROTOCOL_ID + Snapshot (tree-shaken kitchen sink)",
     "path": "src/index.js",
     "import": "{ PROTOCOL_ID, Snapshot }",
-    "limit": "2.5 KB"
+    "limit": "2409 B"
   }
 ]
