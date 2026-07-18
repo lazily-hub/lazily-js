@@ -17,11 +17,21 @@
 // #lzjsclosure: this module uses the closure factory technique (rmemo-style)
 // rather than `class` + `#private` fields. `createContext()` returns an object
 // whose methods close over captured `let` state; nodes are plain objects with
-// a numeric `k` discriminator (CELL/SLOT/EFFECT) replacing `instanceof`. V8
-// inlines the small monomorphic closures more aggressively than prototype
-// methods touching `#private` fields, so the read/invalidate hot paths are
-// 2-8x faster than the prior class implementation (see bench/closure-vs-class
-// .bench.mjs) while also shaving ~8% off the minified+brotlied payload.
+// a numeric discriminator (KIND_CELL/KIND_SLOT/KIND_EFFECT) replacing
+// `instanceof`. V8 inlines the small monomorphic closures more aggressively
+// than prototype methods touching `#private` fields, so the read/invalidate
+// hot paths are 2-8x faster than the prior class implementation (see
+// bench/closure-vs-class.bench.mjs) while also shaving ~8% off the
+// minified+brotlied payload.
+//
+// #lzjsarenanodes: the hot per-node scalar state (kind + packed boolean flags)
+// lives in two arena typed arrays (`kinds` / `flags`) keyed by id, not on the
+// node objects themselves. The `nodes` array keeps only non-scalar fields
+// (value, compute fn, edge arrays), shrinking each node object from up to 10
+// properties to ≤4. That lets V8 emit one stable hidden class per shape and
+// trims per-node memory from ~300 B to ~150 B on the spreadsheet-scale
+// workloads in BENCHMARKS.md. Boolean fields are bit-packed: hasValue/memo/
+// dirty/forceRecompute/inProgress (slots) and forceRun (effects).
 
 export function defaultEqual(a, b) {
   if (a === b) {
@@ -101,10 +111,28 @@ export class SignalHandle {
 }
 
 // -- Node discriminators (replace `instanceof` in hot loops) ----------------
+// #lzjsarenanodes: the kind lives in the `kinds` Uint8Array arena (one byte
+// per id), not on the node object. KIND_NONE (0) marks a free id — it is what
+// `kinds[id]` reads as for never-allocated ids (typed arrays zero-initialize)
+// and what dispose* explicitly writes back when recycling an id. The node
+// objects in `nodes[]` no longer carry a `k` field.
 
-const CELL = 0;
-const SLOT = 1;
-const EFFECT = 2;
+const KIND_NONE = 0;
+const KIND_CELL = 1;
+const KIND_SLOT = 2;
+const KIND_EFFECT = 3;
+
+// Packed boolean flags stored in the `flags` Uint8Array arena (one byte per
+// id). Slot nodes use the first five bits; Effect nodes use F_FORCE_RUN. Cell
+// nodes carry no flags. Packing the booleans into one byte/id (vs ~5 separate
+// properties × ~8 B each on the slot object) is most of the #lzjsarenanodes
+// per-node memory win.
+const F_HAS_VALUE = 1 << 0;        // slot: a memoized value is cached
+const F_MEMO = 1 << 1;             // slot: equality-suppressed recompute
+const F_DIRTY = 1 << 2;            // slot: invalidate-on-next-read marker
+const F_FORCE_RECOMPUTE = 1 << 3;  // slot: force a recompute even if not dirty
+const F_IN_PROGRESS = 1 << 4;      // slot: cycle-detection tripwire
+const F_FORCE_RUN = 1 << 5;        // effect: force the next run regardless
 
 function edgeInsert(edges, id) {
   for (let i = 0; i < edges.length; i++) {
@@ -147,6 +175,15 @@ function edgeRemove(edges, id) {
 function createContext(opts = {}) {
   const instrument = !!(opts && opts.instrument === true);
   const nodes = [];
+  // #lzjsarenanodes: arena typed arrays keyed by id. `kinds[id]` holds the
+  // KIND_* discriminator (replacing the per-node `k` field); `flags[id]` holds
+  // the packed F_* boolean bits (replacing hasValue/dirty/forceRecompute/
+  // inProgress/memo/forceRun). They start small and double on demand via
+  // ensureCapacity; both are `let` so growth can rebind them — every closure
+  // sees the latest binding. 2 bytes/id total versus ~50 B/id for the same
+  // fields as object properties is the bulk of the per-node savings.
+  let kinds = new Uint8Array(32);
+  let flags = new Uint8Array(32);
   let nextId = 1;
   const freeIds = [];
   const trackingStack = [];
@@ -179,9 +216,24 @@ function createContext(opts = {}) {
     };
   }
 
+  // #lzjsarenanodes: grow the arena typed arrays when an id falls outside the
+  // current capacity. Inlined into allocId (the sole caller) so the hot path
+  // stays a single `id < kinds.length` branch; doubling keeps growth amortized
+  // O(1) per alloc. `kinds`/`flags` are `let` so the new arrays are visible to
+  // every closure that reads them.
   function allocId() {
     if (instrument) counters.nodeAllocations++;
-    return freeIds.pop() ?? nextId++;
+    const id = freeIds.pop() ?? nextId++;
+    if (id >= kinds.length) {
+      const newCap = kinds.length * 2;
+      const newKinds = new Uint8Array(newCap);
+      newKinds.set(kinds);
+      kinds = newKinds;
+      const newFlags = new Uint8Array(newCap);
+      newFlags.set(flags);
+      flags = newFlags;
+    }
+    return id;
   }
 
   // -- Creation ----------------------------------------------------------
@@ -192,7 +244,11 @@ function createContext(opts = {}) {
 
   function cellAny(value) {
     const id = allocId();
-    nodes[id] = { k: CELL, value, dependents: null }; // #lzjslazyedges
+    // #lzjsarenanodes: kind + (no) flags live in the arena; the node object
+    // holds only value + the lazy dependents edge list.
+    kinds[id] = KIND_CELL;
+    flags[id] = 0;
+    nodes[id] = { value, dependents: null }; // #lzjslazyedges
     return id;
   }
 
@@ -210,17 +266,17 @@ function createContext(opts = {}) {
 
   function slotAny(memoFlag, compute) {
     const id = allocId();
+    // #lzjsarenanodes: kind + hasValue/dirty/forceRecompute/inProgress all
+    // start at 0/false; memo is the only flag that may be set at creation. The
+    // node object keeps value (varies), compute (closure), and the two lazy
+    // edge lists — down from 10 properties to 4.
+    kinds[id] = KIND_SLOT;
+    flags[id] = memoFlag ? F_MEMO : 0;
     nodes[id] = {
-      k: SLOT,
       value: undefined,
-      hasValue: false,
-      memo: memoFlag,
       compute,
       dependencies: null, // #lzjslazyedges: allocated on first edge
       dependents: null, // #lzjslazyedges: allocated on first edge
-      dirty: false,
-      forceRecompute: false,
-      inProgress: false,
     };
     return id;
   }
@@ -240,14 +296,15 @@ function createContext(opts = {}) {
 
   function effectAny(run) {
     const id = allocId();
-    const node = {
-      k: EFFECT,
+    // #lzjsarenanodes: forceRun starts set (force the initial run on
+    // registration); the node object keeps run/cleanup + the lazy edge list.
+    kinds[id] = KIND_EFFECT;
+    flags[id] = F_FORCE_RUN;
+    nodes[id] = {
       run,
       dependencies: null, // #lzjslazyedges
       cleanup: null,
-      forceRun: true, // force the initial run on registration
     };
-    nodes[id] = node;
     scheduleEffect(id, false);
     flushEffects();
     return id;
@@ -273,11 +330,15 @@ function createContext(opts = {}) {
       registerDependency(id, trackingStack[len - 1]);
     }
     refreshSlot(id);
-    const node = nodes[id];
-    if (node.k !== SLOT || !node.hasValue) {
+    // After refreshSlot, F_HAS_VALUE is set iff `id` is a SLOT that has
+    // produced a value: non-slot kinds (CELL/EFFECT/NONE) never carry the
+    // bit, and refreshSlot sets it on first successful recompute. So this one
+    // flag check replaces both the kind check and the old hasValue read on
+    // the hot cached path.
+    if ((flags[id] & F_HAS_VALUE) === 0) {
       throw new Error(`slot ${id} has no value`);
     }
-    return node.value;
+    return nodes[id].value;
   }
 
   function getCellAny(id) {
@@ -285,11 +346,10 @@ function createContext(opts = {}) {
     if (len > 0) {
       registerDependency(id, trackingStack[len - 1]);
     }
-    const node = nodes[id];
-    if (node.k !== CELL) {
+    if (kinds[id] !== KIND_CELL) {
       throw new Error(`get_cell on non-cell id ${id}`);
     }
-    return node.value;
+    return nodes[id].value;
   }
 
   // -- Write -------------------------------------------------------------
@@ -299,10 +359,10 @@ function createContext(opts = {}) {
   }
 
   function setCellAny(id, value) {
-    const node = nodes[id];
-    if (node.k !== CELL) {
+    if (kinds[id] !== KIND_CELL) {
       throw new Error(`set_cell on non-cell id ${id}`);
     }
+    const node = nodes[id];
     if (!defaultEqual(node.value, value)) {
       node.value = value;
       if (batchDepth > 0) {
@@ -347,9 +407,8 @@ function createContext(opts = {}) {
     batchedCells = new Set();
     const roots = [];
     for (const id of cells) {
-      const node = nodes[id];
-      if (node.k === CELL) {
-        const deps = node.dependents;
+      if (kinds[id] === KIND_CELL) {
+        const deps = nodes[id].dependents;
         if (deps !== null) {
           for (let i = 0; i < deps.length; i++) {
             roots.push(deps[i]);
@@ -373,10 +432,15 @@ function createContext(opts = {}) {
       pendingEffects.splice(idx, 1);
     }
     scheduledEffects.delete(id);
-    const node = nodes[id];
-    if (node.k !== EFFECT) {
+    if (kinds[id] !== KIND_EFFECT) {
       return;
     }
+    const node = nodes[id];
+    // #lzjsarenanodes: clear the arena slots so the recycled id reads as
+    // KIND_NONE/flags=0, then drop the object reference so the run/cleanup
+    // closures can be GC'd.
+    kinds[id] = KIND_NONE;
+    flags[id] = 0;
     nodes[id] = undefined;
     freeIds.push(id);
     const deps = node.dependencies;
@@ -391,8 +455,7 @@ function createContext(opts = {}) {
   }
 
   function isEffectActive(handle) {
-    const node = nodes[handle.id];
-    return node !== undefined && node.k === EFFECT;
+    return kinds[handle.id] === KIND_EFFECT;
   }
 
   function disposeSignal(handle) {
@@ -408,14 +471,14 @@ function createContext(opts = {}) {
   // `dependents` — the slots/effects that read it), so both edge sets must be
   // detached: upstream so invalidation no longer reaches this node, downstream so
   // a later rerun of a former dependent never dereferences the freed id (see
-  // `removeDependentEdge`, which reads `nodes[depId].k`). Safe to call on an
+  // `removeDependentEdge`, which reads `kinds[depId]`). Safe to call on an
   // already-disposed handle or the wrong kind (no-op).
   function disposeSlot(handle) {
     const id = handle.id;
-    const node = nodes[id];
-    if (node === undefined || node.k !== SLOT) {
+    if (kinds[id] !== KIND_SLOT) {
       return;
     }
+    const node = nodes[id];
     const deps = node.dependencies;
     if (deps !== null) {
       for (let i = 0; i < deps.length; i++) {
@@ -428,6 +491,9 @@ function createContext(opts = {}) {
         removeDependencyEdge(dependents[i], id);
       }
     }
+    // #lzjsarenanodes: clear arena slots before recycling the id.
+    kinds[id] = KIND_NONE;
+    flags[id] = 0;
     nodes[id] = undefined;
     freeIds.push(id);
   }
@@ -438,26 +504,29 @@ function createContext(opts = {}) {
   // slot's next recompute (same contract as disposing any still-referenced node).
   function disposeCell(handle) {
     const id = handle.id;
-    const node = nodes[id];
-    if (node === undefined || node.k !== CELL) {
+    if (kinds[id] !== KIND_CELL) {
       return;
     }
+    const node = nodes[id];
     const dependents = node.dependents;
     if (dependents !== null) {
       for (let i = 0; i < dependents.length; i++) {
         removeDependencyEdge(dependents[i], id);
       }
     }
+    kinds[id] = KIND_NONE;
+    flags[id] = 0;
     nodes[id] = undefined;
     freeIds.push(id);
   }
 
   function isSet(handle) {
-    const node = nodes[handle.id];
-    if (node === undefined || node.k !== SLOT) {
+    const id = handle.id;
+    if (kinds[id] !== KIND_SLOT) {
       return false;
     }
-    return node.hasValue && !node.dirty;
+    // hasValue && !dirty, packed.
+    return (flags[id] & (F_HAS_VALUE | F_DIRTY)) === F_HAS_VALUE;
   }
 
   // -- Instrumentation ---------------------------------------------------
@@ -475,8 +544,9 @@ function createContext(opts = {}) {
   // -- Internals: edges --------------------------------------------------
 
   function registerDependency(depId, parentId) {
-    const dep = nodes[depId];
-    if (dep.k === CELL || dep.k === SLOT) {
+    const depKind = kinds[depId];
+    if (depKind === KIND_CELL || depKind === KIND_SLOT) {
+      const dep = nodes[depId];
       if (dep.dependents === null) {
         dep.dependents = [];
       }
@@ -485,8 +555,9 @@ function createContext(opts = {}) {
         counters.dependencyEdgesAdded++;
       }
     }
-    const parent = nodes[parentId];
-    if (parent.k === SLOT || parent.k === EFFECT) {
+    const parentKind = kinds[parentId];
+    if (parentKind === KIND_SLOT || parentKind === KIND_EFFECT) {
+      const parent = nodes[parentId];
       if (parent.dependencies === null) {
         parent.dependencies = [];
       }
@@ -495,8 +566,9 @@ function createContext(opts = {}) {
   }
 
   function removeDependentEdge(depId, parentId) {
-    const dep = nodes[depId];
-    if (dep.k === CELL || dep.k === SLOT) {
+    const depKind = kinds[depId];
+    if (depKind === KIND_CELL || depKind === KIND_SLOT) {
+      const dep = nodes[depId];
       if (dep.dependents === null) {
         return;
       }
@@ -512,11 +584,12 @@ function createContext(opts = {}) {
   // EFFECT nodes carry a `dependencies` list; cells are pure sources. Used by the
   // downstream teardown in {@link disposeSlot}/{@link disposeCell}.
   function removeDependencyEdge(parentId, depId) {
-    const parent = nodes[parentId];
-    if (parent === undefined) {
+    const parentKind = kinds[parentId];
+    if (parentKind === KIND_NONE) {
       return;
     }
-    if (parent.k === SLOT || parent.k === EFFECT) {
+    if (parentKind === KIND_SLOT || parentKind === KIND_EFFECT) {
+      const parent = nodes[parentId];
       if (parent.dependencies === null) {
         return;
       }
@@ -530,43 +603,46 @@ function createContext(opts = {}) {
   // -- Internals: refresh / recompute (pull-based, glitch-free) ----------
 
   function refreshSlot(id) {
+    if (kinds[id] !== KIND_SLOT) {
+      return false;
+    }
     const node = nodes[id];
-    if (node.k !== SLOT) {
+    const f = flags[id];
+    // hasValue && !dirty && !forceRecompute → cached, nothing to do.
+    if ((f & F_HAS_VALUE) !== 0 && (f & (F_DIRTY | F_FORCE_RECOMPUTE)) === 0) {
       return false;
     }
-    if (node.hasValue && !node.dirty && !node.forceRecompute) {
-      return false;
-    }
-    if (node.inProgress) {
+    if ((f & F_IN_PROGRESS) !== 0) {
       throw new Error(
         `lazily: circular dependency detected at slot ${id}; a computed/memo slot depends on itself`,
       );
     }
-    node.inProgress = true;
+    flags[id] = f | F_IN_PROGRESS;
     try {
       let dependencyChanged = false;
       const deps = node.dependencies;
       if (deps !== null) {
         for (let i = 0; i < deps.length; i++) {
           const dep = deps[i];
-          if (nodes[dep].k === SLOT && refreshSlot(dep)) {
+          if (kinds[dep] === KIND_SLOT && refreshSlot(dep)) {
             dependencyChanged = true;
           }
         }
       }
-      const needsRecompute = !node.hasValue || node.forceRecompute || dependencyChanged;
+      const needsRecompute =
+        (f & F_HAS_VALUE) === 0 || (f & F_FORCE_RECOMPUTE) !== 0 || dependencyChanged;
       if (!needsRecompute) {
-        node.dirty = false;
-        node.forceRecompute = false;
+        // Clear dirty/forceRecompute; the finally clears inProgress.
+        flags[id] &= ~(F_DIRTY | F_FORCE_RECOMPUTE);
         return false;
       }
-      return recomputeSlotNow(id, node);
+      return recomputeSlotNow(id, node, f);
     } finally {
-      node.inProgress = false;
+      flags[id] &= ~F_IN_PROGRESS;
     }
   }
 
-  function recomputeSlotNow(id, node) {
+  function recomputeSlotNow(id, node, f) {
     if (instrument) {
       counters.slotRecomputes++;
     }
@@ -589,15 +665,18 @@ function createContext(opts = {}) {
     } finally {
       trackingStack.pop();
     }
-    const unchanged = node.memo && node.hasValue && defaultEqual(node.value, result);
-    node.dirty = false;
-    node.forceRecompute = false;
+    const isMemo = (f & F_MEMO) !== 0;
+    const hadValue = (f & F_HAS_VALUE) !== 0;
+    const unchanged = isMemo && hadValue && defaultEqual(node.value, result);
+    // Clear dirty/forceRecompute for the next cycle. Use `&=` (not assignment
+    // from `f`) so F_IN_PROGRESS — set by the caller and cleared by its finally
+    // — stays set for the duration of the recompute (cycle detection).
+    flags[id] &= ~(F_DIRTY | F_FORCE_RECOMPUTE);
     if (unchanged) {
       return false;
     }
-    const hadValue = node.hasValue;
     node.value = result;
-    node.hasValue = true;
+    flags[id] |= F_HAS_VALUE;
     if (hadValue) {
       invalidateDependentsNow(id);
     }
@@ -612,13 +691,14 @@ function createContext(opts = {}) {
    * active reactor, so no flush is owed).
    */
   function invalidateDependentsNow(id) {
-    const node = nodes[id];
+    const kind = kinds[id];
     let roots;
-    if (node.k === CELL || node.k === SLOT) {
-      if (node.dependents === null) {
+    if (kind === KIND_CELL || kind === KIND_SLOT) {
+      const dependents = nodes[id].dependents;
+      if (dependents === null) {
         return false;
       }
-      roots = node.dependents;
+      roots = dependents;
     } else {
       return false;
     }
@@ -643,15 +723,23 @@ function createContext(opts = {}) {
     while (stack.length > 0) {
       const id = stack.pop();
       const force = forceStack.pop();
-      const node = nodes[id];
-      if (node.k === SLOT) {
-        const shouldPropagate = !node.dirty || (force && !node.forceRecompute);
-        node.dirty = true;
+      const kind = kinds[id];
+      if (kind === KIND_SLOT) {
+        // #lzjsarenanodes: read+write the dirty/forceRecompute bits in the
+        // flags arena. shouldPropagate mirrors the original `!dirty || (force
+        // && !forceRecompute)` predicate; then we set dirty (and
+        // forceRecompute when forcing).
+        const f = flags[id];
+        const isDirty = (f & F_DIRTY) !== 0;
+        const isForceRecompute = (f & F_FORCE_RECOMPUTE) !== 0;
+        const shouldPropagate = !isDirty || (force && !isForceRecompute);
+        let newFlags = f | F_DIRTY;
         if (force) {
-          node.forceRecompute = true;
+          newFlags |= F_FORCE_RECOMPUTE;
         }
+        flags[id] = newFlags;
         if (shouldPropagate) {
-          const ddeps = node.dependents;
+          const ddeps = nodes[id].dependents;
           if (ddeps !== null) {
             for (let i = 0; i < ddeps.length; i++) {
               stack.push(ddeps[i]);
@@ -659,7 +747,7 @@ function createContext(opts = {}) {
             }
           }
         }
-      } else if (node.k === EFFECT) {
+      } else if (kind === KIND_EFFECT) {
         effects.push([id, force]);
       }
     }
@@ -669,12 +757,11 @@ function createContext(opts = {}) {
   // -- Internals: effect scheduling / flush ------------------------------
 
   function scheduleEffect(id, force) {
-    const node = nodes[id];
-    if (node.k !== EFFECT) {
+    if (kinds[id] !== KIND_EFFECT) {
       return;
     }
     if (force) {
-      node.forceRun = true;
+      flags[id] |= F_FORCE_RUN;
     }
     if (scheduledEffects.add(id)) {
       pendingEffects.push(id);
@@ -713,16 +800,16 @@ function createContext(opts = {}) {
     if (!effectShouldRun(id)) {
       return;
     }
-    const node = nodes[id];
-    if (node.k !== EFFECT) {
+    if (kinds[id] !== KIND_EFFECT) {
       return;
     }
+    const node = nodes[id];
     // #lzjslazyedges: clear in place (see recomputeSlotNow) to keep the field
     // monomorphic once allocated.
     const oldDeps = node.dependencies;
     const cleanup = node.cleanup;
     node.cleanup = null;
-    node.forceRun = false;
+    flags[id] &= ~F_FORCE_RUN;
     if (oldDeps !== null) {
       for (let i = 0; i < oldDeps.length; i++) {
         removeDependentEdge(oldDeps[i], id);
@@ -739,27 +826,25 @@ function createContext(opts = {}) {
     } finally {
       trackingStack.pop();
     }
-    const current = nodes[id];
-    if (current.k === EFFECT) {
-      current.cleanup = typeof nextCleanup === "function" ? nextCleanup : null;
+    if (kinds[id] === KIND_EFFECT) {
+      nodes[id].cleanup = typeof nextCleanup === "function" ? nextCleanup : null;
     } else if (typeof nextCleanup === "function") {
       nextCleanup();
     }
   }
 
   function effectShouldRun(id) {
-    const node = nodes[id];
-    if (node.k !== EFFECT) {
+    if (kinds[id] !== KIND_EFFECT) {
       return false;
     }
-    if (node.forceRun) {
+    if ((flags[id] & F_FORCE_RUN) !== 0) {
       return true;
     }
-    const deps = node.dependencies;
+    const deps = nodes[id].dependencies;
     if (deps !== null) {
       for (let i = 0; i < deps.length; i++) {
         const dep = deps[i];
-        if (nodes[dep].k === SLOT && refreshSlot(dep)) {
+        if (kinds[dep] === KIND_SLOT && refreshSlot(dep)) {
           return true;
         }
       }

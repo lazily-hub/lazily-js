@@ -670,7 +670,7 @@ shipped bytes.
 
 <!-- size-limits:start -->
 
-Generated for package `@lazily-hub/lazily-js` version `0.23.0`. Every entry is **minified + brotlied, tree-shaken to the named import** (`size-limit` + esbuild, the same pipeline Webpack/Rollup/Vite apply via `"sideEffects": false`).
+Generated for package `@lazily-hub/lazily-js` version `0.24.0`. Every entry is **minified + brotlied, tree-shaken to the named import** (`size-limit` + esbuild, the same pipeline Webpack/Rollup/Vite apply via `"sideEffects": false`).
 
 Refresh command:
 
@@ -681,8 +681,8 @@ npm run test:size        # gate: fails CI if any entry exceeds its budget
 
 | Import | Size | Budget |
 |---|---:|---:|
-| reactive: Context | 2.11 KB ✓ | 2.11 KB |
-| reactive: Context + handles + defaultEqual | 2.12 KB ✓ | 2.12 KB |
+| reactive: Context | 2.24 KB ✓ | 2.24 KB |
+| reactive: Context + handles + defaultEqual | 2.24 KB ✓ | 2.25 KB |
 | state-machine: StateMachine | 267 B ✓ | 267 B |
 | sem-tree: SemTree | 505 B ✓ | 505 B |
 | stable-id: contentHash | 152 B ✓ | 152 B |
