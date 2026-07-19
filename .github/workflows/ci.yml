@@ -50,8 +50,8 @@ jobs:
           test -d ../lazily-spec/schemas || {
             echo "::error::../lazily-spec/schemas missing — schema-conformance tests cannot run"; exit 1; }
           for area in agent-doc collections coordination crdt-tree lossless-tree materialization \
-                      membership message-passing presence rateshape reliable-sync resilience \
-                      service statechart temporal windowing; do
+                      membership message-passing presence rateshape reactive-graph \
+                      reliable-sync resilience service statechart temporal windowing; do
             test -d "../lazily-spec/conformance/$area" || {
               echo "::error::../lazily-spec/conformance/$area missing"; exit 1; }
           done
@@ -89,6 +89,24 @@ jobs:
           [ -n "$pass" ] && [ "$pass" -gt 0 ] || {
             echo "::error::no passing tests reported — the suite ran nothing"; exit 1; }
           echo "passed $pass tests with 0 skipped"
+
+          # Reactive-graph replay must be observable in the output, per model.
+          # `fail 0 / skipped 0 / pass > 0` proves the suite ran; it does not
+          # prove the reactive-graph corpus was replayed, nor that it was
+          # replayed against every context. The dart/go cascade defect was
+          # sync-clean and async-broken, so a run covering only the default
+          # context is the exact hole this guard closes. Each model prints
+          # "reactive-graph[<model>]: replayed N fixtures, ..." and N must be
+          # nonzero.
+          for model in Context AsyncContext ThreadSafeContext; do
+            line="$(grep -oE "reactive-graph\[$model\]: replayed [0-9]+ fixtures" test-output.txt | head -1)"
+            [ -n "$line" ] || {
+              echo "::error::reactive-graph corpus was not replayed against $model"; exit 1; }
+            n="$(echo "$line" | grep -oE '[0-9]+')"
+            [ "$n" -gt 0 ] || {
+              echo "::error::reactive-graph[$model] replayed 0 fixtures — it tested nothing"; exit 1; }
+            echo "reactive-graph[$model]: $n fixtures replayed"
+          done
 
       - name: Formal model check
         run: npm run test:formal

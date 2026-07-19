@@ -43,6 +43,11 @@ const AREAS = [
   "message-passing",
   "presence",
   "rateshape",
+  // Replayed by test/reactive-graph-conformance.test.js against all three
+  // execution models. Family-wide only lazily-rs replayed these, which is how
+  // an invalidation-cascade defect shipped in dart and go with a fixture
+  // encoding the violated property sitting unrun on disk (#lzspecconf).
+  "reactive-graph",
   "reliable-sync",
   "resilience",
   "service",
