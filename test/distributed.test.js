@@ -100,18 +100,33 @@ test("closed channel reports a Closed WebRtcTransportError on send and recv", ()
 
 // --- CrdtSync frame conformance ---
 
+// Fill in the declared default for `CrdtSync.frontier` so an omitted frontier
+// compares equal to the canonical empty encoding. See lazily-spec
+// docs/conformance.md § Round-trip equivalence exemptions (#lzspecfrontiersuppress).
+function canonicalizeCrdtSyncWire(wire) {
+  const inner = wire?.CrdtSync;
+  if (!inner || "frontier" in inner) return wire;
+  return { CrdtSync: { frontier: [], ...inner } };
+}
+
 test("distributed/crdt_sync_frames.json round-trips each CrdtSync envelope", () => {
   const fixture = loadFixture("distributed/crdt_sync_frames.json");
   for (const frame of fixture.frames) {
     const message = IpcMessage.fromWire(frame.wire);
     assert.equal(message.isCrdtSync, true, frame.label);
-    assert.deepEqual(message.toWire(), frame.wire, frame.label);
+    assert.deepEqual(message.toWire(), canonicalizeCrdtSyncWire(frame.wire), frame.label);
     // Byte round-trip through encode/decode.
     assert.deepEqual(IpcMessage.decodeJson(message.encodeJson()), message, frame.label);
 
     const a = frame.assertions ?? {};
     if ("frontier_len" in a) {
       assert.equal(message.crdtSync.frontier.length, a.frontier_len, frame.label);
+    }
+    if ("frontier_omitted" in a) {
+      // #lzspecfrontiersuppress: an omitted frontier decodes as empty.
+      assert.equal(a.frontier_omitted, true, frame.label);
+      assert.equal("frontier" in frame.wire.CrdtSync, false, frame.label);
+      assert.equal(message.crdtSync.frontier.length, 0, frame.label);
     }
     if ("op_count" in a) {
       assert.equal(message.crdtSync.ops.length, a.op_count, frame.label);
