@@ -107,37 +107,14 @@ const EXPECTED_SKIPS = {
  * fails the build, and a fixed one fails it until the entry is removed. The
  * fixture on disk is never edited and no assertion is loosened.
  *
- * ### Finding: a live reader of a disposed slot serves its stale cache forever
- *
- * `read_after_dispose_is_an_error.json` requires that "a live reader that still
- * names a disposed dependency errors on its next recompute; it MUST NOT return
- * the value it computed before the disposal". lazily-js returns the pre-disposal
- * value instead. Reduced:
- *
- *     const src     = c.cell(4);
- *     const derived = c.computed(() => c.getCell(src));
- *     const reader  = c.computed(() => c.get(derived) + 1);
- *     c.get(reader);            // 5
- *     c.disposeSlot(derived);
- *     c.get(derived);           // throws — correct
- *     c.get(reader);            // 5   — should throw
- *     c.setCell(src, 99);
- *     c.get(reader);            // 5   — still 5, permanently
- *
- * `disposeSlot` detaches the edges in both directions, so `reader` is never
- * invalidated again and serves its cache indefinitely -- a later write to `src`
- * does not move it. This is precisely the failure the fixture's rationale
- * names: the caller cannot distinguish "torn down" from "legitimately 5", so a
- * use-after-dispose bug surfaces as a wrong number rather than an error.
- *
- * Only the sync `Context` is listed because it is the only model exposing
- * `disposeSlot`/`disposeCell`; the async and thread-safe models skip this
- * fixture entirely (see `EXPECTED_SKIPS`), so the same defect is unproven, not
- * absent, there.
+ * Empty today. The one entry this ledger carried -- a live reader of a disposed
+ * slot serving its pre-disposal cache forever, because `disposeSlot` detached
+ * both edge directions without dirtying the surviving readers -- was fixed in
+ * `reactive.js` (`invalidateDisposedDependents`), so
+ * `read_after_dispose_is_an_error.json` now replays clean on `Context`. The same
+ * defect had been found and fixed in lazily-rs (`5db90d2`).
  */
-const KNOWN_DIVERGENCES = [
-  "Context/read_after_dispose_is_an_error.json#6(read):error",
-];
+const KNOWN_DIVERGENCES = [];
 
 // The fixtures each model must replay. Asserted as an exact set, so a fixture
 // dropping out of the replay path fails rather than shrinking the run silently.

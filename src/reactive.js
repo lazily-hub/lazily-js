@@ -576,6 +576,9 @@ function createContext(opts = {}) {
       return;
     }
     const node = nodes[id];
+    // Dirty the surviving readers BEFORE the edges are detached — once the
+    // downstream loop below runs, nothing can reach them again.
+    invalidateDisposedDependents(node.dependents);
     const deps = node.dependencies;
     if (deps !== null) {
       for (let i = 0; i < deps.length; i++) {
@@ -610,6 +613,8 @@ function createContext(opts = {}) {
       return;
     }
     const node = nodes[id];
+    // See `disposeSlot`: detaching is not enough, the readers must be dirtied.
+    invalidateDisposedDependents(node.dependents);
     const dependents = node.dependents;
     if (dependents !== null) {
       for (let i = 0; i < dependents.length; i++) {
@@ -820,6 +825,31 @@ function createContext(opts = {}) {
       scheduleEffect(effects[i][0], effects[i][1]);
     }
     return effects.length > 0;
+  }
+
+  // Dirty the cone that read a node being disposed (`#lzspecedgeindex`).
+  //
+  // Detaching the edges is not enough on its own: a dependent that already has a
+  // cached value would keep serving it forever, since with its dependency edge
+  // gone nothing will ever invalidate it again — not even a later write to the
+  // disposed node's own source. The spec requires that reader to error on its
+  // next recompute, so the cone must be marked dirty and recompute (and hit the
+  // freed id) rather than answer from cache.
+  //
+  // Effects reached by the walk are deliberately NOT scheduled. Disposal is not
+  // a publish: an effect's next recompute is driven by a real write, and running
+  // one here would re-enter a compute that reads the node currently being torn
+  // down, turning `dispose` itself into a throw and breaking the idempotence
+  // teardown paths depend on. Marking dirty is sufficient — the contract is
+  // "errors on next recompute", not "errors immediately".
+  function invalidateDisposedDependents(dependents) {
+    if (dependents === null || dependents.length === 0) {
+      return;
+    }
+    markFrontier(dependents);
+    // The returned frontier is a shared scratch array; drop the effect entries
+    // so no later caller can mistake them for its own.
+    frontierEffects.length = 0;
   }
 
   function markFrontier(roots) {

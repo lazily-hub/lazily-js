@@ -196,6 +196,48 @@ test("#lzspecedgeindex: repeated reads of the same dep register exactly one edge
   }
 });
 
+test("#lzspecedgeindex: disposal invalidates surviving readers", () => {
+  // Detaching the edge is not enough -- a reader that still names a disposed
+  // node must recompute (and error) rather than serve the value it cached
+  // before the disposal, forever. Without the dirty mark the reader is frozen
+  // permanently: its dependency edge is gone, so not even a later write to the
+  // disposed node's own source can move it.
+  const ctx = new Context();
+  const src = ctx.cell(4);
+  const derived = ctx.computed(() => ctx.getCell(src));
+  const reader = ctx.computed(() => ctx.get(derived) + 1);
+  assert.equal(ctx.get(reader), 5);
+
+  ctx.disposeSlot(derived);
+  assert.throws(() => ctx.get(derived), "a direct read of a disposed node still errors");
+  assert.throws(() => ctx.get(reader), "reader must not serve its pre-disposal cache");
+
+  // ... and a later publish on the surviving source must not revive it.
+  ctx.setCell(src, 99);
+  assert.throws(() => ctx.get(reader), "a write to the live source must not revive the reader");
+});
+
+test("#lzspecedgeindex: disposal does not run effects during teardown", () => {
+  // Disposal is not a publish. The invalidation walk marks the dependent cone
+  // dirty but deliberately does NOT schedule the effects it reaches: running one
+  // here would re-enter a compute that reads the node being torn down, turning
+  // `dispose` itself into a throw and breaking teardown idempotence.
+  const ctx = new Context();
+  const src = ctx.cell(1);
+  const derived = ctx.computed(() => ctx.getCell(src));
+  let runs = 0;
+  ctx.effect(() => {
+    runs += 1;
+    return ctx.get(derived);
+  });
+  const afterSetup = runs;
+
+  ctx.disposeSlot(derived); // must not throw, and must not run the effect
+  assert.equal(runs, afterSetup, "disposal must not schedule the effects it invalidates");
+  ctx.disposeSlot(derived); // idempotent
+  assert.equal(runs, afterSetup);
+});
+
 test("#lzspecedgeindex: a recycled id does not inherit a stale edge index", () => {
   // The index is a side table keyed by owner id, and ids are recycled through
   // `freeIds`. If disposal failed to drop the entry, the next node handed that
@@ -233,10 +275,34 @@ test("#lzspecedgeindex: a recycled id does not inherit a stale edge index", () =
   // Reads 60 with the index dropped on teardown; reads a stale 30 without it.
   assert.equal(ctx.get(revived), 60);
 
-  // The surviving original subscribers must be unaffected by the recycling.
+  // The surviving original subscribers must be unaffected by the recycling:
+  // whatever they read, they must all read the SAME thing, since they are
+  // identical memos over one source. A stale index would corrupt some subset of
+  // their edge sets and split this set.
+  //
+  // They no longer answer `1` (the value cached before `wide` was disposed).
+  // Disposing a node dirties the cone that read it, so each memo recomputes
+  // rather than serving its pre-disposal cache -- see `read_after_dispose_is_an_
+  // error.json` and `invalidateDisposedDependents` in `reactive.js`. This
+  // assertion asserted `1` while that dirty mark was missing.
+  //
+  // The recompute reads through the now-stale `wide` handle, whose id has been
+  // recycled into `fresh` (both are id 1 here), so it observes `fresh` and
+  // yields 20 + 1. That is a use-after-dispose through a stale handle, and it is
+  // a wrong number rather than an error ONLY because the id was immediately
+  // reoccupied by a live cell of the same kind -- step (2) of this test's setup
+  // arranges exactly that. Held here as the observed behaviour, not as a
+  // desirable one; the fixture's contract covers the un-recycled case, where the
+  // id reads back as KIND_NONE and the recompute throws.
+  const surviving = new Set();
   for (let i = 0; i < 399; i++) {
-    assert.equal(ctx.get(subs[i]), 1);
+    surviving.add(ctx.get(subs[i]));
   }
+  assert.deepEqual(
+    [...surviving],
+    [21],
+    "surviving subscribers must agree — a split means the recycled index corrupted a subset",
+  );
 });
 
 test("#lzspecedgeindex: dynamic dependencies stay exact on a promoted list", () => {

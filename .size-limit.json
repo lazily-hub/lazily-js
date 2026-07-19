@@ -3,7 +3,7 @@
     "name": "reactive: Context",
     "path": "src/reactive.js",
     "import": "{ Context }",
-    "limit": "2394 B"
+    "limit": "2395 B"
   },
   {
     "name": "reactive: Context + handles + defaultEqual",
