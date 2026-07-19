@@ -18,12 +18,15 @@ import { CrdtPlaneRuntime } from "../src/distributed.js";
 // a derived aggregate (count of `true` entries) converges across replicas.
 
 const here = dirname(fileURLToPath(import.meta.url));
-const localFixtures = join(here, "conformance");
 const specFixtures = join(here, "..", "..", "lazily-spec", "conformance");
 
 function loadFixture(name) {
-  const specPath = join(specFixtures, name);
-  const path = existsSync(specPath) ? specPath : join(localFixtures, name);
+  const path = join(specFixtures, name);
+  assert.ok(
+    existsSync(path),
+    `missing canonical spec fixture ${path} — clone the lazily-spec sibling `
+      + `(git clone https://github.com/lazily-hub/lazily-spec.git ../lazily-spec)`,
+  );
   return JSON.parse(readFileSync(path, "utf8"));
 }
 

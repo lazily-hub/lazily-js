@@ -9,7 +9,6 @@ import { TextCrdt } from "../src/text-crdt.js";
 const here = dirname(fileURLToPath(import.meta.url));
 const specCollections = join(here, "..", "..", "lazily-spec", "conformance", "collections");
 const specCrdtTree = join(here, "..", "..", "lazily-spec", "conformance", "crdt-tree");
-const localCrdtTree = join(here, "conformance", "crdt-tree");
 
 function loadFixture(name) {
   const path = join(specCollections, name);
@@ -18,8 +17,12 @@ function loadFixture(name) {
 }
 
 function loadCrdtTreeFixture(name) {
-  const specPath = join(specCrdtTree, name);
-  const path = existsSync(specPath) ? specPath : join(localCrdtTree, name);
+  const path = join(specCrdtTree, name);
+  assert.ok(
+    existsSync(path),
+    `missing canonical spec fixture ${path} — clone the lazily-spec sibling `
+      + `(git clone https://github.com/lazily-hub/lazily-spec.git ../lazily-spec)`,
+  );
   return JSON.parse(readFileSync(path, "utf8"));
 }
 

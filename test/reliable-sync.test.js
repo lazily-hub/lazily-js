@@ -31,11 +31,14 @@ import {
 
 const here = dirname(fileURLToPath(import.meta.url));
 const specDir = join(here, "..", "..", "lazily-spec", "conformance", "reliable-sync");
-const localDir = join(here, "conformance", "reliable-sync");
 
 function loadFixture(name) {
-  const specPath = join(specDir, name);
-  const path = existsSync(specPath) ? specPath : join(localDir, name);
+  const path = join(specDir, name);
+  assert.ok(
+    existsSync(path),
+    `missing canonical spec fixture ${path} — clone the lazily-spec sibling `
+      + `(git clone https://github.com/lazily-hub/lazily-spec.git ../lazily-spec)`,
+  );
   return JSON.parse(readFileSync(path, "utf8"));
 }
 
