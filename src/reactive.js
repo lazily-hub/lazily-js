@@ -516,10 +516,15 @@ function createContext(opts = {}) {
 
   function disposeEffect(handle) {
     const id = handle.id;
-    const idx = pendingEffects.indexOf(id, pendingHead);
-    if (idx !== -1) {
-      pendingEffects.splice(idx, 1);
-    }
+    // #lzspecedgeindex: dropping a scheduled effect is a Set delete, not a scan.
+    // This used to be `pendingEffects.indexOf(id, pendingHead)` + `splice`, which
+    // is O(pending) per dispose. That is free when the queue is drained — the
+    // common case, since `flushEffects` resets the array — but a cascade that
+    // tears down a cohort from *inside* an effect body runs while the rest of
+    // that cohort is still queued behind it, making every dispose scan and shift
+    // a full-width live window: O(W^2) per publish. `scheduledEffects` is the
+    // authority on whether a queued id should run, so the entry can simply be
+    // left in place and skipped at drain time (see `flushEffects`).
     scheduledEffects.delete(id);
     if (kinds[id] !== KIND_EFFECT) {
       return;
@@ -871,7 +876,13 @@ function createContext(opts = {}) {
     if (force) {
       flags[id] |= F_FORCE_RUN;
     }
-    if (scheduledEffects.add(id)) {
+    // `Set.prototype.add` returns the Set, which is always truthy — this read as
+    // a dedup but never was one, so an effect reachable from several changed
+    // cells was queued once per path. Harmless in run count (`effectShouldRun`
+    // gates the repeats) but it inflates the very queue that dispose and drain
+    // walk, so the dedup is now real.
+    if (!scheduledEffects.has(id)) {
+      scheduledEffects.add(id);
       pendingEffects.push(id);
       if (instrument) {
         counters.effectQueuePushes++;
@@ -896,6 +907,11 @@ function createContext(opts = {}) {
           pendingHead = 0;
           return;
         }
+        // A slot whose effect was disposed since it was queued is left in place
+        // rather than spliced out (see `disposeEffect`). `runEffect` already
+        // drops it: a disposed id reads back as KIND_NONE, and a recycled id
+        // belongs to a fresh effect that `effectShouldRun` finds clean. No scan
+        // of the queue is needed to keep a disposed effect from running.
         scheduledEffects.delete(id);
         runEffect(id);
       }

@@ -292,3 +292,74 @@ test("#lzspecedgeindex: effects on a promoted source fire exactly once per publi
   ctx.setCell(source, 2);
   assert.equal(runs, 750);
 });
+
+test("#lzspecedgeindex: an effect disposed mid-flush does not run, and the queue slot is skipped", () => {
+  // `disposeEffect` drops a scheduled effect by tombstoning it in
+  // `scheduledEffects` rather than splicing it out of `pendingEffects` (the
+  // splice was O(pending) per dispose, quadratic for a cohort torn down from
+  // inside an effect body). The tombstone must actually suppress the run.
+  //
+  // Flush order is reverse-registration, so the disposer is created LAST in
+  // order to run FIRST — while every victim is still queued behind it.
+  const ctx = new Context();
+  const source = ctx.cell(0);
+  const victimRuns = [];
+  const victims = [];
+  for (let i = 0; i < 200; i++) {
+    const n = i;
+    victims.push(
+      ctx.effect(() => {
+        victimRuns.push(n);
+        ctx.getCell(source);
+      }),
+    );
+  }
+  let armed = false;
+  ctx.effect(() => {
+    ctx.getCell(source);
+    if (!armed) return;
+    for (const v of victims) ctx.disposeEffect(v);
+  });
+  armed = true;
+
+  victimRuns.length = 0;
+  ctx.setCell(source, 1);
+  assert.deepEqual(victimRuns, [], "victims disposed mid-flush must not run");
+  for (const v of victims) assert.equal(ctx.isEffectActive(v), false);
+
+  // A later publish must not resurrect them either.
+  ctx.setCell(source, 2);
+  assert.deepEqual(victimRuns, []);
+});
+
+test("#lzspecedgeindex: an id recycled mid-flush runs exactly once", () => {
+  // Disposing an effect returns its id to `freeIds` while a stale queue slot may
+  // still reference it. If a new effect claims that id in the same flush, the
+  // stale slot is reached first and runs the new effect early, and the fresh
+  // slot is then skipped. Either way: exactly one run, never zero, never two.
+  const ctx = new Context();
+  const source = ctx.cell(0);
+  const victims = [];
+  for (let i = 0; i < 50; i++) {
+    victims.push(ctx.effect(() => ctx.getCell(source)));
+  }
+  let recycledRuns = 0;
+  let armed = false;
+  ctx.effect(() => {
+    ctx.getCell(source);
+    if (!armed) return;
+    armed = false;
+    for (const v of victims) ctx.disposeEffect(v);
+    // Claim the just-freed ids from inside the same flush.
+    for (let i = 0; i < 50; i++) {
+      ctx.effect(() => {
+        recycledRuns++;
+        ctx.getCell(source);
+      });
+    }
+  });
+  armed = true;
+
+  ctx.setCell(source, 1);
+  assert.equal(recycledRuns, 50, "each recycled effect runs exactly once");
+});
