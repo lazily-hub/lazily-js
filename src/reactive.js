@@ -134,25 +134,101 @@ const F_FORCE_RECOMPUTE = 1 << 3;  // slot: force a recompute even if not dirty
 const F_IN_PROGRESS = 1 << 4;      // slot: cycle-detection tripwire
 const F_FORCE_RUN = 1 << 5;        // effect: force the next run regardless
 
-function edgeInsert(edges, id) {
-  for (let i = 0; i < edges.length; i++) {
-    if (edges[i] === id) {
+// #lzspecedgeindex: width at which an edge list promotes from linear-scan dedup
+// to a hash index. Measured, not inherited — see the note on `edgeInsert`.
+//
+// Below this width the linear scan over a small packed SMI array is faster than
+// one Map lookup; above it the scan's O(n^2/2) total comparisons dominate. The
+// crossover for the structure actually used here (Map<id, position>) measured at
+// width 160 on node v26 (map/linear = 0.77x at 160, 1.03x — break-even — at 128).
+// A Set crosses over earlier (~96) but cannot give O(1) *removal*, which the
+// recompute path needs, so Map<id, position> is the structure and 160 is its
+// crossover.
+//
+// This is 5x the `32` used elsewhere in the lazily family: at width 32 the hash
+// index measured 2.3x SLOWER than the scan here, so importing that constant
+// would have made every mid-degree node slower than before the fix. The spec is
+// explicit that this threshold is not portable (`#lzspecedgeindex`).
+const EDGE_INDEX_PROMOTE = 160;
+
+// Dedup an edge list, promoting to a hash index past EDGE_INDEX_PROMOTE.
+//
+// `index` is a side table `Map<ownerId, Map<edgeId, position>>`; `ownerId` keys
+// the list being mutated. The inner map holds each edge's *position* in `edges`,
+// not just membership, so `edgeRemoveIndexed` can swap-remove in O(1) instead of
+// rescanning — the dependents list of a wide source is rebuilt one edge at a
+// time on every dependent recompute, so an O(n) removal would reintroduce the
+// same O(n^2) on the recompute path that the index removes from the build path.
+//
+// Promotion is one-way: there is no demotion. A shrinking list keeps its index.
+// This is deliberate — edges are removed and re-registered on every recompute,
+// so a list sitting near the boundary oscillates by one, and a shared
+// promote/demote boundary would rebuild the index on every recompute. The spec
+// permits "demote well below the promote threshold, or do not demote at all";
+// not demoting is the variant with no thrash window at all. The index is instead
+// dropped wholesale when the list is cleared or its owner is torn down, which is
+// also what keeps a recycled id from inheriting a stale index.
+function edgeInsertIndexed(edges, id, ownerId, index) {
+  const pos = index.get(ownerId);
+  if (pos !== undefined) {
+    if (pos.has(id)) {
       return false;
     }
+    pos.set(id, edges.length);
+    edges.push(id);
+    return true;
   }
+  const n = edges.length;
+  if (n < EDGE_INDEX_PROMOTE) {
+    for (let i = 0; i < n; i++) {
+      if (edges[i] === id) {
+        return false;
+      }
+    }
+    edges.push(id);
+    return true;
+  }
+  // Cross the threshold: build the index once, then take the indexed path.
+  const built = new Map();
+  for (let i = 0; i < n; i++) {
+    built.set(edges[i], i);
+  }
+  index.set(ownerId, built);
+  if (built.has(id)) {
+    return false;
+  }
+  built.set(id, n);
   edges.push(id);
   return true;
 }
 
-function edgeRemove(edges, id) {
-  for (let i = 0; i < edges.length; i++) {
-    if (edges[i] === id) {
-      edges[i] = edges[edges.length - 1];
-      edges.pop();
-      return true;
+function edgeRemoveIndexed(edges, id, ownerId, index) {
+  const pos = index.get(ownerId);
+  if (pos === undefined) {
+    // Narrow list: linear swap-remove, unchanged from the pre-index behavior.
+    for (let i = 0; i < edges.length; i++) {
+      if (edges[i] === id) {
+        edges[i] = edges[edges.length - 1];
+        edges.pop();
+        return true;
+      }
     }
+    return false;
   }
-  return false;
+  const at = pos.get(id);
+  if (at === undefined) {
+    return false;
+  }
+  // Swap-remove, keeping the index's positions consistent with the array.
+  const last = edges.length - 1;
+  const moved = edges[last];
+  edges[at] = moved;
+  edges.pop();
+  pos.delete(id);
+  if (moved !== id) {
+    pos.set(moved, at);
+  }
+  return true;
 }
 
 /**
@@ -186,6 +262,19 @@ function createContext(opts = {}) {
   let flags = new Uint8Array(32);
   let nextId = 1;
   const freeIds = [];
+  // #lzspecedgeindex: hash indexes for wide edge lists, keyed by the id of the
+  // node that owns the list. Held outside the node objects on purpose — a node
+  // whose degree stays below EDGE_INDEX_PROMOTE (the overwhelming majority, and
+  // every node in a wide fan-out except the source itself) has no entry here and
+  // pays nothing, not even a null field slot. That keeps the #lzjsarenanodes
+  // per-node footprint intact: scalar state stays in the typed-array arenas,
+  // variable-size edge state stays lazily allocated.
+  //
+  // Because ids are recycled (`freeIds`), every teardown path MUST drop the
+  // entries for the id it frees, or a new node would alias the previous
+  // occupant's index. See disposeSlot/disposeCell/disposeEffect.
+  const dependentsIndex = new Map();
+  const dependenciesIndex = new Map();
   const trackingStack = [];
   let pendingEffects = [];
   let pendingHead = 0;
@@ -439,6 +528,9 @@ function createContext(opts = {}) {
     // #lzjsarenanodes: clear the arena slots so the recycled id reads as
     // KIND_NONE/flags=0, then drop the object reference so the run/cleanup
     // closures can be GC'd.
+    // #lzspecedgeindex: drop the index entries for the recycled id.
+    dependentsIndex.delete(id);
+    dependenciesIndex.delete(id);
     kinds[id] = KIND_NONE;
     flags[id] = 0;
     nodes[id] = undefined;
@@ -492,6 +584,11 @@ function createContext(opts = {}) {
       }
     }
     // #lzjsarenanodes: clear arena slots before recycling the id.
+    // #lzspecedgeindex: drop both index entries before the id goes back on the
+    // free list — a slot owns both an incoming and an outgoing edge list, and a
+    // recycled id must not inherit either.
+    dependentsIndex.delete(id);
+    dependenciesIndex.delete(id);
     kinds[id] = KIND_NONE;
     flags[id] = 0;
     nodes[id] = undefined;
@@ -514,6 +611,10 @@ function createContext(opts = {}) {
         removeDependencyEdge(dependents[i], id);
       }
     }
+    // #lzspecedgeindex: a cell owns only a dependents list, but drop both keys
+    // anyway — the id is about to be recycled into a node of any kind.
+    dependentsIndex.delete(id);
+    dependenciesIndex.delete(id);
     kinds[id] = KIND_NONE;
     flags[id] = 0;
     nodes[id] = undefined;
@@ -550,7 +651,7 @@ function createContext(opts = {}) {
       if (dep.dependents === null) {
         dep.dependents = [];
       }
-      const added = edgeInsert(dep.dependents, parentId);
+      const added = edgeInsertIndexed(dep.dependents, parentId, depId, dependentsIndex);
       if (instrument && added) {
         counters.dependencyEdgesAdded++;
       }
@@ -561,7 +662,7 @@ function createContext(opts = {}) {
       if (parent.dependencies === null) {
         parent.dependencies = [];
       }
-      edgeInsert(parent.dependencies, depId);
+      edgeInsertIndexed(parent.dependencies, depId, parentId, dependenciesIndex);
     }
   }
 
@@ -572,7 +673,7 @@ function createContext(opts = {}) {
       if (dep.dependents === null) {
         return;
       }
-      const removed = edgeRemove(dep.dependents, parentId);
+      const removed = edgeRemoveIndexed(dep.dependents, parentId, depId, dependentsIndex);
       if (instrument && removed) {
         counters.dependencyEdgesRemoved++;
       }
@@ -593,7 +694,7 @@ function createContext(opts = {}) {
       if (parent.dependencies === null) {
         return;
       }
-      const removed = edgeRemove(parent.dependencies, depId);
+      const removed = edgeRemoveIndexed(parent.dependencies, depId, parentId, dependenciesIndex);
       if (instrument && removed) {
         counters.dependencyEdgesRemoved++;
       }
@@ -657,6 +758,13 @@ function createContext(opts = {}) {
         removeDependentEdge(oldDeps[i], id);
       }
       oldDeps.length = 0;
+      // #lzspecedgeindex: the list was cleared wholesale, so its index is now
+      // entirely stale. Drop it rather than clear it in place — the edges are
+      // about to be re-registered by the tracked compute below, which re-promotes
+      // if the new dependency set is still wide.
+      if (dependenciesIndex.size !== 0) {
+        dependenciesIndex.delete(id);
+      }
     }
     trackingStack.push(id);
     let result;
@@ -815,6 +923,10 @@ function createContext(opts = {}) {
         removeDependentEdge(oldDeps[i], id);
       }
       oldDeps.length = 0;
+      // #lzspecedgeindex: see recomputeSlotNow — cleared list, stale index.
+      if (dependenciesIndex.size !== 0) {
+        dependenciesIndex.delete(id);
+      }
     }
     if (cleanup) {
       cleanup();
