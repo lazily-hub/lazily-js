@@ -138,6 +138,10 @@
       "types": "./src/state-projection.d.ts",
       "default": "./src/state-projection.js"
     },
+    "./graph-view": {
+      "types": "./src/graph-view.d.ts",
+      "default": "./src/graph-view.js"
+    },
     "./signaling": {
       "types": "./src/signaling.d.ts",
       "default": "./src/signaling.js"
