@@ -51,6 +51,7 @@ import {
   CellHandle,
   DisposedNodeError,
   EffectHandle,
+  SignalHandle,
   SlotHandle,
   createContext,
 } from "../../src/reactive.js";
@@ -58,6 +59,7 @@ import {
   AsyncCellHandle,
   AsyncContext,
   AsyncEffectHandle,
+  AsyncSignalHandle,
   AsyncSlotHandle,
 } from "../../src/reactive-async.js";
 import { ThreadSafeContext } from "../../src/thread-safe.js";
@@ -66,6 +68,7 @@ export { DisposedNodeError };
 
 /** Ops every model can now execute -- the whole corpus. */
 const ALL_OPS = [
+  "batch",
   "begin_scope",
   "cell",
   "churn",
@@ -73,17 +76,20 @@ const ALL_OPS = [
   "disarm",
   "dispose",
   "dispose_fanout",
+  "dispose_signal",
   "dispose_stale_handle",
   "effect",
   "end_scope",
   "fanout",
   "read",
   "set_cell",
+  "signal",
 ];
 
 /** `expect` keys every model can now evaluate -- the whole corpus. */
 const ALL_ASSERTIONS = [
   "cleanup_order",
+  "computes_of",
   "dependencies_of",
   "dependents_of",
   "error",
@@ -114,7 +120,52 @@ function kindOfHandle(handle) {
   if (handle instanceof CellHandle || handle instanceof AsyncCellHandle) return "cell";
   if (handle instanceof EffectHandle || handle instanceof AsyncEffectHandle) return "effect";
   if (handle instanceof SlotHandle || handle instanceof AsyncSlotHandle) return "slot";
+  if (handle instanceof SignalHandle || handle instanceof AsyncSignalHandle) return "signal";
   throw new Error("unrecognised handle class");
+}
+
+/**
+ * The `computes_of` counter (`#lzsignaleager`).
+ *
+ * The signal fixtures assert *when* a compute ran, because an eager signal and
+ * the lazy memo it is built on return identical values for every read sequence
+ * the corpus can express -- a values-only assertion passes against a `signal()`
+ * that is secretly a `memo()`. So the count must come from the real compute
+ * closure, wrapped exactly once at synthesis, and must never be derived from the
+ * runner's own model of what "should" have happened. `bump` is called from
+ * inside the closure the context invokes; if the context never calls it, the
+ * count stays where it was and the fixture fails, which is the point.
+ *
+ * Cumulative for the whole scenario, including the invocation at creation, and
+ * never reset per step.
+ */
+function makeComputeCounter() {
+  /** @type {Map<string, number>} */
+  const counts = new Map();
+  return {
+    /** Wrap a compute so every invocation the context makes is counted. */
+    countingSync(id, compute) {
+      counts.set(id, 0);
+      return () => {
+        counts.set(id, counts.get(id) + 1);
+        return compute();
+      };
+    },
+    countingAsync(id, compute) {
+      counts.set(id, 0);
+      return async (cc) => {
+        counts.set(id, counts.get(id) + 1);
+        return compute(cc);
+      };
+    },
+    of(id) {
+      const n = counts.get(id);
+      if (n === undefined) {
+        throw new Error(`computes_of asked for ${id}, which has no counted compute`);
+      }
+      return n;
+    },
+  };
 }
 
 // --------------------------------------------------------------------------
@@ -140,10 +191,13 @@ function makeSyncLikeModel(name, makeContext) {
       const scopes = new Map();
       const runLog = [];
       const cleanupLog = [];
+      const computes = makeComputeCounter();
 
       const readId = (id) => {
         const handle = handles.get(id);
-        return handle instanceof CellHandle ? ctx.getCell(handle) : ctx.get(handle);
+        if (handle instanceof CellHandle) return ctx.getCell(handle);
+        if (handle instanceof SignalHandle) return ctx.getSignal(handle);
+        return ctx.get(handle);
       };
 
       return {
@@ -155,13 +209,32 @@ function makeSyncLikeModel(name, makeContext) {
           handles.set(id, handle);
         },
         async computed(id, reads, offset, scopeName) {
-          const compute = () => sumOffset(reads.map(readId), offset);
+          const compute = computes.countingSync(id, () => sumOffset(reads.map(readId), offset));
           const handle =
             scopeName == null
               ? ctx.computed(compute)
               : scopes.get(scopeName).computed(compute);
           handles.set(id, handle);
         },
+        // Same `sum(reads) + offset` convention as `computed`, so the only
+        // difference the fixtures see is eagerness.
+        async signal(id, reads, offset, scopeName) {
+          const compute = computes.countingSync(id, () => sumOffset(reads.map(readId), offset));
+          const handle =
+            scopeName == null ? ctx.signal(compute) : scopes.get(scopeName).signal(compute);
+          handles.set(id, handle);
+        },
+        // Clause 4: the eager puller only. The backing memo slot survives and
+        // reverts to lazy -- this is deliberately NOT `disposeNode`.
+        async disposeSignal(id) {
+          ctx.disposeSignal(handles.get(id));
+        },
+        async batch(writes) {
+          ctx.batch(() => {
+            for (const w of writes) ctx.setCell(handles.get(w.id), w.value);
+          });
+        },
+        computesOf: (id) => computes.of(id),
         async effect(id, reads, scopeName) {
           const body = () => {
             runLog.push(id);
@@ -246,21 +319,22 @@ export const asyncModel = {
     const scopes = new Map();
     const runLog = [];
     const cleanupLog = [];
+    const computes = makeComputeCounter();
 
     // Inside a compute: cells read synchronously, slots are awaited. Both
     // register the dependency edge before the value is produced.
     const readDep = async (cc, id) => {
       const handle = handles.get(id);
-      return handle instanceof AsyncCellHandle
-        ? cc.getCell(handle)
-        : await cc.getAsync(handle);
+      if (handle instanceof AsyncCellHandle) return cc.getCell(handle);
+      if (handle instanceof AsyncSignalHandle) return await cc.getAsync(handle.slot);
+      return await cc.getAsync(handle);
     };
 
     const readId = async (id) => {
       const handle = handles.get(id);
-      return handle instanceof AsyncCellHandle
-        ? ctx.getCell(handle)
-        : await ctx.getAsync(handle);
+      if (handle instanceof AsyncCellHandle) return ctx.getCell(handle);
+      if (handle instanceof AsyncSignalHandle) return await ctx.getSignalAsync(handle);
+      return await ctx.getAsync(handle);
     };
 
     return {
@@ -272,17 +346,46 @@ export const asyncModel = {
         handles.set(id, handle);
       },
       async computed(id, reads, offset, scopeName) {
-        const compute = async (cc) => {
+        const compute = computes.countingAsync(id, async (cc) => {
           const values = [];
           for (const r of reads) values.push(await readDep(cc, r));
           return sumOffset(values, offset);
-        };
+        });
         const handle =
           scopeName == null
             ? ctx.memoAsync(compute)
             : scopes.get(scopeName).memoAsync(compute);
         handles.set(id, handle);
       },
+      async signal(id, reads, offset, scopeName) {
+        const compute = computes.countingAsync(id, async (cc) => {
+          const values = [];
+          for (const r of reads) values.push(await readDep(cc, r));
+          return sumOffset(values, offset);
+        });
+        const handle =
+          scopeName == null
+            ? ctx.signalAsync(compute)
+            : scopes.get(scopeName).signalAsync(compute);
+        handles.set(id, handle);
+      },
+      async disposeSignal(id) {
+        await ctx.disposeSignal(handles.get(id));
+      },
+      // `AsyncContext` satisfies clause 3 twice over: the batch defers
+      // invalidation to the outermost exit, AND effect reruns coalesce into a
+      // `pending` flag on the executor, so N writes reach the puller as one
+      // rerun even unbatched. Verified by removing this wrapper: the sync and
+      // thread-safe models then report the fixture's predicted 3, the async one
+      // still reports 2. That is a stronger guarantee, not a missing one -- but
+      // it does mean the batch fixture's discriminating power on THIS model
+      // comes from the scheduler rather than from `batch` itself.
+      async batch(writes) {
+        ctx.batch(() => {
+          for (const w of writes) ctx.setCell(handles.get(w.id), w.value);
+        });
+      },
+      computesOf: (id) => computes.of(id),
       async effect(id, reads, scopeName) {
         const body = async (cc) => {
           runLog.push(id);

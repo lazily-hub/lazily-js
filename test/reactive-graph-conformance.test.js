@@ -3,7 +3,7 @@
 //
 // ## Why this file exists
 //
-// Nine reactive-graph fixtures shipped in lazily-spec and, family-wide, only
+// Reactive-graph fixtures shipped in lazily-spec and, family-wide, only
 // lazily-rs replayed them. lazily-js replayed none. The cost of that gap is not
 // theoretical: an invalidation-cascade defect shipped undetected in lazily-dart
 // and lazily-go while a fixture encoding the exact violated property
@@ -18,6 +18,15 @@
 // `Context`, `AsyncContext`, and `ThreadSafeContext` independently -- see
 // `reactive-graph/models.js` for why `ThreadSafeContext` counts as a meaningful
 // third model rather than an alias.
+//
+// ## Signal eagerness (`#lzsignaleager`)
+//
+// Three fixtures assert the four normative signal clauses, and they are the only
+// fixtures in the corpus that assert `computes_of` -- the cumulative count of
+// compute invocations. They need it because an eager signal and the lazy memo it
+// is built on return IDENTICAL values for every read sequence: values alone
+// cannot tell `signal()` from `memo()`. The counter is therefore wrapped around
+// the real compute closure in `models.js`, never synthesized by the runner.
 //
 // ## Positive assertion (the non-negotiable part)
 //
@@ -78,7 +87,7 @@ const EXPECTED_SKIPS = {};
  * fails the build, and a fixed one fails it until the entry is removed. The
  * fixture on disk is never edited and no assertion is loosened.
  *
- * Empty today, across all three models and all nine fixtures. The one entry this
+ * Empty today, across all three models and every fixture. The one entry this
  * ledger carried -- a live reader of a disposed slot serving its pre-disposal
  * cache forever, because `disposeSlot` detached both edge directions without
  * dirtying the surviving readers -- was fixed in `reactive.js`

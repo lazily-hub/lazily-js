@@ -66,10 +66,13 @@ export const FIXTURES = [
   "disarm_disposes_nothing.json",
   "disposal_does_not_run_surviving_effects.json",
   "dispose_detaches_edges_both_directions.json",
+  "dispose_signal_reverts_to_lazy.json",
   "read_after_dispose_is_an_error.json",
   "recycled_id_inherits_nothing.json",
   "scope_teardown_equals_fold_of_disposals.json",
   "scoping_bounds_teardown_not_visibility.json",
+  "signal_materializes_once_per_batch.json",
+  "signal_materializes_without_a_read.json",
   "teardown_runs_members_in_reverse_creation_order.json",
   "transitive_invalidation_reaches_depth.json",
 ];
@@ -219,6 +222,21 @@ async function replaySteps(model, steps, label, assertFn, divergences, tail) {
         case "computed":
           await instance.computed(op.id, op.reads ?? [], op.offset ?? 0, op.scope ?? null);
           break;
+        case "signal":
+          // Eager: the value must be materialized by the time this returns, and
+          // deliberately NOT read here -- reading would materialize a lazy
+          // binding and hide the very thing `computes_of` is asserting.
+          await instance.signal(op.id, op.reads ?? [], op.offset ?? 0, op.scope ?? null);
+          break;
+        case "dispose_signal":
+          // The eager puller only -- see clause 4. Not a node teardown, which is
+          // why this is not routed through `dispose`.
+          await instance.disposeSignal(op.id);
+          break;
+        case "batch":
+          // One batch carrying all writes, so the runner needs no nesting state.
+          await instance.batch(op.writes ?? []);
+          break;
         case "effect":
           await instance.effect(op.id, op.reads ?? [], op.scope ?? null);
           break;
@@ -293,10 +311,31 @@ async function replaySteps(model, steps, label, assertFn, divergences, tail) {
             // Prose. Carries no assertion, and is not counted as a check.
             break;
 
-          case "value":
+          case "value": {
+            // For a `read` op this is the value the op returned. The signal
+            // fixtures also assert `value` on a `signal` creation op, meaning
+            // "the node's value right now" -- so it is read here, at assertion
+            // time, rather than eagerly at op time. That ordering is load-bearing:
+            // `computes_of` sorts BEFORE `value`, so the compute count is checked
+            // before this read can materialize a lazy binding and mask the
+            // difference the fixture exists to detect.
+            const got = op.type === "read" ? (opError ? DISPOSED : opValue) : await readOr(op.id);
             check(where, "value", null, () => {
-              assertFn.equal(opError ? DISPOSED : opValue, want, `${where}: value`);
+              assertFn.equal(got, want, `${where}: value`);
             });
+            break;
+          }
+
+          case "computes_of":
+            // Cumulative invocations of the node's compute since the start of
+            // the scenario, creation included -- the only caller-observable
+            // difference between an eager signal and the lazy memo backing it.
+            for (const id of Object.keys(want).sort()) {
+              const got = instance.computesOf(id);
+              check(where, "computes_of", id, () =>
+                assertFn.equal(got, want[id], `${where}: computes_of ${id}`),
+              );
+            }
             break;
 
           case "read":
