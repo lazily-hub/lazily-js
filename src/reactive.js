@@ -33,6 +33,8 @@
 // workloads in BENCHMARKS.md. Boolean fields are bit-packed: hasValue/memo/
 // dirty/forceRecompute/inProgress (slots) and forceRun (effects).
 
+import { TeardownScope } from "./teardown-scope.js";
+
 export function defaultEqual(a, b) {
   if (a === b) {
     return true;
@@ -77,6 +79,30 @@ export function defaultEqual(a, b) {
     }
   }
   return true;
+}
+
+/**
+ * Thrown when a node that has been torn down is read (`read_after_dispose`).
+ *
+ * Disposal is not a value. A binding that answers a read on a disposed node with
+ * its last-computed value, a zero, or `undefined` makes "torn down"
+ * indistinguishable from "legitimately this value", and a use-after-dispose bug
+ * then surfaces as a wrong number far from its cause. It is also what lets a
+ * caller — an effect body, a teardown path — narrow the failure to *this* cause
+ * with a `instanceof` check instead of swallowing every error.
+ *
+ * The id is carried for diagnostics only. Note that ids are recycled here (see
+ * `freeIds`), so this error means "the id currently names no live node", which
+ * is the strongest claim a recycling binding can make: once the id is handed to
+ * a new node, a stale handle addresses that new node and the corpus's
+ * `recycled_id_inherits_nothing` / `dispose_stale_handle` cases govern instead.
+ */
+export class DisposedNodeError extends Error {
+  constructor(id) {
+    super(`read after dispose: node ${id} has been disposed`);
+    this.name = "DisposedNodeError";
+    this.nodeId = id;
+  }
 }
 
 // -- Handles -----------------------------------------------------------------
@@ -289,6 +315,19 @@ function createContext(opts = {}) {
   const frontierEffects = [];
   const frontierStack = [];
   const frontierForceStack = [];
+  // #lzspecedgeindex: depth of the disposal-driven invalidation cascade.
+  //
+  // Non-zero only while `invalidateDisposedDependents` is walking the cone left
+  // behind by a teardown. While it is set the walk is MARK-ONLY: `scheduleEffect`
+  // drops every effect it reaches. Disposal is not a publish — running an effect
+  // here re-enters a body that reads the node currently being torn down, turning
+  // `dispose` itself into a throw and breaking the idempotence teardown paths
+  // depend on. The contract is "errors on the next recompute", and that recompute
+  // is driven by a real write.
+  //
+  // It is a counter, not a flag, because scope teardown disposes N nodes and each
+  // one cascades; a flag would be cleared by the first inner completion.
+  let disposalDepth = 0;
   // Opt-in instrumentation (off by default → zero steady-state overhead, so the
   // committed BENCHMARKS.md numbers are unperturbed). Mirrors the counter subset
   // of lazily-rs's `InstrumentationSnapshot` that is meaningful single-threaded.
@@ -414,6 +453,15 @@ function createContext(opts = {}) {
   }
 
   function getSlotAny(id) {
+    // #lzspecedgeindex: the disposed check comes BEFORE `registerDependency`,
+    // deliberately. A reader that hits a torn-down node must not leave an edge
+    // pointing at it — `registerDependency` would push the freed id onto the
+    // reader's own `dependencies` list, and that dangling half-edge outlives the
+    // throw. Failing first keeps the reader's upstream set clean for its next
+    // recompute.
+    if (kinds[id] === KIND_NONE) {
+      throw new DisposedNodeError(id);
+    }
     const len = trackingStack.length;
     if (len > 0) {
       registerDependency(id, trackingStack[len - 1]);
@@ -431,6 +479,10 @@ function createContext(opts = {}) {
   }
 
   function getCellAny(id) {
+    // See `getSlotAny`: disposed first, before any edge is registered.
+    if (kinds[id] === KIND_NONE) {
+      throw new DisposedNodeError(id);
+    }
     const len = trackingStack.length;
     if (len > 0) {
       registerDependency(id, trackingStack[len - 1]);
@@ -448,6 +500,11 @@ function createContext(opts = {}) {
   }
 
   function setCellAny(id, value) {
+    // A write that silently vanishes is the same failure mode as a read that
+    // silently returns stale, so a disposed cell rejects writes too.
+    if (kinds[id] === KIND_NONE) {
+      throw new DisposedNodeError(id);
+    }
     if (kinds[id] !== KIND_CELL) {
       throw new Error(`set_cell on non-cell id ${id}`);
     }
@@ -638,6 +695,123 @@ function createContext(opts = {}) {
     }
     // hasValue && !dirty, packed.
     return (flags[id] & (F_HAS_VALUE | F_DIRTY)) === F_HAS_VALUE;
+  }
+
+  // -- Degree introspection + generic teardown (`#lzspecedgeindex`) ------
+  //
+  // The introspection surface is deliberately COUNTS, NEVER COLLECTIONS. A
+  // caller can assert on graph shape — "this subscribe/unsubscribe cycle left
+  // the source's live subscriber count where it started" — without a path to
+  // the edge arrays, without being able to mutate them, and without pinning any
+  // storage strategy into the public contract. In particular the linear-scan /
+  // promoted-`Map` hybrid behind `EDGE_INDEX_PROMOTE` stays an implementation
+  // detail, which it must: that threshold is measured per binding and is not
+  // portable.
+  //
+  // `SignalHandle` resolves to its backing memo slot, which is the node that
+  // actually carries the edges; the puller effect is addressed via
+  // `handle.effect` when a caller wants the sink's degree instead.
+
+  function nodeIdOf(handle) {
+    return handle.slot !== undefined ? handle.slot.id : handle.id;
+  }
+
+  /**
+   * How many nodes currently depend on `handle` — the size of its reverse edge
+   * set, and the observable the disposal contract is written against. Returns 0
+   * for a disposed node and for effects, which are pure sinks.
+   */
+  function dependentCount(handle) {
+    const id = nodeIdOf(handle);
+    const kind = kinds[id];
+    if (kind !== KIND_CELL && kind !== KIND_SLOT) {
+      return 0;
+    }
+    const dependents = nodes[id].dependents;
+    return dependents === null ? 0 : dependents.length;
+  }
+
+  /**
+   * How many nodes `handle` currently depends on — the size of its forward edge
+   * set. Counterpart to {@link dependentCount}: disposal must detach both
+   * directions, and detaching only one leaves a dangling half-edge visible here.
+   * Returns 0 for a disposed node and for cells, which are pure sources.
+   */
+  function dependencyCount(handle) {
+    const id = nodeIdOf(handle);
+    const kind = kinds[id];
+    if (kind !== KIND_SLOT && kind !== KIND_EFFECT) {
+      return 0;
+    }
+    const dependencies = nodes[id].dependencies;
+    return dependencies === null ? 0 : dependencies.length;
+  }
+
+  /**
+   * Whether `handle`'s id currently names no live node.
+   *
+   * Ids are recycled, so this answers "disposed and not yet reused". Once the id
+   * has been handed to a new node this reads `false` and the handle addresses
+   * that new node — which is exactly why `disposeNode` dispatches on the
+   * handle's own class rather than on the arena's current kind.
+   */
+  function isNodeDisposed(handle) {
+    return kinds[nodeIdOf(handle)] === KIND_NONE;
+  }
+
+  /**
+   * Tear down whatever kind of node `handle` names.
+   *
+   * Dispatch is on the HANDLE'S CLASS, not on `kinds[id]`. That is load-bearing
+   * under id recycling: a stale `CellHandle` whose id has since been reissued to
+   * a slot must be a no-op, and dispatching on the arena would instead tear down
+   * the innocent new occupant. Each `dispose*` already re-checks the kind, so
+   * routing through them makes the stale-handle case a no-op by construction
+   * (`dispose_stale_handle` in the corpus).
+   */
+  function disposeNode(handle) {
+    if (handle instanceof CellHandle) {
+      disposeCell(handle);
+    } else if (handle instanceof SlotHandle) {
+      disposeSlot(handle);
+    } else if (handle instanceof EffectHandle) {
+      disposeEffect(handle);
+    } else if (handle instanceof SignalHandle) {
+      disposeSignal(handle);
+      disposeSlot(handle.slot);
+    } else {
+      throw new TypeError("disposeNode: not a lazily node handle");
+    }
+  }
+
+  // -- Teardown scopes ---------------------------------------------------
+
+  /**
+   * Open a {@link TeardownScope}: nodes created through it are disposed when it
+   * ends, in reverse creation order.
+   *
+   * Grouping bounds TEARDOWN, not visibility — a scoped node reads parent-owned
+   * and sibling-scope-owned nodes freely, and scoping never restricts what an
+   * edge may point at.
+   *
+   * Prefer {@link withScope} when the scope's lifetime is lexical; reach for the
+   * explicit `end()` when it is not.
+   */
+  function scope() {
+    return new TeardownScope(api);
+  }
+
+  /**
+   * Run `body` with a fresh scope and end it in a `finally`, returning whatever
+   * `body` returned. The bracketed form, and the one to reach for by default.
+   */
+  function withScope(body) {
+    const s = new TeardownScope(api);
+    try {
+      return body(s);
+    } finally {
+      s.end();
+    }
   }
 
   // -- Instrumentation ---------------------------------------------------
@@ -846,9 +1020,24 @@ function createContext(opts = {}) {
     if (dependents === null || dependents.length === 0) {
       return;
     }
-    markFrontier(dependents);
-    // The returned frontier is a shared scratch array; drop the effect entries
-    // so no later caller can mistake them for its own.
+    // The suppression is mechanized by `disposalDepth`, not by "this function
+    // happens not to call scheduleEffect". The frontier is still walked and the
+    // effects it reaches are still offered to `scheduleEffect`, which drops them
+    // while the depth is non-zero — so the same guard covers every path that
+    // reaches an effect during a teardown, including the nested cascades a scope
+    // end produces, and removing the guard is a single-line mutation that a
+    // direct test can be written against.
+    disposalDepth++;
+    try {
+      const effects = markFrontier(dependents);
+      for (let i = 0; i < effects.length; i++) {
+        scheduleEffect(effects[i][0], effects[i][1]);
+      }
+    } finally {
+      disposalDepth--;
+    }
+    // The frontier is a shared scratch array; drop the effect entries so no later
+    // caller can mistake them for its own.
     frontierEffects.length = 0;
   }
 
@@ -900,6 +1089,10 @@ function createContext(opts = {}) {
   // -- Internals: effect scheduling / flush ------------------------------
 
   function scheduleEffect(id, force) {
+    // #lzspecedgeindex: disposal is not a publish. See `disposalDepth`.
+    if (disposalDepth > 0) {
+      return;
+    }
     if (kinds[id] !== KIND_EFFECT) {
       return;
     }
@@ -1010,7 +1203,10 @@ function createContext(opts = {}) {
     return false;
   }
 
-  return {
+  // Named so `scope()`/`withScope()` can hand the context itself to a
+  // `TeardownScope` without the scope reaching into closure internals: a scope
+  // is a bookkeeper over the same public surface any caller has.
+  const api = {
     cell,
     computed,
     slot,
@@ -1028,11 +1224,29 @@ function createContext(opts = {}) {
     isSignalActive,
     disposeSlot,
     disposeCell,
+    disposeNode,
+    dependentCount,
+    dependencyCount,
+    isNodeDisposed,
+    scope,
+    withScope,
     isSet,
     instrumentationSnapshot,
     resetInstrumentation,
   };
+  return api;
 }
+
+// `TeardownScope` lives in its own module, re-exported here so the public API is
+// unchanged. It is not merely organisational: the class carries a computed
+// member key (`[Symbol.dispose]`), and a computed class key makes the class
+// definition impure as far as esbuild is concerned, so the class cannot be
+// tree-shaken out of a bundle that merely imports *something* from its module.
+// Keeping it here cost 185 B in every consumer of `./reactive.js` — including
+// `state-machine.js`, which imports one handle class and will never open a
+// scope. In its own module, `"sideEffects": false` drops the whole file for
+// those consumers instead.
+export { TeardownScope };
 
 /**
  * Backwards-compatible newable alias of {@link createContext}. Existing code

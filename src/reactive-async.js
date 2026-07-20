@@ -16,6 +16,13 @@
 // per revision shared by all waiters, cooperative abort on supersession/dispose,
 // and cleanup-before-rerun ordering for effects.
 
+// `DisposedNodeError` is imported rather than redeclared: the runner — and any
+// caller with both graphs in play — narrows read-after-dispose with a single
+// `instanceof`, which a per-module copy of the class would silently break.
+import { DisposedNodeError } from "./reactive.js";
+
+export { DisposedNodeError };
+
 function defaultEqual(a, b) {
   if (a === b) {
     return true;
@@ -194,6 +201,12 @@ export class AsyncContext {
   #effectRuns = new Set(); // in-flight effect run-loop promises
   #batchDepth = 0;
   #batchedCells = new Set();
+  // #lzspecedgeindex: depth of the disposal-driven invalidation cascade. While
+  // it is non-zero the cascade is MARK-ONLY — `#scheduleEffect` drops every
+  // effect it reaches, because disposal is not a publish. See the identical
+  // counter in `./reactive.js` for the full reasoning. A counter rather than a
+  // flag so a scope tearing down N nodes nests correctly.
+  #disposalDepth = 0;
 
   // -- Creation ----------------------------------------------------------
 
@@ -239,6 +252,9 @@ export class AsyncContext {
 
   getCell(handle) {
     const node = this.#nodes[handle.id];
+    if (node === undefined) {
+      throw new DisposedNodeError(handle.id);
+    }
     if (!(node instanceof AsyncCellNode)) {
       throw new Error(`get_cell on non-cell id ${handle.id}`);
     }
@@ -247,6 +263,11 @@ export class AsyncContext {
 
   setCell(handle, value) {
     const node = this.#nodes[handle.id];
+    // A write that silently vanishes is the same failure mode as a read that
+    // silently returns stale.
+    if (node === undefined) {
+      throw new DisposedNodeError(handle.id);
+    }
     if (!(node instanceof AsyncCellNode)) {
       throw new Error(`set_cell on non-cell id ${handle.id}`);
     }
@@ -298,6 +319,9 @@ export class AsyncContext {
     // eslint-disable-next-line no-constant-condition
     while (true) {
       const node = this.#nodes[id];
+      if (node === undefined) {
+        throw new DisposedNodeError(id);
+      }
       if (!(node instanceof AsyncSlotNode)) {
         throw new Error(`get_async on non-slot id ${id}`);
       }
@@ -366,6 +390,160 @@ export class AsyncContext {
 
   isEffectActive(handle) {
     return this.#nodes[handle.id] instanceof AsyncEffectNode;
+  }
+
+  /**
+   * Tear down an async derived slot (`#lzspecedgeindex`).
+   *
+   * Order is load-bearing and mirrors the synchronous core:
+   *
+   * 1. Mark the surviving dependent cone stale FIRST, while the edges still
+   *    exist — once step 3 runs, nothing can reach those readers again. This is
+   *    the step that is easy to omit and that leaves a live reader serving a
+   *    value it computed *through* the node being torn down, forever, because
+   *    with its edge gone nothing will ever invalidate it. `lazily-rs` shipped
+   *    that defect (`5db90d2`) and so did this package's sync core (`4d20670`).
+   * 2. Supersede any in-flight compute, so a completion that is already in
+   *    flight cannot publish into a node that no longer exists.
+   * 3. Detach BOTH edge directions — upstream so the source's dependent list
+   *    stops growing (the leak disposal exists for), downstream so no survivor
+   *    holds a dangling half-edge to a freed id.
+   *
+   * Idempotent, and a no-op on a handle of the wrong kind.
+   */
+  disposeSlot(handle) {
+    const id = handle.id;
+    const node = this.#nodes[id];
+    if (!(node instanceof AsyncSlotNode)) {
+      return;
+    }
+    this.#invalidateDisposedDependents(node.dependents);
+    if (node.state === "computing") {
+      node.token.aborted = true;
+      if (node.abort) {
+        node.abort.abort();
+      }
+      node.notifier.settle({ kind: "superseded" });
+      this.#inflight.delete(id);
+    }
+    for (const dep of [...node.dependencies]) {
+      this.#removeDependentEdge(dep, id);
+    }
+    for (const dependent of [...node.dependents]) {
+      this.#removeDependencyEdge(dependent, id);
+    }
+    node.state = "empty";
+    node.hasValue = false;
+    node.token = null;
+    node.abort = null;
+    node.notifier = null;
+    this.#nodes[id] = undefined;
+    this.#freeIds.push(id);
+  }
+
+  /**
+   * Tear down a source cell. Cells are pure sources with no dependencies, so
+   * only downstream edges are detached — but the surviving cone is still marked
+   * stale, or a dependent that cached a value read through this cell would serve
+   * it forever instead of failing. See {@link disposeSlot}.
+   */
+  disposeCell(handle) {
+    const id = handle.id;
+    const node = this.#nodes[id];
+    if (!(node instanceof AsyncCellNode)) {
+      return;
+    }
+    this.#invalidateDisposedDependents(node.dependents);
+    for (const dependent of [...node.dependents]) {
+      this.#removeDependencyEdge(dependent, id);
+    }
+    this.#nodes[id] = undefined;
+    this.#freeIds.push(id);
+  }
+
+  /**
+   * Tear down whatever kind of node `handle` names. Dispatch is on the HANDLE'S
+   * CLASS, not on the node currently at that id: ids are recycled here, and a
+   * stale handle whose id has been reissued must be a no-op rather than tear
+   * down the innocent new occupant (`dispose_stale_handle`).
+   *
+   * Returns a promise because effect teardown awaits the effect's run loop and
+   * its cleanup; slot and cell teardown are synchronous underneath.
+   */
+  async disposeNode(handle) {
+    if (handle instanceof AsyncCellHandle) {
+      this.disposeCell(handle);
+    } else if (handle instanceof AsyncSlotHandle) {
+      this.disposeSlot(handle);
+    } else if (handle instanceof AsyncEffectHandle) {
+      await this.disposeAsyncEffect(handle);
+    } else if (handle instanceof AsyncSignalHandle) {
+      await this.disposeAsyncEffect(handle.effect);
+      this.disposeSlot(handle.slot);
+    } else {
+      throw new TypeError("disposeNode: not a lazily async node handle");
+    }
+  }
+
+  // -- Degree introspection (`#lzspecedgeindex`) -------------------------
+  //
+  // Counts, never collections — see the note on the synchronous core. The point
+  // is that graph shape is assertable ("this churn cycle left the source's live
+  // subscriber count where it started") with no path to the edge arrays and no
+  // storage strategy pinned into the contract.
+
+  #nodeIdOf(handle) {
+    return handle.slot !== undefined ? handle.slot.id : handle.id;
+  }
+
+  /** How many nodes currently depend on `handle`. 0 for a disposed node and for
+   * effects, which are pure sinks. */
+  dependentCount(handle) {
+    const node = this.#nodes[this.#nodeIdOf(handle)];
+    if (node instanceof AsyncCellNode || node instanceof AsyncSlotNode) {
+      return node.dependents.length;
+    }
+    return 0;
+  }
+
+  /** How many nodes `handle` currently depends on. 0 for a disposed node and for
+   * cells, which are pure sources. */
+  dependencyCount(handle) {
+    const node = this.#nodes[this.#nodeIdOf(handle)];
+    if (node instanceof AsyncSlotNode || node instanceof AsyncEffectNode) {
+      return node.dependencies.length;
+    }
+    return 0;
+  }
+
+  /** Whether `handle`'s id currently names no live node. Ids are recycled, so
+   * this means "disposed and not yet reused". */
+  isNodeDisposed(handle) {
+    return this.#nodes[this.#nodeIdOf(handle)] === undefined;
+  }
+
+  // -- Teardown scopes ---------------------------------------------------
+
+  /**
+   * Open an {@link AsyncTeardownScope}: nodes created through it are disposed
+   * when it ends, in reverse creation order. Scoping bounds teardown, never
+   * visibility.
+   */
+  scope() {
+    return new AsyncTeardownScope(this);
+  }
+
+  /**
+   * Run `body` with a fresh scope and end it in a `finally`. `body` may be
+   * async; the scope ends after it settles.
+   */
+  async withScope(body) {
+    const s = new AsyncTeardownScope(this);
+    try {
+      return await body(s);
+    } finally {
+      await s.end();
+    }
   }
 
   disposeSignal(handle) {
@@ -448,6 +626,15 @@ export class AsyncContext {
 
   #registerDependency(depId, ownerId) {
     const dep = this.#nodes[depId];
+    // #lzspecedgeindex: a read that lands on a disposed node must leave NO edge
+    // behind. The owner-side insert below is unconditional otherwise, so without
+    // this the freed id would be pushed onto the reader's own `dependencies`
+    // list and outlive the `DisposedNodeError` the read is about to throw —
+    // a dangling half-edge, which is exactly what `dependencyCount` exists to
+    // rule out. Mirrors the pre-`_track` check in the synchronous core.
+    if (dep === undefined) {
+      return;
+    }
     if (dep instanceof AsyncCellNode || dep instanceof AsyncSlotNode) {
       edgeInsert(dep.dependents, ownerId);
     }
@@ -461,6 +648,16 @@ export class AsyncContext {
     const dep = this.#nodes[depId];
     if (dep instanceof AsyncCellNode || dep instanceof AsyncSlotNode) {
       edgeRemove(dep.dependents, ownerId);
+    }
+  }
+
+  // Symmetric to #removeDependentEdge: drop `depId` from the consumer-side list
+  // of `ownerId`. Only disposal needs it — every other path clears an owner's
+  // whole dependency list at once before re-tracking.
+  #removeDependencyEdge(ownerId, depId) {
+    const owner = this.#nodes[ownerId];
+    if (owner instanceof AsyncSlotNode || owner instanceof AsyncEffectNode) {
+      edgeRemove(owner.dependencies, depId);
     }
   }
 
@@ -569,6 +766,24 @@ export class AsyncContext {
     }
   }
 
+  // Mark the cone left behind by a disposal stale, without scheduling anything
+  // (`#lzspecedgeindex`). Reuses `#invalidateDependent` — the same walk every
+  // publish takes — rather than a second traversal, so there is exactly one
+  // definition of "transitively reached" in this graph and the two cannot drift.
+  #invalidateDisposedDependents(dependents) {
+    if (dependents.length === 0) {
+      return;
+    }
+    this.#disposalDepth++;
+    try {
+      for (const d of [...dependents]) {
+        this.#invalidateDependent(d);
+      }
+    } finally {
+      this.#disposalDepth--;
+    }
+  }
+
   #invalidateDependent(id) {
     const node = this.#nodes[id];
     if (node instanceof AsyncEffectNode) {
@@ -608,6 +823,10 @@ export class AsyncContext {
   // -- Internals: async effects (serialized, cleanup-before-body) --------
 
   #scheduleEffect(id) {
+    // #lzspecedgeindex: disposal is not a publish. See `#disposalDepth`.
+    if (this.#disposalDepth > 0) {
+      return;
+    }
     const node = this.#nodes[id];
     if (!(node instanceof AsyncEffectNode)) {
       return;
@@ -676,5 +895,112 @@ export class AsyncContext {
     } else if (typeof nextCleanup === "function") {
       await nextCleanup(); // disposed mid-run: run the fresh cleanup immediately
     }
+  }
+}
+
+// See the note on `DISPOSE` in ./reactive.js: a computed class member, not a
+// post-class prototype assignment, so this stays tree-shakeable.
+const ASYNC_DISPOSE = Symbol.asyncDispose ?? Symbol.for("Symbol.asyncDispose");
+
+/**
+ * A teardown scope over an {@link AsyncContext}: nodes created through it are
+ * disposed when it ends (`#lzspecedgeindex`).
+ *
+ * The async twin of `./reactive.js`'s `TeardownScope`, and the shape that makes
+ * the explicit end obviously right rather than merely necessary. Async effect
+ * teardown awaits the effect's run loop and its cleanup, so `end()` is a promise
+ * — and the scopes that matter most here are exactly the ones no lexical bracket
+ * can express: a scope whose lifetime is a websocket connection or a
+ * subscription, opened in one callback and ended in another. `withScope` is
+ * offered for the lexical case; `Symbol.asyncDispose` is installed where the
+ * runtime defines it, so `await using scope = ctx.scope()` also works.
+ *
+ * A GC finalizer is deliberately NOT offered — see the sync class comment.
+ *
+ * Teardown runs in REVERSE creation order, and each node is awaited before the
+ * next is torn down. Graph state does not depend on that order, but effect
+ * cleanups are side effects and their order is observable; serializing them is
+ * what makes `disposeScope_eq_disposeAll` hold for the async graph too.
+ */
+export class AsyncTeardownScope {
+  #ctx;
+  #owned = [];
+  #ended = false;
+
+  /** @internal — obtain one from {@link AsyncContext#scope}. */
+  constructor(ctx) {
+    this.#ctx = ctx;
+  }
+
+  /** How many nodes this scope currently owns. */
+  get size() {
+    return this.#owned.length;
+  }
+
+  /** Whether {@link end} has already run. */
+  get ended() {
+    return this.#ended;
+  }
+
+  /** Take ownership of an existing node. No-op on an already-ended scope: the
+   * scope's moment has passed, and adopting is not a request to dispose now. */
+  adopt(handle) {
+    if (!this.#ended) {
+      this.#owned.push(handle);
+    }
+    return handle;
+  }
+
+  /** Create a source cell owned by this scope. */
+  cell(value) {
+    return this.adopt(this.#ctx.cell(value));
+  }
+
+  /** Create an async computed slot owned by this scope. */
+  computedAsync(compute) {
+    return this.adopt(this.#ctx.computedAsync(compute));
+  }
+
+  /** Create an equality-guarded async memo owned by this scope. */
+  memoAsync(compute) {
+    return this.adopt(this.#ctx.memoAsync(compute));
+  }
+
+  /** Create an eager async signal owned by this scope. */
+  signalAsync(compute) {
+    return this.adopt(this.#ctx.signalAsync(compute));
+  }
+
+  /** Register an async effect owned by this scope. */
+  effectAsync(run) {
+    return this.adopt(this.#ctx.effectAsync(run));
+  }
+
+  /**
+   * Cancel this scope's teardown: ending it afterwards disposes nothing, and its
+   * nodes revert to plain context ownership. The nodes themselves are untouched
+   * — same values, same edges, still individually disposable. Only whether this
+   * scope fires at end-of-life changes.
+   */
+  disarm() {
+    this.#owned.length = 0;
+  }
+
+  /** Dispose every node this scope owns, in reverse creation order. Idempotent. */
+  async end() {
+    if (this.#ended) {
+      return;
+    }
+    this.#ended = true;
+    const owned = this.#owned;
+    for (let i = owned.length - 1; i >= 0; i--) {
+      await this.#ctx.disposeNode(owned[i]);
+    }
+    owned.length = 0;
+  }
+
+  /** TC39 explicit resource management: `await using scope = ctx.scope()`. */
+  [ASYNC_DISPOSE]() {
+    return this.end();
   }
 }

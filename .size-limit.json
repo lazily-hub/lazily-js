@@ -3,13 +3,13 @@
     "name": "reactive: Context",
     "path": "src/reactive.js",
     "import": "{ Context }",
-    "limit": "2395 B"
+    "limit": "2900 B"
   },
   {
     "name": "reactive: Context + handles + defaultEqual",
     "path": "src/reactive.js",
     "import": "{ Context, CellHandle, SlotHandle, SignalHandle, EffectHandle, defaultEqual }",
-    "limit": "2402 B"
+    "limit": "2920 B"
   },
   {
     "name": "state-machine: StateMachine",

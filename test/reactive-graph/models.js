@@ -1,5 +1,5 @@
 // Execution-model adapters for the reactive-graph conformance runner
-// (`#lzspecconf`).
+// (`#lzspecconf`, `#lzspecedgeindex`).
 //
 // The fixtures under `../lazily-spec/conformance/reactive-graph/` are written
 // against an abstract `Context`, and the corpus explicitly requires replay
@@ -18,40 +18,83 @@
 // replays the corpus against each independently.
 //
 // `ThreadSafeContext` is included because it is a *meaningful* wrapper, not an
-// alias: every operation runs under a shared `AtomicMutex`, and it maintains its
-// own instrumentation counters over a distinct internal `Context`. A mutex that
-// serialized a recompute incorrectly, or a wrapper that forgot to forward an
-// invalidation, would be invisible to the sync replay.
+// alias: every operation runs under a shared `AtomicMutex` over a distinct
+// internal `Context`. A mutex that serialized a recompute incorrectly, or a
+// wrapper that forgot to forward an invalidation or a teardown, would be
+// invisible to the sync replay.
 //
 // ## Adapter contract
 //
 // Every adapter is uniformly `async`, so the engine can `await` each op without
-// knowing which model it is driving. Each exposes:
+// knowing which model it is driving. Each exposes `name`, `ops`, `assertions`,
+// and `create()`; each instance exposes the op surface plus `runLog` /
+// `cleanupLog` (effect bodies and effect cleanups, in execution order),
+// `settle()`, and `destroy()`.
 //
-//   name         -- model label used in assertion messages and the skip ledger
-//   ops          -- Set of fixture op types this model can execute
-//   assertions   -- Set of `expect` keys this model can evaluate
-//   create()     -- returns a fresh instance
+// ## Subscribers are effects, not slots
 //
-// and each instance exposes `cell`, `computed`, `read`, `setCell`, `dispose`,
-// and `destroy`. `read` throws on a disposed node -- that is a contract the
-// corpus asserts, not an implementation detail, so it is deliberately allowed to
-// propagate and is caught by the engine.
+// `fanout` / `churn` build their readers as EFFECTS. The corpus asserts
+// `observed_count` on a publish, and in a lazy binding only an eager reader
+// observes a publish without first being pulled -- a fan-out of lazy slots would
+// report zero observers and the fixture would be measuring nothing.
 //
-// ## Capability sets are findings, not conveniences
+// ## `kindOf` reads the HANDLE, not the graph
 //
-// A model omits an op from `ops` only when the underlying context genuinely
-// lacks the API. `AsyncContext` and `ThreadSafeContext` both omit `dispose`
-// because neither exposes `disposeSlot`/`disposeCell` -- the sync `Context` is
-// the only one with lazy-node teardown. That gap is reported by the runner as a
-// named skip rather than being silently papered over by, say, disposing the
-// inner context instead.
-import { createContext } from "../../src/reactive.js";
-import { AsyncContext } from "../../src/reactive-async.js";
+// lazily-js recycles node ids (`freeIds`), so after a disposal the arena at that
+// id may already describe an unrelated node. `dispose_stale_handle` is precisely
+// the case where that matters: the fixture hands back a handle whose id has been
+// reissued and requires the teardown to be a no-op. Answering `kindOf` from the
+// arena would make the runner assert the *successor's* kind and then tear it
+// down -- so the kind comes from the class of the handle the model recorded,
+// which is also how `Context.disposeNode` dispatches.
+import {
+  CellHandle,
+  DisposedNodeError,
+  EffectHandle,
+  SlotHandle,
+  createContext,
+} from "../../src/reactive.js";
+import {
+  AsyncCellHandle,
+  AsyncContext,
+  AsyncEffectHandle,
+  AsyncSlotHandle,
+} from "../../src/reactive-async.js";
 import { ThreadSafeContext } from "../../src/thread-safe.js";
 
-/** Assertion kinds the fixture bodies use that any model can evaluate. */
-const VALUE_ASSERTIONS = ["note", "value", "read"];
+export { DisposedNodeError };
+
+/** Ops every model can now execute -- the whole corpus. */
+const ALL_OPS = [
+  "begin_scope",
+  "cell",
+  "churn",
+  "computed",
+  "disarm",
+  "dispose",
+  "dispose_fanout",
+  "dispose_stale_handle",
+  "effect",
+  "end_scope",
+  "fanout",
+  "read",
+  "set_cell",
+];
+
+/** `expect` keys every model can now evaluate -- the whole corpus. */
+const ALL_ASSERTIONS = [
+  "cleanup_order",
+  "dependencies_of",
+  "dependents_of",
+  "error",
+  "note",
+  "observed_by",
+  "observed_count",
+  "read",
+  "readable",
+  "scope_owned_count",
+  "value",
+];
 
 /**
  * Sum the current values of `deps` and add `offset`.
@@ -66,150 +109,225 @@ function sumOffset(values, offset) {
   return total;
 }
 
+/** The kind of a node as the corpus names them, read from the handle's class. */
+function kindOfHandle(handle) {
+  if (handle instanceof CellHandle || handle instanceof AsyncCellHandle) return "cell";
+  if (handle instanceof EffectHandle || handle instanceof AsyncEffectHandle) return "effect";
+  if (handle instanceof SlotHandle || handle instanceof AsyncSlotHandle) return "slot";
+  throw new Error("unrecognised handle class");
+}
+
 // --------------------------------------------------------------------------
-// Model 1: the synchronous `Context` -- the binding's default execution model.
+// Models 1 and 3: the synchronous `Context`, and `ThreadSafeContext` -- the
+// same public surface, one of them behind an Atomics mutex.
 // --------------------------------------------------------------------------
+//
+// One factory for both. The wrapper is a genuinely distinct implementation (a
+// forwarding layer that could drop an invalidation or take a lock at the wrong
+// granularity), but its API is deliberately identical, so a shared adapter is
+// what keeps the two replays comparable instead of accidentally diverging.
 
-export const syncModel = {
-  name: "Context",
-  ops: new Set(["cell", "computed", "read", "set_cell", "dispose"]),
-  assertions: new Set([...VALUE_ASSERTIONS, "error", "readable"]),
-  create() {
-    const ctx = createContext();
-    /** @type {Map<string, { kind: "cell" | "slot", handle: unknown }>} */
-    const refs = new Map();
+function makeSyncLikeModel(name, makeContext) {
+  return {
+    name,
+    ops: new Set(ALL_OPS),
+    assertions: new Set(ALL_ASSERTIONS),
+    create() {
+      const ctx = makeContext();
+      /** @type {Map<string, object>} */
+      const handles = new Map();
+      /** @type {Map<string, object>} */
+      const scopes = new Map();
+      const runLog = [];
+      const cleanupLog = [];
 
-    const readRef = (ref) =>
-      ref.kind === "cell" ? ctx.getCell(ref.handle) : ctx.get(ref.handle);
+      const readId = (id) => {
+        const handle = handles.get(id);
+        return handle instanceof CellHandle ? ctx.getCell(handle) : ctx.get(handle);
+      };
 
-    return {
-      async cell(id, value) {
-        refs.set(id, { kind: "cell", handle: ctx.cell(value) });
-      },
-      async computed(id, reads, offset) {
-        const deps = reads.map((r) => refs.get(r));
-        const handle = ctx.computed(() =>
-          sumOffset(deps.map(readRef), offset),
-        );
-        refs.set(id, { kind: "slot", handle });
-      },
-      async read(id) {
-        return readRef(refs.get(id));
-      },
-      async setCell(id, value) {
-        ctx.setCell(refs.get(id).handle, value);
-      },
-      async dispose(id) {
-        const ref = refs.get(id);
-        if (ref.kind === "cell") ctx.disposeCell(ref.handle);
-        else ctx.disposeSlot(ref.handle);
-      },
-      async destroy() {},
-    };
-  },
-};
+      return {
+        runLog,
+        cleanupLog,
+        async cell(id, value, scopeName) {
+          const handle =
+            scopeName == null ? ctx.cell(value) : scopes.get(scopeName).cell(value);
+          handles.set(id, handle);
+        },
+        async computed(id, reads, offset, scopeName) {
+          const compute = () => sumOffset(reads.map(readId), offset);
+          const handle =
+            scopeName == null
+              ? ctx.computed(compute)
+              : scopes.get(scopeName).computed(compute);
+          handles.set(id, handle);
+        },
+        async effect(id, reads, scopeName) {
+          const body = () => {
+            runLog.push(id);
+            // Swallowed, never propagated: an effect that reads through a
+            // disposed node must not turn the publish that scheduled it into a
+            // throw. The corpus asserts read-after-dispose at top-level reads,
+            // which is where a caller can act on it. Narrow on purpose -- any
+            // OTHER error still escapes and fails the run.
+            try {
+              for (const r of reads) readId(r);
+            } catch (err) {
+              if (!(err instanceof DisposedNodeError)) throw err;
+            }
+            return () => cleanupLog.push(id);
+          };
+          const handle =
+            scopeName == null ? ctx.effect(body) : scopes.get(scopeName).effect(body);
+          handles.set(id, handle);
+        },
+        async read(id) {
+          return readId(id);
+        },
+        async setCell(id, value) {
+          ctx.setCell(handles.get(id), value);
+        },
+        async dispose(id) {
+          ctx.disposeNode(handles.get(id));
+        },
+        kindOf: (id) => kindOfHandle(handles.get(id)),
+        isEffectActive: (id) => ctx.isEffectActive(handles.get(id)),
+        dependentsOf: (id) => ctx.dependentCount(handles.get(id)),
+        dependenciesOf: (id) => ctx.dependencyCount(handles.get(id)),
+        beginScope(scopeName) {
+          scopes.set(scopeName, ctx.scope());
+        },
+        async endScope(scopeName) {
+          scopes.get(scopeName).end();
+        },
+        disarmScope(scopeName) {
+          scopes.get(scopeName).disarm();
+        },
+        scopeOwned: (scopeName) => scopes.get(scopeName).size,
+        // Synchronous models are already quiescent when an op returns.
+        async settle() {},
+        async destroy() {},
+      };
+    },
+  };
+}
+
+export const syncModel = makeSyncLikeModel("Context", () => createContext());
+
+export const threadSafeModel = makeSyncLikeModel(
+  "ThreadSafeContext",
+  () => new ThreadSafeContext(),
+);
 
 // --------------------------------------------------------------------------
 // Model 2: `AsyncContext` -- the path the dart/go cascade defect lived on.
 // --------------------------------------------------------------------------
 //
-// Derived nodes are `memoAsync` slots: memoized (so the `==` store-guard step
-// in the transitive fixture is meaningful) and async (so the revision-counter /
+// Derived nodes are `memoAsync` slots: memoized (so the `==` store-guard step in
+// the transitive fixture is meaningful) and async (so the revision-counter /
 // in-flight machinery the fixture warns about is actually exercised).
 //
-// `setCell` awaits `settle()`. That is the model's legitimate quiescence
-// boundary, not a workaround: it is where a caller in this context is entitled
-// to observe a consistent graph. Reading before quiescence would assert a
-// stronger property than the corpus states.
-//
-// `dispose` is absent from `ops`: `AsyncContext` exposes `disposeAsyncEffect`,
-// `disposeSignal`, and a whole-context `dispose`, but no per-slot or per-cell
-// teardown. Substituting one of those would replay a different fixture than the
-// one on disk, so the runner names the gap and skips instead.
+// `settle()` awaits the context's own quiescence anchor. That is the model's
+// legitimate observation boundary, not a workaround: it is where a caller in
+// this context is entitled to observe a consistent graph, and asserting before
+// quiescence would assert a STRONGER property than the corpus states. It changes
+// *when* assertions are evaluated, never *what* they assert -- an effect that
+// never runs still fails.
 
 export const asyncModel = {
   name: "AsyncContext",
-  ops: new Set(["cell", "computed", "read", "set_cell"]),
-  assertions: new Set(VALUE_ASSERTIONS),
+  ops: new Set(ALL_OPS),
+  assertions: new Set(ALL_ASSERTIONS),
   create() {
     const ctx = new AsyncContext();
-    /** @type {Map<string, { kind: "cell" | "slot", handle: unknown }>} */
-    const refs = new Map();
+    /** @type {Map<string, object>} */
+    const handles = new Map();
+    /** @type {Map<string, object>} */
+    const scopes = new Map();
+    const runLog = [];
+    const cleanupLog = [];
 
     // Inside a compute: cells read synchronously, slots are awaited. Both
     // register the dependency edge before the value is produced.
-    const readDep = async (cx, ref) =>
-      ref.kind === "cell" ? cx.getCell(ref.handle) : await cx.getAsync(ref.handle);
+    const readDep = async (cc, id) => {
+      const handle = handles.get(id);
+      return handle instanceof AsyncCellHandle
+        ? cc.getCell(handle)
+        : await cc.getAsync(handle);
+    };
+
+    const readId = async (id) => {
+      const handle = handles.get(id);
+      return handle instanceof AsyncCellHandle
+        ? ctx.getCell(handle)
+        : await ctx.getAsync(handle);
+    };
 
     return {
-      async cell(id, value) {
-        refs.set(id, { kind: "cell", handle: ctx.cell(value) });
+      runLog,
+      cleanupLog,
+      async cell(id, value, scopeName) {
+        const handle =
+          scopeName == null ? ctx.cell(value) : scopes.get(scopeName).cell(value);
+        handles.set(id, handle);
       },
-      async computed(id, reads, offset) {
-        const deps = reads.map((r) => refs.get(r));
-        const handle = ctx.memoAsync(async (cx) => {
+      async computed(id, reads, offset, scopeName) {
+        const compute = async (cc) => {
           const values = [];
-          for (const dep of deps) values.push(await readDep(cx, dep));
+          for (const r of reads) values.push(await readDep(cc, r));
           return sumOffset(values, offset);
-        });
-        refs.set(id, { kind: "slot", handle });
+        };
+        const handle =
+          scopeName == null
+            ? ctx.memoAsync(compute)
+            : scopes.get(scopeName).memoAsync(compute);
+        handles.set(id, handle);
+      },
+      async effect(id, reads, scopeName) {
+        const body = async (cc) => {
+          runLog.push(id);
+          try {
+            for (const r of reads) await readDep(cc, r);
+          } catch (err) {
+            if (!(err instanceof DisposedNodeError)) throw err;
+          }
+          return () => cleanupLog.push(id);
+        };
+        const handle =
+          scopeName == null
+            ? ctx.effectAsync(body)
+            : scopes.get(scopeName).effectAsync(body);
+        handles.set(id, handle);
       },
       async read(id) {
-        const ref = refs.get(id);
-        return ref.kind === "cell"
-          ? ctx.getCell(ref.handle)
-          : await ctx.getAsync(ref.handle);
+        return readId(id);
       },
       async setCell(id, value) {
-        ctx.setCell(refs.get(id).handle, value);
+        ctx.setCell(handles.get(id), value);
+      },
+      async dispose(id) {
+        await ctx.disposeNode(handles.get(id));
+      },
+      kindOf: (id) => kindOfHandle(handles.get(id)),
+      isEffectActive: (id) => ctx.isEffectActive(handles.get(id)),
+      dependentsOf: (id) => ctx.dependentCount(handles.get(id)),
+      dependenciesOf: (id) => ctx.dependencyCount(handles.get(id)),
+      beginScope(scopeName) {
+        scopes.set(scopeName, ctx.scope());
+      },
+      async endScope(scopeName) {
+        await scopes.get(scopeName).end();
+      },
+      disarmScope(scopeName) {
+        scopes.get(scopeName).disarm();
+      },
+      scopeOwned: (scopeName) => scopes.get(scopeName).size,
+      async settle() {
         await ctx.settle();
       },
       async destroy() {
         await ctx.dispose();
       },
-    };
-  },
-};
-
-// --------------------------------------------------------------------------
-// Model 3: `ThreadSafeContext` -- every op under a shared Atomics mutex.
-// --------------------------------------------------------------------------
-//
-// Shaped like the sync model because the public surface is deliberately the
-// same; the value of replaying it is that the mutex-guarded forwarding path is
-// a distinct implementation that could drop an invalidation without the sync
-// replay noticing. Like `AsyncContext` it has no `disposeSlot`/`disposeCell`.
-
-export const threadSafeModel = {
-  name: "ThreadSafeContext",
-  ops: new Set(["cell", "computed", "read", "set_cell"]),
-  assertions: new Set(VALUE_ASSERTIONS),
-  create() {
-    const ctx = new ThreadSafeContext();
-    /** @type {Map<string, { kind: "cell" | "slot", handle: unknown }>} */
-    const refs = new Map();
-
-    const readRef = (ref) =>
-      ref.kind === "cell" ? ctx.getCell(ref.handle) : ctx.get(ref.handle);
-
-    return {
-      async cell(id, value) {
-        refs.set(id, { kind: "cell", handle: ctx.cell(value) });
-      },
-      async computed(id, reads, offset) {
-        const deps = reads.map((r) => refs.get(r));
-        const handle = ctx.computed(() =>
-          sumOffset(deps.map(readRef), offset),
-        );
-        refs.set(id, { kind: "slot", handle });
-      },
-      async read(id) {
-        return readRef(refs.get(id));
-      },
-      async setCell(id, value) {
-        ctx.setCell(refs.get(id).handle, value);
-      },
-      async destroy() {},
     };
   },
 };

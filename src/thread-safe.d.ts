@@ -2,6 +2,7 @@ import type {
   CellHandle,
   Context,
   EffectHandle,
+  NodeHandle,
   SignalHandle,
   SlotHandle,
 } from "./reactive.js";
@@ -62,6 +63,38 @@ export class ThreadSafeContext {
   disposeSignal<T>(handle: SignalHandle<T>): void;
   isSignalActive<T>(handle: SignalHandle<T>): boolean;
 
+  disposeSlot<T>(handle: SlotHandle<T>): void;
+  disposeCell<T>(handle: CellHandle<T>): void;
+  disposeNode(handle: NodeHandle): void;
+  dependentCount(handle: NodeHandle): number;
+  dependencyCount(handle: NodeHandle): number;
+  isNodeDisposed(handle: NodeHandle): boolean;
+  /** Open a teardown scope whose every operation — including the whole
+   * reverse-order teardown in `end()` — runs as one critical section. */
+  scope(): ThreadSafeTeardownScope;
+  withScope<R>(body: (scope: ThreadSafeTeardownScope) => R): R;
+
   instrumentationSnapshot(): InstrumentationSnapshot | null;
   resetInstrumentation(): void;
+}
+
+/**
+ * A teardown scope whose every operation runs under the context's mutex.
+ * Wraps the single-threaded `TeardownScope`, so scope semantics have exactly one
+ * definition and this class carries only the critical section.
+ */
+export class ThreadSafeTeardownScope {
+  /** @internal — obtain one from {@link ThreadSafeContext.scope}. */
+  private constructor(inner: unknown, mutex: AtomicMutex);
+  readonly size: number;
+  readonly ended: boolean;
+  adopt<H extends NodeHandle>(handle: H): H;
+  cell<T>(value: T): CellHandle<T>;
+  computed<T>(compute: () => T): SlotHandle<T>;
+  memo<T>(compute: () => T): SlotHandle<T>;
+  signal<T>(compute: () => T): SignalHandle<T>;
+  effect(run: () => void | (() => void)): EffectHandle;
+  disarm(): void;
+  end(): void;
+  [Symbol.dispose](): void;
 }

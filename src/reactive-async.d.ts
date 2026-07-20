@@ -77,4 +77,59 @@ export class AsyncContext {
   isSignalActive(handle: AsyncSignalHandle<unknown>): boolean;
   /** Dispose the context: abort in-flight work and await active cleanups. */
   dispose(): Promise<void>;
+
+  /** Tear down an async derived slot: mark the surviving cone stale, supersede
+   * any in-flight compute, then detach both edge directions. Idempotent. */
+  disposeSlot<T>(handle: AsyncSlotHandle<T>): void;
+  /** Tear down a source cell. See {@link disposeSlot}. */
+  disposeCell<T>(handle: AsyncCellHandle<T>): void;
+  /** Tear down whatever kind of node `handle` names. Dispatch is on the
+   * handle's CLASS, not on the node currently at its id — ids are recycled, and
+   * a stale handle must be a no-op rather than tear down the new occupant. */
+  disposeNode(handle: AsyncNodeHandle): Promise<void>;
+  /** How many nodes currently depend on `handle`. Counts, never collections. */
+  dependentCount(handle: AsyncNodeHandle): number;
+  /** How many nodes `handle` currently depends on. */
+  dependencyCount(handle: AsyncNodeHandle): number;
+  /** Whether `handle`'s id currently names no live node. */
+  isNodeDisposed(handle: AsyncNodeHandle): boolean;
+  /** Open an {@link AsyncTeardownScope} over this context. */
+  scope(): AsyncTeardownScope;
+  /** Run `body` with a fresh scope and end it in a `finally`. */
+  withScope<R>(body: (scope: AsyncTeardownScope) => R | Promise<R>): Promise<R>;
 }
+
+/** Any node handle an {@link AsyncContext} can address by degree or tear down. */
+export type AsyncNodeHandle =
+  | AsyncCellHandle<never>
+  | AsyncSlotHandle<never>
+  | AsyncEffectHandle
+  | AsyncSignalHandle<never>;
+
+/**
+ * A teardown scope over an {@link AsyncContext}: nodes created through it are
+ * disposed when it ends, in reverse creation order (`#lzspecedgeindex`).
+ *
+ * `end()` is a promise because async effect teardown awaits the effect's run
+ * loop and its cleanup, and each node is awaited before the next is torn down —
+ * which is what keeps cleanup order observable and deterministic.
+ */
+export class AsyncTeardownScope {
+  /** @internal — obtain one from {@link AsyncContext.scope}. */
+  private constructor(ctx: AsyncContext);
+  readonly size: number;
+  readonly ended: boolean;
+  adopt<H extends AsyncNodeHandle>(handle: H): H;
+  cell<T>(value: T): AsyncCellHandle<T>;
+  computedAsync<T>(compute: AsyncComputeFn<T>): AsyncSlotHandle<T>;
+  memoAsync<T>(compute: AsyncComputeFn<T>): AsyncSlotHandle<T>;
+  signalAsync<T>(compute: AsyncComputeFn<T>): AsyncSignalHandle<T>;
+  effectAsync(run: AsyncEffectRun): AsyncEffectHandle;
+  /** Cancel this scope's teardown; the nodes themselves are untouched. */
+  disarm(): void;
+  /** Dispose every node this scope owns, in reverse creation order. Idempotent. */
+  end(): Promise<void>;
+  [Symbol.asyncDispose](): Promise<void>;
+}
+
+export { DisposedNodeError } from "./reactive.js";

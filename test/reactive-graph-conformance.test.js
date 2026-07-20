@@ -55,48 +55,19 @@ import { MODELS } from "./reactive-graph/models.js";
 
 // Fixtures a model cannot replay, as `<model>/<fixture>` -> reason.
 //
-// Every entry names the specific op or assertion that is missing. These are
-// findings against lazily-js, not relaxations of the corpus:
+// EMPTY, and asserted as an exact match in both directions: every fixture now
+// replays against every context lazily-js ships. The eight entries this ledger
+// used to carry all named the same missing surface -- `ctx.scope()` /
+// `TeardownScope`, per-node `disposeNode`, and dependency-edge degree
+// introspection -- which `lazily-rs` was the only binding to have shipped. That
+// surface now exists on `Context`, `AsyncContext`, and `ThreadSafeContext`
+// (`#lzspecedgeindex`), so a skip here would be a regression, not a gap.
 //
-//   * Scope ops (`begin_scope` / `end_scope` / `disarm`) -- lazily-js exposes no
-//     `ctx.scope()` / `TeardownScope` at all, so four fixtures are unreachable
-//     for every model. This is the largest single gap in js's reactive-graph
-//     surface relative to the corpus.
-//   * `fanout` / `churn` / `dispose_fanout` / `dispose_stale_handle` -- runner
-//     constructs js could express, but the fixtures using them assert
-//     `dependents_of` / `dependencies_of`, and js publishes no dependency-edge
-//     introspection. Replaying the ops while checking nothing would be the exact
-//     silent-pass shape this runner exists to prevent.
-//   * `dispose` on the async and thread-safe models -- neither exposes
-//     `disposeSlot`/`disposeCell`; only the sync `Context` has lazy-node
-//     teardown.
-const EXPECTED_SKIPS = {
-  "Context/churn_returns_to_baseline.json": "unsupported op: fanout",
-  "Context/cross_scope_teardown_hazard.json": "unsupported op: begin_scope",
-  "Context/disarm_disposes_nothing.json": "unsupported op: begin_scope",
-  "Context/dispose_detaches_edges_both_directions.json": "unsupported op: effect",
-  "Context/recycled_id_inherits_nothing.json": "unsupported op: fanout",
-  "Context/scope_teardown_equals_fold_of_disposals.json": "unsupported op: begin_scope",
-  "Context/scoping_bounds_teardown_not_visibility.json": "unsupported op: begin_scope",
-
-  "AsyncContext/churn_returns_to_baseline.json": "unsupported op: fanout",
-  "AsyncContext/cross_scope_teardown_hazard.json": "unsupported op: begin_scope",
-  "AsyncContext/disarm_disposes_nothing.json": "unsupported op: begin_scope",
-  "AsyncContext/dispose_detaches_edges_both_directions.json": "unsupported op: effect",
-  "AsyncContext/read_after_dispose_is_an_error.json": "unsupported op: dispose",
-  "AsyncContext/recycled_id_inherits_nothing.json": "unsupported op: fanout",
-  "AsyncContext/scope_teardown_equals_fold_of_disposals.json": "unsupported op: begin_scope",
-  "AsyncContext/scoping_bounds_teardown_not_visibility.json": "unsupported op: begin_scope",
-
-  "ThreadSafeContext/churn_returns_to_baseline.json": "unsupported op: fanout",
-  "ThreadSafeContext/cross_scope_teardown_hazard.json": "unsupported op: begin_scope",
-  "ThreadSafeContext/disarm_disposes_nothing.json": "unsupported op: begin_scope",
-  "ThreadSafeContext/dispose_detaches_edges_both_directions.json": "unsupported op: effect",
-  "ThreadSafeContext/read_after_dispose_is_an_error.json": "unsupported op: dispose",
-  "ThreadSafeContext/recycled_id_inherits_nothing.json": "unsupported op: fanout",
-  "ThreadSafeContext/scope_teardown_equals_fold_of_disposals.json": "unsupported op: begin_scope",
-  "ThreadSafeContext/scoping_bounds_teardown_not_visibility.json": "unsupported op: begin_scope",
-};
+// An entry may only be added with the specific op or assertion named, and only
+// when the underlying context genuinely lacks the API -- never to route around a
+// failing assertion. A failing fixture belongs in `KNOWN_DIVERGENCES`, where it
+// is visible as a finding.
+const EXPECTED_SKIPS = {};
 
 /**
  * Fixture assertions an execution model does not satisfy today, as
@@ -107,24 +78,25 @@ const EXPECTED_SKIPS = {
  * fails the build, and a fixed one fails it until the entry is removed. The
  * fixture on disk is never edited and no assertion is loosened.
  *
- * Empty today. The one entry this ledger carried -- a live reader of a disposed
- * slot serving its pre-disposal cache forever, because `disposeSlot` detached
- * both edge directions without dirtying the surviving readers -- was fixed in
- * `reactive.js` (`invalidateDisposedDependents`), so
- * `read_after_dispose_is_an_error.json` now replays clean on `Context`. The same
- * defect had been found and fixed in lazily-rs (`5db90d2`).
+ * Empty today, across all three models and all nine fixtures. The one entry this
+ * ledger carried -- a live reader of a disposed slot serving its pre-disposal
+ * cache forever, because `disposeSlot` detached both edge directions without
+ * dirtying the surviving readers -- was fixed in `reactive.js`
+ * (`invalidateDisposedDependents`). The same defect had been found and fixed in
+ * lazily-rs (`5db90d2`), and lazily-dart and lazily-go each hit it on their
+ * async paths.
+ *
+ * The `observationally_equal` relation is recorded here under the tag
+ * `<model>/<fixture>:observationally_equal` if it ever diverges.
  */
 const KNOWN_DIVERGENCES = [];
 
 // The fixtures each model must replay. Asserted as an exact set, so a fixture
 // dropping out of the replay path fails rather than shrinking the run silently.
 const EXPECTED_REPLAYS = {
-  Context: [
-    "read_after_dispose_is_an_error.json",
-    "transitive_invalidation_reaches_depth.json",
-  ],
-  AsyncContext: ["transitive_invalidation_reaches_depth.json"],
-  ThreadSafeContext: ["transitive_invalidation_reaches_depth.json"],
+  Context: FIXTURES,
+  AsyncContext: FIXTURES,
+  ThreadSafeContext: FIXTURES,
 };
 
 test("reactive-graph corpus is the canonical sibling's, unmodified", () => {

@@ -226,6 +226,58 @@ export class ThreadSafeContext {
     return this.#mutex.runExclusive(() => this.#ctx.isSignalActive(handle));
   }
 
+  // -- Teardown + degree introspection (`#lzspecedgeindex`) --------------
+  //
+  // Forwarded like every other operation: a teardown mutates two edge lists per
+  // node and frees an id, so it is exactly the kind of multi-step mutation the
+  // lock exists to serialize. The degree reads are locked too — an unsynchronized
+  // count taken mid-teardown could observe a node detached from one direction and
+  // not yet the other, which is precisely the dangling half-edge these counts are
+  // there to rule out.
+
+  disposeSlot(handle) {
+    return this.#mutex.runExclusive(() => this.#ctx.disposeSlot(handle));
+  }
+
+  disposeCell(handle) {
+    return this.#mutex.runExclusive(() => this.#ctx.disposeCell(handle));
+  }
+
+  disposeNode(handle) {
+    return this.#mutex.runExclusive(() => this.#ctx.disposeNode(handle));
+  }
+
+  dependentCount(handle) {
+    return this.#mutex.runExclusive(() => this.#ctx.dependentCount(handle));
+  }
+
+  dependencyCount(handle) {
+    return this.#mutex.runExclusive(() => this.#ctx.dependencyCount(handle));
+  }
+
+  isNodeDisposed(handle) {
+    return this.#mutex.runExclusive(() => this.#ctx.isNodeDisposed(handle));
+  }
+
+  /**
+   * Open a teardown scope over this context. Every scope operation — including
+   * the whole reverse-order teardown in `end()` — runs as ONE critical section,
+   * so another realm never observes a half-torn-down scope.
+   */
+  scope() {
+    return new ThreadSafeTeardownScope(this.#ctx.scope(), this.#mutex);
+  }
+
+  /** Run `body` with a fresh scope and end it in a `finally`. */
+  withScope(body) {
+    const s = this.scope();
+    try {
+      return body(s);
+    } finally {
+      s.end();
+    }
+  }
+
   // -- Instrumentation (opt-in; passthrough) -----------------------------
 
   instrumentationSnapshot() {
@@ -242,5 +294,73 @@ export class ThreadSafeContext {
         this.#ctx.resetInstrumentation();
       }
     });
+  }
+}
+
+// See the note on `DISPOSE` in ./reactive.js.
+const DISPOSE = Symbol.dispose ?? Symbol.for("Symbol.dispose");
+
+/**
+ * A {@link TeardownScope} whose every operation runs under the context's mutex.
+ *
+ * Wrapping rather than re-implementing keeps one definition of scope semantics —
+ * reverse-order teardown, idempotent `end`, `disarm` that touches no node — and
+ * lets this class carry only the concern it actually owns: the critical section.
+ * `end()` takes the lock ONCE for the whole reverse walk, not once per node, so
+ * a scope tears down atomically from another realm's point of view.
+ */
+export class ThreadSafeTeardownScope {
+  #inner;
+  #mutex;
+
+  /** @internal — obtain one from {@link ThreadSafeContext#scope}. */
+  constructor(inner, mutex) {
+    this.#inner = inner;
+    this.#mutex = mutex;
+  }
+
+  get size() {
+    return this.#mutex.runExclusive(() => this.#inner.size);
+  }
+
+  get ended() {
+    return this.#mutex.runExclusive(() => this.#inner.ended);
+  }
+
+  adopt(handle) {
+    return this.#mutex.runExclusive(() => this.#inner.adopt(handle));
+  }
+
+  cell(value) {
+    return this.#mutex.runExclusive(() => this.#inner.cell(value));
+  }
+
+  computed(compute) {
+    return this.#mutex.runExclusive(() => this.#inner.computed(compute));
+  }
+
+  memo(compute) {
+    return this.#mutex.runExclusive(() => this.#inner.memo(compute));
+  }
+
+  signal(compute) {
+    return this.#mutex.runExclusive(() => this.#inner.signal(compute));
+  }
+
+  effect(run) {
+    return this.#mutex.runExclusive(() => this.#inner.effect(run));
+  }
+
+  disarm() {
+    return this.#mutex.runExclusive(() => this.#inner.disarm());
+  }
+
+  end() {
+    return this.#mutex.runExclusive(() => this.#inner.end());
+  }
+
+  /** TC39 explicit resource management: `using scope = ctx.scope()`. */
+  [DISPOSE]() {
+    this.end();
   }
 }
