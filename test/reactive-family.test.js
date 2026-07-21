@@ -160,7 +160,7 @@ test("CellMap: entry caches one cell per key; get_or_insert mints once", () => {
   const a1 = map.entry("a", 1);
   const a2 = map.entry("a", 999);
   assert.equal(a1.id, a2.id, "same key -> same cell; second default ignored");
-  assert.equal(ctx.getCell(a1), 1);
+  assert.equal(ctx.get(a1), 1);
   assert.equal(map.lenUntracked(), 1);
 
   // getOrInsertWith mints once then returns existing (factory not re-run).
@@ -196,7 +196,7 @@ test("CellMap: membership is reactive but value changes are not", () => {
   assert.equal(ctx.get(count), 2);
 
   // Mutating an existing entry must NOT invalidate the membership reader.
-  ctx.setCell(a, 100);
+  ctx.set(a, 100);
   assert.ok(ctx.isSet(count), "membership reader stayed cached");
   assert.equal(ctx.get(count), 2);
 
@@ -220,12 +220,12 @@ test("ReactiveMap: per-entry reads are independent", () => {
   assert.equal(ctx.get(viewA), 10);
 
   // Changing b must not invalidate a's reader.
-  ctx.setCell(b, 222);
+  ctx.set(b, 222);
   assert.ok(ctx.isSet(viewA), "sibling change must not invalidate");
   assert.equal(ctx.get(viewA), 10);
 
   // Changing a does.
-  ctx.setCell(a, 5);
+  ctx.set(a, 5);
   assert.equal(ctx.get(viewA), 50);
 });
 

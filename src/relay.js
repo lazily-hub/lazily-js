@@ -63,10 +63,10 @@ export class BackpressurePolicy {
   /** @param {import("./reactive.js").Context} ctx */
   constructor(ctx, dimension, highWater, lowWater, overflow) {
     this.ctx = ctx;
-    this.dimension = ctx.cell(dimension);
-    this.highWater = ctx.cell(highWater);
-    this.lowWater = ctx.cell(lowWater);
-    this.overflow = ctx.cell(overflow);
+    this.dimension = ctx.source(dimension);
+    this.highWater = ctx.source(highWater);
+    this.lowWater = ctx.source(lowWater);
+    this.overflow = ctx.source(overflow);
   }
 }
 
@@ -83,27 +83,27 @@ export class RelayCell {
    * non-conflating policy.
    */
   constructor(ctx, policy, mergePolicy) {
-    if (ctx.getCell(policy.overflow) === Overflow.Conflate && !mergePolicy.conflates) {
+    if (ctx.get(policy.overflow) === Overflow.Conflate && !mergePolicy.conflates) {
       throw new Error(RelayConfigError.ConflateNotBounding);
     }
     this.ctx = ctx;
     this.policy = policy;
     this.mergePolicy = mergePolicy;
     // Hot head: current window's coalesced value (null = empty window).
-    this._head = ctx.cell(null);
+    this._head = ctx.source(null);
     // Ops merged into the current window since the last drain (the Count bound).
-    this._pending = ctx.cell(0);
-    this._depth = ctx.computed(() => ctx.getCell(this._pending));
+    this._pending = ctx.source(0);
+    this._depth = ctx.computed(() => ctx.get(this._pending));
     this._isFull = ctx.computed(
-      () => ctx.getCell(this._pending) >= ctx.getCell(policy.highWater),
+      () => ctx.get(this._pending) >= ctx.get(policy.highWater),
     );
-    this._isEmpty = ctx.computed(() => ctx.getCell(this._head) === null);
+    this._isEmpty = ctx.computed(() => ctx.get(this._head) === null);
   }
 
   /** Whether the current overflow choice is legal for the policy. */
   overflowIsLegal() {
     return (
-      this.ctx.getCell(this.policy.overflow) !== Overflow.Conflate ||
+      this.ctx.get(this.policy.overflow) !== Overflow.Conflate ||
       this.mergePolicy.conflates
     );
   }
@@ -133,13 +133,13 @@ export class RelayCell {
   }
 
   _readFull() {
-    return this.ctx.getCell(this._pending) >= this.ctx.getCell(this.policy.highWater);
+    return this.ctx.get(this._pending) >= this.ctx.get(this.policy.highWater);
   }
 
   _mergeIntoHead(op) {
-    const cur = this.ctx.getCell(this._head);
+    const cur = this.ctx.get(this._head);
     const next = cur === null ? op : this.mergePolicy.merge(cur, op);
-    this.ctx.setCell(this._head, next);
+    this.ctx.set(this._head, next);
   }
 
   /**
@@ -147,16 +147,16 @@ export class RelayCell {
    * high_water; otherwise merges the op into the hot head under the policy.
    */
   ingress(op) {
-    const wasEmpty = this.ctx.getCell(this._pending) === 0;
+    const wasEmpty = this.ctx.get(this._pending) === 0;
     if (this._readFull()) {
-      switch (this.ctx.getCell(this.policy.overflow)) {
+      switch (this.ctx.get(this.policy.overflow)) {
         case Overflow.Block:
           return IngressOutcome.Blocked;
         case Overflow.DropNewest:
           return IngressOutcome.Dropped;
         case Overflow.DropOldest:
-          this.ctx.setCell(this._head, op);
-          this.ctx.setCell(this._pending, 1);
+          this.ctx.set(this._head, op);
+          this.ctx.set(this._pending, 1);
           return IngressOutcome.Dropped;
         // Conflate keeps merging; Spill is Phase 3 and, until wired, degrades to
         // Conflate for a bounding policy. Both fall through to the merge below.
@@ -166,7 +166,7 @@ export class RelayCell {
       }
     }
     this._mergeIntoHead(op);
-    this.ctx.setCell(this._pending, this.ctx.getCell(this._pending) + 1);
+    this.ctx.set(this._pending, this.ctx.get(this._pending) + 1);
     return wasEmpty ? IngressOutcome.Accepted : IngressOutcome.Conflated;
   }
 
@@ -176,17 +176,17 @@ export class RelayCell {
    * equals the flat fold of every ingested op, for any drain schedule.
    */
   drain() {
-    const cur = this.ctx.getCell(this._head);
+    const cur = this.ctx.get(this._head);
     if (cur !== null) {
-      this.ctx.setCell(this._head, null);
-      this.ctx.setCell(this._pending, 0);
+      this.ctx.set(this._head, null);
+      this.ctx.set(this._pending, 0);
     }
     return cur;
   }
 
   /** Peek the current coalesced window without draining. */
   peek() {
-    return this.ctx.getCell(this._head);
+    return this.ctx.get(this._head);
   }
 }
 

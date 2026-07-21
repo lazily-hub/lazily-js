@@ -16,8 +16,8 @@ import { Context } from "./reactive.js";
 class SemNode {
   constructor(id, value, ctx) {
     this.id = id;
-    this.valueCell = ctx.cell(value);
-    this.childKeysCell = ctx.cell([]); // array of child ids (reactive membership/order)
+    this.valueCell = ctx.source(value);
+    this.childKeysCell = ctx.source([]); // array of child ids (reactive membership/order)
     this.childSlots = new Map(); // child id -> Computed (captured at build)
     this.slot = null; // guarded Computed for this node's derived value
   }
@@ -56,15 +56,15 @@ export class SemTree {
       node.childSlots.set(childSpec.id, childNode.slot);
     }
     // Set the child-list cell BEFORE registering the memo so the memo observes it.
-    this.#ctx.setCell(node.childKeysCell, childOrder);
+    this.#ctx.set(node.childKeysCell, childOrder);
     // Register the memo slot: subscribes to own value cell, own child-list cell,
     // and each present child's derived slot.
     const ctx = this.#ctx;
     const fold = this.#fold;
     const self = this;
     node.slot = ctx.computed(() => {
-      const v = ctx.getCell(node.valueCell);
-      const kids = ctx.getCell(node.childKeysCell);
+      const v = ctx.get(node.valueCell);
+      const kids = ctx.get(node.childKeysCell);
       const ds = [];
       for (const kid of kids) {
         const childSlot = node.childSlots.get(kid);
@@ -83,7 +83,7 @@ export class SemTree {
     if (!node) {
       throw new RangeError(`SemTree node not present: ${String(id)}`);
     }
-    this.#ctx.setCell(node.valueCell, value);
+    this.#ctx.set(node.valueCell, value);
   }
 
   // Remove a child from its parent's child-list cell. The parent re-folds over
@@ -93,8 +93,8 @@ export class SemTree {
     if (!parent) {
       throw new RangeError(`SemTree parent not present: ${String(parentId)}`);
     }
-    const kids = this.#ctx.getCell(parent.childKeysCell).filter((k) => k !== childId);
-    this.#ctx.setCell(parent.childKeysCell, kids);
+    const kids = this.#ctx.get(parent.childKeysCell).filter((k) => k !== childId);
+    this.#ctx.set(parent.childKeysCell, kids);
   }
 
   // Reactive read of the root derived value.

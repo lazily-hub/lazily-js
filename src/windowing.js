@@ -111,14 +111,14 @@ export class SessionCore {
 class WindowOutput {
   constructor(ctx) {
     this.ctx = ctx;
-    this.outputCell = ctx.cell(null);
+    this.outputCell = ctx.source(null);
   }
   emit(e) {
-    if (e !== null) this.ctx.setCell(this.outputCell, e);
+    if (e !== null) this.ctx.set(this.outputCell, e);
     return e;
   }
   value() {
-    return this.ctx.getCell(this.outputCell);
+    return this.ctx.get(this.outputCell);
   }
 }
 

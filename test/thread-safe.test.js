@@ -45,11 +45,11 @@ test("AtomicMutex exposes a shareable lock buffer when shared memory is availabl
 // --- ThreadSafeContext: observational refinement of Context -----------------
 test("ThreadSafeContext mirrors single-threaded reactive semantics", () => {
   const ctx = new ThreadSafeContext();
-  const a = ctx.cell(2);
-  const b = ctx.cell(3);
-  const sum = ctx.computed(() => ctx.getCell(a) + ctx.getCell(b));
+  const a = ctx.source(2);
+  const b = ctx.source(3);
+  const sum = ctx.computed(() => ctx.get(a) + ctx.get(b));
   assert.equal(ctx.get(sum), 5);
-  ctx.setCell(a, 10);
+  ctx.set(a, 10);
   assert.equal(ctx.get(sum), 13);
 
   // memo suppresses equal recompute downstream; signal is eager.
@@ -59,28 +59,28 @@ test("ThreadSafeContext mirrors single-threaded reactive semantics", () => {
 
 test("ThreadSafeContext.batch coalesces to one invalidation pass (flushBatch ≡ setCell)", () => {
   const ctx = new ThreadSafeContext();
-  const c = ctx.cell(0);
+  const c = ctx.source(0);
   let runs = 0;
   ctx.effect(() => {
-    ctx.getCell(c);
+    ctx.get(c);
     runs += 1;
   });
   assert.equal(runs, 1, "effect runs once on registration");
   ctx.batch(() => {
-    ctx.setCell(c, 1);
-    ctx.setCell(c, 2);
-    ctx.setCell(c, 3);
+    ctx.set(c, 1);
+    ctx.set(c, 2);
+    ctx.set(c, 3);
   });
-  assert.equal(ctx.getCell(c), 3);
+  assert.equal(ctx.get(c), 3);
   assert.equal(runs, 2, "the batch triggers exactly one rerun");
 });
 
 test("ThreadSafeContext effect dispose + signal lifecycle", () => {
   const ctx = new ThreadSafeContext();
-  const c = ctx.cell(1);
-  const sig = ctx.signal(() => ctx.getCell(c) + 1);
+  const c = ctx.source(1);
+  const sig = ctx.signal(() => ctx.get(c) + 1);
   assert.equal(ctx.getSignal(sig), 2);
-  ctx.setCell(c, 5);
+  ctx.set(c, 5);
   assert.equal(ctx.getSignal(sig), 6);
   assert.equal(ctx.isSignalActive(sig), true);
   ctx.disposeSignal(sig);
@@ -94,8 +94,8 @@ test("ThreadSafeContext.withLockBuffer shares a lock across contexts", () => {
     const ctx2 = ThreadSafeContext.withLockBuffer(buf, new Context());
     assert.equal(ctx2.lockBuffer, buf);
     // Both drive their own graphs correctly under the shared lock.
-    const c = ctx2.cell(1);
-    assert.equal(ctx2.getCell(c), 1);
+    const c = ctx2.source(1);
+    assert.equal(ctx2.get(c), 1);
   } else {
     assert.equal(buf, null); // shared memory unavailable — degenerate lock
   }
@@ -105,8 +105,8 @@ test("ThreadSafeContext passes through opt-in instrumentation", () => {
   const plain = new ThreadSafeContext();
   assert.equal(plain.instrumentationSnapshot(), null);
   const ctx = new ThreadSafeContext({ instrument: true });
-  const c = ctx.cell(1);
-  const d = ctx.computed(() => ctx.getCell(c) + 1);
+  const c = ctx.source(1);
+  const d = ctx.computed(() => ctx.get(c) + 1);
   ctx.get(d);
   const snap = ctx.instrumentationSnapshot();
   assert.ok(snap && snap.nodeAllocations >= 2);

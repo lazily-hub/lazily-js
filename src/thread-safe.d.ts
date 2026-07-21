@@ -43,17 +43,25 @@ export class ThreadSafeContext {
   /** The mutex guarding this context. */
   readonly mutex: AtomicMutex;
 
-  cell<T>(value: T): CellHandle<T>;
+  // #lzcellkernel v2 constructor surface
+  source<T>(value: T, policy?: unknown): CellHandle<T>;
   computed<T>(compute: () => T): SlotHandle<T>;
+  /** @deprecated use {@link ThreadSafeContext#source}. */
+  cell<T>(value: T): CellHandle<T>;
+  /** @deprecated use {@link ThreadSafeContext#computed} (guarded, the only derived construction). */
   slot<T>(compute: () => T): SlotHandle<T>;
   signal<T>(compute: () => T): SignalHandle<T>;
   effect(run: () => void | (() => void)): EffectHandle;
 
-  get<T>(handle: SlotHandle<T>): T;
+  // #lzcellkernel unified read/write
+  get<T>(handle: CellHandle<T> | SlotHandle<T>): T;
+  set<T>(handle: CellHandle<T>, value: T): void;
+  /** @deprecated use {@link ThreadSafeContext#get} — the unified cell read (#lzcellkernel). */
   getCell<T>(handle: CellHandle<T>): T;
   getSignal<T>(handle: SignalHandle<T>): T;
   isSet<T>(handle: SlotHandle<T>): boolean;
 
+  /** @deprecated use {@link ThreadSafeContext#set} — the unified cell write (#lzcellkernel). */
   setCell<T>(handle: CellHandle<T>, value: T): void;
   batch(run: () => void): void;
 
@@ -88,6 +96,8 @@ export class ThreadSafeTeardownScope {
   readonly size: number;
   readonly ended: boolean;
   adopt<H extends NodeHandle>(handle: H): H;
+  source<T>(value: T, policy?: unknown): CellHandle<T>;
+  /** @deprecated use {@link ThreadSafeTeardownScope#source}. */
   cell<T>(value: T): CellHandle<T>;
   computed<T>(compute: () => T): SlotHandle<T>;
   signal<T>(compute: () => T): SignalHandle<T>;

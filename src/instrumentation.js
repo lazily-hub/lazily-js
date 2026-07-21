@@ -95,7 +95,7 @@ export function runBenchmarkSuite(iterations = 1000) {
       "cell_create",
       () => {
         const ctx = new Context();
-        ctx.cell(0);
+        ctx.source(0);
       },
       iterations,
     ),
@@ -104,15 +104,15 @@ export function runBenchmarkSuite(iterations = 1000) {
   // cell get/set churn on a live cell.
   {
     const ctx = new Context();
-    const c = ctx.cell(0);
+    const c = ctx.source(0);
     let v = 0;
     results.push(
       benchmark(
         "cell_set_get",
         () => {
           v = (v + 1) | 0;
-          ctx.setCell(c, v);
-          ctx.getCell(c);
+          ctx.set(c, v);
+          ctx.get(c);
         },
         iterations,
       ),
@@ -122,15 +122,15 @@ export function runBenchmarkSuite(iterations = 1000) {
   // derived slot recompute on source change.
   {
     const ctx = new Context();
-    const c = ctx.cell(1);
-    const doubled = ctx.computed(() => ctx.getCell(c) * 2);
+    const c = ctx.source(1);
+    const doubled = ctx.computed(() => ctx.get(c) * 2);
     let v = 0;
     results.push(
       benchmark(
         "computed_recompute",
         () => {
           v = (v + 1) | 0;
-          ctx.setCell(c, v);
+          ctx.set(c, v);
           ctx.get(doubled);
         },
         iterations,
@@ -141,10 +141,10 @@ export function runBenchmarkSuite(iterations = 1000) {
   // effect rerun on source change.
   {
     const ctx = new Context();
-    const c = ctx.cell(0);
+    const c = ctx.source(0);
     let sink = 0;
     ctx.effect(() => {
-      sink += ctx.getCell(c);
+      sink += ctx.get(c);
     });
     let v = 0;
     results.push(
@@ -152,7 +152,7 @@ export function runBenchmarkSuite(iterations = 1000) {
         "effect_rerun",
         () => {
           v = (v + 1) | 0;
-          ctx.setCell(c, v);
+          ctx.set(c, v);
         },
         iterations,
       ),

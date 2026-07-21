@@ -36,19 +36,19 @@ export class TimerCell {
   constructor(ctx, fireAt) {
     this.ctx = ctx;
     this.core = new TimerCore(fireAt);
-    this.firedCell = ctx.cell(false);
+    this.firedCell = ctx.source(false);
   }
   tick(now) {
     const edge = this.core.tick(now);
-    if (edge) this.ctx.setCell(this.firedCell, true);
+    if (edge) this.ctx.set(this.firedCell, true);
     return edge;
   }
   hasFired() {
-    return this.ctx.getCell(this.firedCell);
+    return this.ctx.get(this.firedCell);
   }
   /** `null` before the fire, the unit marker (`true`) after. */
   value() {
-    return this.ctx.getCell(this.firedCell) ? true : null;
+    return this.ctx.get(this.firedCell) ? true : null;
   }
   nextFire() {
     return this.core.nextFire();
@@ -87,15 +87,15 @@ export class IntervalCell {
   constructor(ctx, period) {
     this.ctx = ctx;
     this.core = new IntervalCore(period);
-    this.countCell = ctx.cell(0);
+    this.countCell = ctx.source(0);
   }
   tick(now) {
     const edge = this.core.tick(now);
-    if (edge) this.ctx.setCell(this.countCell, this.core.count);
+    if (edge) this.ctx.set(this.countCell, this.core.count);
     return edge;
   }
   count() {
-    return this.ctx.getCell(this.countCell);
+    return this.ctx.get(this.countCell);
   }
   nextFire() {
     return this.core.nextFire();
@@ -160,15 +160,15 @@ export class CronCell {
   constructor(ctx, cycle, offsets) {
     this.ctx = ctx;
     this.core = new CronCore(cycle, offsets);
-    this.countCell = ctx.cell(0);
+    this.countCell = ctx.source(0);
   }
   tick(now) {
     const edge = this.core.tick(now);
-    if (edge) this.ctx.setCell(this.countCell, this.core.count);
+    if (edge) this.ctx.set(this.countCell, this.core.count);
     return edge;
   }
   count() {
-    return this.ctx.getCell(this.countCell);
+    return this.ctx.get(this.countCell);
   }
   nextFire() {
     return this.core.nextFire();
@@ -205,20 +205,20 @@ export class DeadlineCell {
     this.ctx = ctx;
     this.value = value;
     this.core = new DeadlineCore(deadline);
-    this.expiredCell = ctx.cell(false);
+    this.expiredCell = ctx.source(false);
   }
   tick(now) {
     const edge = this.core.tick(now);
-    if (edge) this.ctx.setCell(this.expiredCell, true);
+    if (edge) this.ctx.set(this.expiredCell, true);
     return edge;
   }
   /** `{ state: "Live"|"Expired", value }` — the value is preserved across the flip. */
   state() {
-    const expired = this.ctx.getCell(this.expiredCell);
+    const expired = this.ctx.get(this.expiredCell);
     return { state: expired ? DeadlinedState.Expired : DeadlinedState.Live, value: this.value };
   }
   isExpired() {
-    return this.ctx.getCell(this.expiredCell);
+    return this.ctx.get(this.expiredCell);
   }
   nextFire() {
     return this.core.nextFire();

@@ -119,12 +119,12 @@ export class TeardownScope {
 
   /** @deprecated use {@link source}. */
   cell(value) {
-    return this.adopt(this.#ctx.cell(value));
+    return this.adopt(this.#ctx.source(value));
   }
 
   /** @deprecated use {@link computed} (guarded, the only derived construction). */
   slot(compute) {
-    return this.adopt(this.#ctx.slot(compute));
+    return this.adopt(this.#ctx.computed(compute));
   }
 
   /** @deprecated use {@link computed}`(f).eager()` for an eager signal. */

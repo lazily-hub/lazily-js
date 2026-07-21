@@ -26,24 +26,24 @@ export class StateMachine {
     }
     this.#ctx = ctx;
     this.#transition = transition;
-    this.#cell = ctx.cell(initial);
+    this.#cell = ctx.source(initial);
   }
 
   // Send an event. Returns `true` if accepted (non-null), `false` if rejected
   // (`null`/guard). An accepted transition to an equal state returns `true`
   // but the `==` guard suppresses invalidation (no downstream cascade).
   send(event) {
-    const current = this.#ctx.getCell(this.#cell);
+    const current = this.#ctx.get(this.#cell);
     const next = this.#transition(current, event);
     if (next === null || next === undefined) {
       return false;
     }
-    this.#ctx.setCell(this.#cell, next);
+    this.#ctx.set(this.#cell, next);
     return true;
   }
 
   get state() {
-    return this.#ctx.getCell(this.#cell);
+    return this.#ctx.get(this.#cell);
   }
 
   // The underlying active-state cell handle, for reactive composition.

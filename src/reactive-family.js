@@ -82,20 +82,20 @@ export class ReactiveMap {
     }
     this._ctx = ctx;
     this._kind = kind;
-    this._membership = ctx.cell(0);
-    this._orderSignal = ctx.cell(0);
+    this._membership = ctx.source(0);
+    this._orderSignal = ctx.source(0);
   }
 
   /** Bump the order signal (invalidates `keys` readers). */
   _bumpOrder() {
     this._orderVersion = (this._orderVersion + 1) >>> 0;
-    this._ctx.setCell(this._orderSignal, this._orderVersion);
+    this._ctx.set(this._orderSignal, this._orderVersion);
   }
 
   /** Bump set-membership (invalidates `len`/`containsKey` readers) + order. */
   _bumpMembership() {
     this._version = (this._version + 1) >>> 0;
-    this._ctx.setCell(this._membership, this._version);
+    this._ctx.set(this._membership, this._version);
     // The key set changed, so the ordered key list changed too.
     this._bumpOrder();
   }
@@ -116,7 +116,7 @@ export class ReactiveMap {
     // An input cell sets its value directly; a derived slot wraps `compute` as
     // its recomputation — the same node an eager pre-mint would allocate.
     const handle =
-      this._kind === EntryKind.Cell ? this._ctx.cell(compute()) : this._ctx.computed(() => compute());
+      this._kind === EntryKind.Cell ? this._ctx.source(compute()) : this._ctx.computed(() => compute());
     this._entries.set(key, handle);
     this._order.push(key);
     this._bumpMembership();
@@ -125,7 +125,7 @@ export class ReactiveMap {
 
   /** Read a handle's value through the owning context (subscribes the caller). */
   _observe(handle) {
-    return this._kind === EntryKind.Cell ? this._ctx.getCell(handle) : this._ctx.get(handle);
+    return this._ctx.get(handle);
   }
 
   /**
@@ -194,7 +194,7 @@ export class ReactiveMap {
    * @returns {K[]}
    */
   keys() {
-    this._ctx.getCell(this._orderSignal);
+    this._ctx.get(this._orderSignal);
     return [...this._order];
   }
 
@@ -295,7 +295,7 @@ export class ReactiveMap {
 
   /** Reactive entry count. Subscribes the caller to membership changes only. */
   len() {
-    this._ctx.getCell(this._membership);
+    this._ctx.get(this._membership);
     return this._order.length;
   }
 
@@ -311,7 +311,7 @@ export class ReactiveMap {
    * @returns {boolean}
    */
   containsKey(key) {
-    this._ctx.getCell(this._membership);
+    this._ctx.get(this._membership);
     return this._entries.has(key);
   }
 
@@ -381,7 +381,7 @@ export class CellMap extends ReactiveMap {
   set(key, value) {
     const existing = this._entries.get(key);
     if (existing !== undefined) {
-      this._ctx.setCell(existing, value);
+      this._ctx.set(existing, value);
       return;
     }
     this.entryWith(key, () => value);

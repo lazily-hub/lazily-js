@@ -72,7 +72,7 @@ export class AsyncReactiveMap {
     }
     const handle =
       this._kind === EntryKind.Cell
-        ? this._ctx.cell(compute())
+        ? this._ctx.source(compute())
         : this._ctx.computedAsync(async () => compute());
     return this._mutex.runExclusive(() => {
       const existing = this._materialized.get(key);
@@ -108,7 +108,7 @@ export class AsyncReactiveMap {
     if (handle === undefined) {
       return undefined;
     }
-    return this._kind === EntryKind.Cell ? this._ctx.getCell(handle) : this._ctx.get(handle);
+    return this._ctx.get(handle);
   }
 
   /**
@@ -124,7 +124,7 @@ export class AsyncReactiveMap {
     if (handle === undefined) {
       throw new Error(`resolve: key ${String(key)} is absent and no factory was given`);
     }
-    return this._kind === EntryKind.Cell ? this._ctx.getCell(handle) : this._ctx.getAsync(handle);
+    return this._kind === EntryKind.Cell ? this._ctx.get(handle) : this._ctx.getAsync(handle);
   }
 
   /**
@@ -178,7 +178,7 @@ export class AsyncCellMap extends AsyncReactiveMap {
   set(key, value) {
     const existing = this._mutex.runExclusive(() => this._materialized.get(key));
     if (existing !== undefined) {
-      this._ctx.setCell(existing, value);
+      this._ctx.set(existing, value);
       return;
     }
     this.getOrInsertHandle(key, () => value);

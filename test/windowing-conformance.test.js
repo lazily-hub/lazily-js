@@ -18,7 +18,7 @@ function loadFixture(name) {
 }
 
 function observe(ctx, cell) {
-  const obs = ctx.computed(() => ctx.getCell(cell));
+  const obs = ctx.computed(() => ctx.get(cell));
   ctx.get(obs);
   return obs;
 }

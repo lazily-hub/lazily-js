@@ -150,9 +150,16 @@ export interface Context {
   /** @deprecated the eager construction is `computed(f).eager()`. */
   signal<T>(compute: ComputeFn<T>): SignalHandle<T>;
   effect(run: EffectRun): Effect;
-  get<T>(handle: Computed<T>): T;
+  // -- Cell kernel (#lzcellkernel) unified read/write (v2) --
+  /** The unified cell read: a `Source` returns its value, a `Computed` recomputes. */
+  get<T>(handle: Source<T> | Computed<T>): T;
+  /** The unified cell write: only a `Source` is writable (write protection). */
+  set<T>(handle: Source<T>, value: T): void;
+  // -- Deprecated split read/write --
+  /** @deprecated use {@link get} — the unified cell read (#lzcellkernel). */
   getCell<T>(handle: Source<T>): T;
   getSignal<T>(handle: SignalHandle<T>): T;
+  /** @deprecated use {@link set} — the unified cell write (#lzcellkernel). */
   setCell<T>(handle: Source<T>, value: T): void;
   batch(run: () => void): void;
   disposeEffect(handle: Effect): void;

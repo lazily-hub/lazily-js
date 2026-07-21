@@ -66,10 +66,10 @@ export class CircuitBreakerCell {
   constructor(ctx, window, failureThreshold, resetTimeout) {
     this.ctx = ctx;
     this.core = new CircuitBreakerCore(window, failureThreshold, resetTimeout);
-    this.stateCell = ctx.cell(BreakerState.Closed);
+    this.stateCell = ctx.source(BreakerState.Closed);
   }
   #refresh() {
-    this.ctx.setCell(this.stateCell, this.core.state);
+    this.ctx.set(this.stateCell, this.core.state);
   }
   allow(now) {
     const r = this.core.allow(now);
@@ -116,19 +116,19 @@ export class RetryPolicyCell {
   constructor(ctx, base, cap) {
     this.ctx = ctx;
     this.core = new RetryPolicyCore(base, cap);
-    this.delayCell = ctx.cell(0);
+    this.delayCell = ctx.source(0);
   }
   nextDelay() {
     const d = this.core.nextDelay();
-    this.ctx.setCell(this.delayCell, d);
+    this.ctx.set(this.delayCell, d);
     return d;
   }
   reset() {
     this.core.reset();
-    this.ctx.setCell(this.delayCell, 0);
+    this.ctx.set(this.delayCell, 0);
   }
   delay() {
-    return this.ctx.getCell(this.delayCell);
+    return this.ctx.get(this.delayCell);
   }
 }
 
@@ -159,10 +159,10 @@ export class BulkheadCell {
   constructor(ctx, capacity) {
     this.ctx = ctx;
     this.core = new BulkheadCore(capacity);
-    this.inUseCell = ctx.cell(0);
+    this.inUseCell = ctx.source(0);
   }
   #refresh() {
-    this.ctx.setCell(this.inUseCell, this.core.inUse);
+    this.ctx.set(this.inUseCell, this.core.inUse);
   }
   acquire() {
     const r = this.core.acquire();
@@ -174,7 +174,7 @@ export class BulkheadCell {
     this.#refresh();
   }
   permitsInUse() {
-    return this.ctx.getCell(this.inUseCell);
+    return this.ctx.get(this.inUseCell);
   }
 }
 
@@ -211,10 +211,10 @@ export class TimeoutCell {
   constructor(ctx) {
     this.ctx = ctx;
     this.core = new TimeoutCore();
-    this.timedOutCell = ctx.cell(false);
+    this.timedOutCell = ctx.source(false);
   }
   #refresh() {
-    this.ctx.setCell(this.timedOutCell, this.core.isTimedOut());
+    this.ctx.set(this.timedOutCell, this.core.isTimedOut());
   }
   arm(now, timeout) {
     this.core.arm(now, timeout);
@@ -226,6 +226,6 @@ export class TimeoutCell {
     return r;
   }
   isTimedOut() {
-    return this.ctx.getCell(this.timedOutCell);
+    return this.ctx.get(this.timedOutCell);
   }
 }

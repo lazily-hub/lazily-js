@@ -66,21 +66,21 @@ test("in-flight deduplication: concurrent get_async share one compute", async ()
 
 test("depends on a cell; invalidation recomputes lazily", async () => {
   const ctx = new AsyncContext();
-  const n = ctx.cell(2);
-  const doubled = ctx.computedAsync(async (cctx) => cctx.getCell(n) * 2);
+  const n = ctx.source(2);
+  const doubled = ctx.computedAsync(async (cctx) => cctx.get(n) * 2);
   assert.equal(await ctx.getAsync(doubled), 4);
-  ctx.setCell(n, 5);
+  ctx.set(n, 5);
   assert.equal(ctx.slotState(doubled), "empty", "invalidation clears the cache");
   assert.equal(await ctx.getAsync(doubled), 10);
 });
 
 test("stale completion is discarded, never published (stale_completeOk_discarded)", async () => {
   const ctx = new AsyncContext();
-  const n = ctx.cell(1);
+  const n = ctx.source(1);
   const gates = [];
   let calls = 0;
   const s = ctx.computedAsync(async (cctx) => {
-    const v = cctx.getCell(n); // dependency registered BEFORE the await
+    const v = cctx.get(n); // dependency registered BEFORE the await
     calls += 1;
     const g = deferred();
     gates.push(g);
@@ -95,7 +95,7 @@ test("stale completion is discarded, never published (stale_completeOk_discarded
 
   // Invalidate mid-flight: the revision advances and the in-flight compute is
   // superseded.
-  ctx.setCell(n, 2);
+  ctx.set(n, 2);
   assert.equal(ctx.slotState(s), "empty");
   gates[0].resolve(); // the stale (revision-1) compute completes -> discarded
   await flush();
@@ -126,41 +126,41 @@ test("error transitions to Error and get_async rejects; retry recomputes (curren
 
 test("effect runs initially and reruns on dependency change (invalidate_from_idle_schedules)", async () => {
   const ctx = new AsyncContext();
-  const n = ctx.cell(0);
+  const n = ctx.source(0);
   const seen = [];
   ctx.effectAsync(async (cctx) => {
-    seen.push(cctx.getCell(n));
+    seen.push(cctx.get(n));
   });
   await ctx.settle();
   assert.deepEqual(seen, [0]);
-  ctx.setCell(n, 1);
+  ctx.set(n, 1);
   await ctx.settle();
   assert.deepEqual(seen, [0, 1]);
 });
 
 test("cleanup runs before the next body (fire_blocked_during_cleanup / cleanupDone_resumes_deferred)", async () => {
   const ctx = new AsyncContext();
-  const n = ctx.cell(0);
+  const n = ctx.source(0);
   const order = [];
   ctx.effectAsync(async (cctx) => {
-    const v = cctx.getCell(n);
+    const v = cctx.get(n);
     order.push(`body:${v}`);
     return async () => {
       order.push(`cleanup:${v}`);
     };
   });
   await ctx.settle();
-  ctx.setCell(n, 1);
+  ctx.set(n, 1);
   await ctx.settle();
   assert.deepEqual(order, ["body:0", "cleanup:0", "body:1"]);
 });
 
 test("dispose runs the final cleanup and stops reruns (dispose_absorbing / disposed_terminal)", async () => {
   const ctx = new AsyncContext();
-  const n = ctx.cell(0);
+  const n = ctx.source(0);
   const order = [];
   const e = ctx.effectAsync(async (cctx) => {
-    const v = cctx.getCell(n);
+    const v = cctx.get(n);
     order.push(`body:${v}`);
     return () => order.push(`cleanup:${v}`);
   });
@@ -169,7 +169,7 @@ test("dispose runs the final cleanup and stops reruns (dispose_absorbing / dispo
   assert.equal(ctx.isEffectActive(e), false);
   assert.deepEqual(order, ["body:0", "cleanup:0"]);
   // Disposed is terminal: further invalidation does not resurrect the effect.
-  ctx.setCell(n, 1);
+  ctx.set(n, 1);
   await ctx.settle();
   assert.deepEqual(order, ["body:0", "cleanup:0"]);
 });
@@ -178,11 +178,11 @@ test("dispose runs the final cleanup and stops reruns (dispose_absorbing / dispo
 
 test("signal_async eagerly materializes after settle", async () => {
   const ctx = new AsyncContext();
-  const n = ctx.cell(3);
-  const sig = ctx.signalAsync(async (cctx) => cctx.getCell(n) + 1);
+  const n = ctx.source(3);
+  const sig = ctx.signalAsync(async (cctx) => cctx.get(n) + 1);
   await ctx.settle();
   assert.equal(ctx.getSignal(sig), 4);
-  ctx.setCell(n, 10);
+  ctx.set(n, 10);
   await ctx.settle();
   assert.equal(ctx.getSignal(sig), 11);
   assert.equal(await ctx.getSignalAsync(sig), 11);
@@ -195,19 +195,19 @@ test("signal_async eagerly materializes after settle", async () => {
 
 test("batch coalesces multiple cell writes into one rerun", async () => {
   const ctx = new AsyncContext();
-  const a = ctx.cell(1);
-  const b = ctx.cell(1);
+  const a = ctx.source(1);
+  const b = ctx.source(1);
   let runs = 0;
   ctx.effectAsync(async (cctx) => {
-    cctx.getCell(a);
-    cctx.getCell(b);
+    cctx.get(a);
+    cctx.get(b);
     runs += 1;
   });
   await ctx.settle();
   assert.equal(runs, 1);
   ctx.batch(() => {
-    ctx.setCell(a, 2);
-    ctx.setCell(b, 2);
+    ctx.set(a, 2);
+    ctx.set(b, 2);
   });
   await ctx.settle();
   assert.equal(runs, 2, "two writes in a batch trigger a single rerun");
@@ -215,15 +215,15 @@ test("batch coalesces multiple cell writes into one rerun", async () => {
 
 test("batch does not schedule reruns until the outermost batch exits", async () => {
   const ctx = new AsyncContext();
-  const a = ctx.cell(1);
+  const a = ctx.source(1);
   let runs = 0;
   ctx.effectAsync(async (cctx) => {
-    cctx.getCell(a);
+    cctx.get(a);
     runs += 1;
   });
   await ctx.settle();
   ctx.batch(() => {
-    ctx.setCell(a, 2);
+    ctx.set(a, 2);
     // Still inside the batch: no rerun scheduled yet.
     assert.equal(runs, 1);
   });
@@ -235,29 +235,29 @@ test("batch does not schedule reruns until the outermost batch exits", async () 
 
 test("dynamic dependencies are re-discovered each run", async () => {
   const ctx = new AsyncContext();
-  const which = ctx.cell("a");
-  const a = ctx.cell("A");
-  const b = ctx.cell("B");
+  const which = ctx.source("a");
+  const a = ctx.source("A");
+  const b = ctx.source("B");
   const s = ctx.computedAsync(async (cctx) =>
-    cctx.getCell(which) === "a" ? cctx.getCell(a) : cctx.getCell(b),
+    cctx.get(which) === "a" ? cctx.get(a) : cctx.get(b),
   );
   assert.equal(await ctx.getAsync(s), "A");
   // While selecting `a`, changing `b` must not invalidate the slot.
-  ctx.setCell(b, "B2");
+  ctx.set(b, "B2");
   assert.equal(ctx.slotState(s), "resolved", "unrelated dependency did not invalidate");
   // Switch selection; now `b` is a dependency.
-  ctx.setCell(which, "b");
+  ctx.set(which, "b");
   assert.equal(await ctx.getAsync(s), "B2");
-  ctx.setCell(a, "A2");
+  ctx.set(a, "A2");
   assert.equal(ctx.slotState(s), "resolved", "old dependency `a` no longer tracked");
 });
 
 test("context dispose aborts in-flight work and awaits cleanups", async () => {
   const ctx = new AsyncContext();
-  const n = ctx.cell(0);
+  const n = ctx.source(0);
   let cleaned = false;
   ctx.effectAsync(async (cctx) => {
-    cctx.getCell(n);
+    cctx.get(n);
     return () => {
       cleaned = true;
     };

@@ -139,14 +139,14 @@ export class MembershipCell {
   constructor(ctx, config = defaultMembershipConfig) {
     this.ctx = ctx;
     this.core = new MembershipCore(config);
-    this.peerSetCell = ctx.cell([]);
+    this.peerSetCell = ctx.source([]);
   }
   #refresh() {
     const next = this.core.aliveSet();
     // Only write when the set changed, so the reader's PartialEq guard holds even
     // though the array identity differs each call.
-    if (!setEquals(this.ctx.getCell(this.peerSetCell), next)) {
-      this.ctx.setCell(this.peerSetCell, next);
+    if (!setEquals(this.ctx.get(this.peerSetCell), next)) {
+      this.ctx.set(this.peerSetCell, next);
     }
   }
   join(peer, now) {
@@ -170,7 +170,7 @@ export class MembershipCell {
     return ev;
   }
   peerSet() {
-    return this.ctx.getCell(this.peerSetCell);
+    return this.ctx.get(this.peerSetCell);
   }
   state(peer) {
     return this.core.state(peer);

@@ -27,7 +27,7 @@ test("MembershipCell lifecycle", () => {
   };
   const ctx = new Context();
   const m = new MembershipCell(ctx, config);
-  const observed = ctx.computed(() => ctx.getCell(m.peerSetCell));
+  const observed = ctx.computed(() => ctx.get(m.peerSetCell));
   ctx.get(observed);
 
   for (const step of fx.steps) {

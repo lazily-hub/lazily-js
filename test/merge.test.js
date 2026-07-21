@@ -84,12 +84,12 @@ test("idempotency holds exactly when the flag is set: (a⊕b)⊕b == a⊕b", () 
 
 test("Cell ≡ MergeCell(KeepLatest): merge replaces, equal writes no-op", () => {
   const ctx = new Context();
-  const cell = ctx.cell(0);
+  const cell = ctx.source(0);
   const mc = mergeCell(ctx, 0, KeepLatest);
   for (const v of [3, 3, 7, 7, 1]) {
-    ctx.setCell(cell, v);
+    ctx.set(cell, v);
     mc.merge(v);
-    assert.equal(ctx.getCell(cell), mc.get());
+    assert.equal(ctx.get(cell), mc.get());
   }
   assert.equal(mc.get(), 1);
 });
@@ -125,7 +125,7 @@ test("idempotent merge no-ops via the == store-guard (no effect rerun)", () => {
 
 test("asSource adapts a plain cell to the Source shape (merge == replace)", () => {
   const ctx = new Context();
-  const src = asSource(ctx, ctx.cell(0));
+  const src = asSource(ctx, ctx.source(0));
   src.set(1);
   src.merge(2); // KeepLatest replace
   assert.equal(src.get(), 2);

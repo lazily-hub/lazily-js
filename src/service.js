@@ -54,10 +54,10 @@ export class HealthCell {
   constructor(ctx) {
     this.ctx = ctx;
     this.core = new HealthCore();
-    this.healthCell = ctx.cell(Health.Healthy);
+    this.healthCell = ctx.source(Health.Healthy);
   }
   #refresh() {
-    this.ctx.setCell(this.healthCell, this.core.health());
+    this.ctx.set(this.healthCell, this.core.health());
   }
   set(name, up, critical) {
     this.core.set(name, up, critical);
@@ -91,10 +91,10 @@ export class ReadinessCell {
   constructor(ctx) {
     this.ctx = ctx;
     this.core = new ReadinessCore();
-    this.readyCell = ctx.cell(true);
+    this.readyCell = ctx.source(true);
   }
   #refresh() {
-    this.ctx.setCell(this.readyCell, this.core.ready());
+    this.ctx.set(this.readyCell, this.core.ready());
   }
   set(name, ready) {
     this.core.set(name, ready);
@@ -140,12 +140,12 @@ export class DiscoveryCell {
   constructor(ctx) {
     this.ctx = ctx;
     this.core = new DiscoveryCore();
-    this.discoveryCell = ctx.cell({});
+    this.discoveryCell = ctx.source({});
   }
   #refresh() {
     const next = this.core.discovery();
-    if (!objectEquals(this.ctx.getCell(this.discoveryCell), next)) {
-      this.ctx.setCell(this.discoveryCell, next);
+    if (!objectEquals(this.ctx.get(this.discoveryCell), next)) {
+      this.ctx.set(this.discoveryCell, next);
     }
   }
   register(service, endpoint, peer) {
@@ -164,7 +164,7 @@ export class DiscoveryCell {
     return this.core.resolve(service);
   }
   discovery() {
-    return this.ctx.getCell(this.discoveryCell);
+    return this.ctx.get(this.discoveryCell);
   }
 }
 
@@ -208,12 +208,12 @@ export class ServiceRegistry {
   constructor(ctx) {
     this.ctx = ctx;
     this.core = new ServiceRegistryCore();
-    this.projectionCell = ctx.cell({});
+    this.projectionCell = ctx.source({});
   }
   #refresh() {
     const next = this.core.projectionObject();
-    if (!objectEquals(this.ctx.getCell(this.projectionCell), next)) {
-      this.ctx.setCell(this.projectionCell, next);
+    if (!objectEquals(this.ctx.get(this.projectionCell), next)) {
+      this.ctx.set(this.projectionCell, next);
     }
   }
   register(service, endpoint) {
@@ -229,6 +229,6 @@ export class ServiceRegistry {
     this.#refresh();
   }
   projection() {
-    return this.ctx.getCell(this.projectionCell);
+    return this.ctx.get(this.projectionCell);
   }
 }

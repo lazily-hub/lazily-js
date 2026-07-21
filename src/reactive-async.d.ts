@@ -3,7 +3,9 @@ export type AsyncSlotStateView = "none" | "empty" | "computing" | "resolved" | "
 export interface AsyncComputeContext {
   /** Aborts when this run is superseded by a newer revision or disposed. */
   readonly signal: AbortSignal;
-  /** Read a cell, recording it as a dependency (synchronous). */
+  /** Unified cell read (#lzcellkernel), recording it as a dependency (synchronous). */
+  get<T>(handle: AsyncCellHandle<T>): T;
+  /** @deprecated use {@link get} — the unified cell read (#lzcellkernel). */
   getCell<T>(handle: AsyncCellHandle<T>): T;
   /** Await a slot value, recording it as a dependency before awaiting. */
   getAsync<T>(handle: AsyncSlotHandle<T>): Promise<T>;
@@ -39,11 +41,15 @@ export class AsyncSignalHandle<T = unknown> {
 }
 
 export class AsyncContext {
-  /** Create a mutable cell (the synchronous input layer). */
+  /** Create a source cell (the synchronous input layer) (#lzcellkernel). */
+  source<T>(value: T): AsyncCellHandle<T>;
+  /** @deprecated use {@link AsyncContext#source}. */
   cell<T>(value: T): AsyncCellHandle<T>;
-  /** Read a cell value (synchronous). */
+  /** The unified cell write (#lzcellkernel): only a source cell is writable. */
+  set<T>(handle: AsyncCellHandle<T>, value: T): void;
+  /** @deprecated use {@link AsyncContext#get} — the unified cell read (#lzcellkernel). */
   getCell<T>(handle: AsyncCellHandle<T>): T;
-  /** Update a cell and invalidate dependents (synchronous). */
+  /** @deprecated use {@link AsyncContext#set} — the unified cell write (#lzcellkernel). */
   setCell<T>(handle: AsyncCellHandle<T>, value: T): void;
 
   /** Create an async computed slot (no memo guard). */
@@ -55,7 +61,11 @@ export class AsyncContext {
   /** Create an async effect returning an optional (possibly async) cleanup. */
   effectAsync(run: AsyncEffectRun): AsyncEffectHandle;
 
-  /** Synchronous cached read: the resolved value, or `undefined` otherwise. */
+  /**
+   * The unified cell read (#lzcellkernel). A source cell returns its value; a
+   * slot returns its synchronous cached snapshot (resolved value or `undefined`).
+   */
+  get<T>(handle: AsyncCellHandle<T>): T;
   get<T>(handle: AsyncSlotHandle<T>): T | undefined;
   isResolved<T>(handle: AsyncSlotHandle<T>): boolean;
   /** Public projection of the slot state machine. */
@@ -120,6 +130,8 @@ export class AsyncTeardownScope {
   readonly size: number;
   readonly ended: boolean;
   adopt<H extends AsyncNodeHandle>(handle: H): H;
+  source<T>(value: T): AsyncCellHandle<T>;
+  /** @deprecated use {@link AsyncTeardownScope#source}. */
   cell<T>(value: T): AsyncCellHandle<T>;
   computedAsync<T>(compute: AsyncComputeFn<T>): AsyncSlotHandle<T>;
   memoAsync<T>(compute: AsyncComputeFn<T>): AsyncSlotHandle<T>;

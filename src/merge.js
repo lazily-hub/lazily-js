@@ -90,26 +90,26 @@ export class MergeCell {
 
   /** Read the current converged value (tracks a dependency inside a computation). */
   get() {
-    return this.ctx.getCell(this.cell);
+    return this.ctx.get(this.cell);
   }
 
   /** Replace the value outright (the keep-latest write), bypassing the policy. */
   set(value) {
-    this.ctx.setCell(this.cell, value);
+    this.ctx.set(this.cell, value);
   }
 
   /** Fold `op` into the current value under the policy. Routes through `setCell`
    *  so the `==` store-guard (free dedup for idempotent ⊕) + store-without-cascade
    *  apply unchanged. */
   merge(op) {
-    const old = this.ctx.getCell(this.cell);
-    this.ctx.setCell(this.cell, this.policy.merge(old, op));
+    const old = this.ctx.get(this.cell);
+    this.ctx.set(this.cell, this.policy.merge(old, op));
   }
 }
 
 /** Create a `MergeCell` over `ctx` with `initial` value under `policy`. */
 export function mergeCell(ctx, initial, policy) {
-  return new MergeCell(ctx, ctx.cell(initial), policy);
+  return new MergeCell(ctx, ctx.source(initial), policy);
 }
 
 // -- Reactive / Source -------------------------------------------------------
@@ -123,26 +123,18 @@ export function mergeCell(ctx, initial, policy) {
 /** Adapt a plain `CellHandle` to the `Source` shape (get/set/merge). */
 export function asSource(ctx, cellHandle) {
   return {
-    get: () => ctx.getCell(cellHandle),
-    set: (value) => ctx.setCell(cellHandle, value),
+    get: () => ctx.get(cellHandle),
+    set: (value) => ctx.set(cellHandle, value),
     // Cell ≡ MergeCell(KeepLatest): merge replaces.
-    merge: (op) => ctx.setCell(cellHandle, op),
+    merge: (op) => ctx.set(cellHandle, op),
   };
 }
 
 /** Adapt any read handle (Slot/Signal/Cell) to the `Reactive` shape ({ get }). */
 export function asReactive(ctx, handle) {
-  // Cells read via getCell; slots/signals via get/getSignal. Detect by shape.
+  // Signals read via getSignal; every plain cell/slot via the unified `get`
+  // (#lzcellkernel reads both source and computed handles). Detect by shape.
   if (handle instanceof MergeCell) return { get: () => handle.get() };
   if (handle && handle.slot !== undefined) return { get: () => ctx.getSignal(handle) };
-  // Fall back: try getCell then get.
-  return {
-    get: () => {
-      try {
-        return ctx.getCell(handle);
-      } catch {
-        return ctx.get(handle);
-      }
-    },
-  };
+  return { get: () => ctx.get(handle) };
 }

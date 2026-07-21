@@ -155,16 +155,23 @@ export class ThreadSafeContext {
 
   // -- Creation ----------------------------------------------------------
 
+  // #lzcellkernel v2 constructor surface: `source` / `computed`.
+  source(value, policy) {
+    return this.#mutex.runExclusive(() => this.#ctx.source(value, policy));
+  }
+
+  /** @deprecated use {@link ThreadSafeContext#source}. */
   cell(value) {
-    return this.#mutex.runExclusive(() => this.#ctx.cell(value));
+    return this.#mutex.runExclusive(() => this.#ctx.source(value));
   }
 
   computed(compute) {
     return this.#mutex.runExclusive(() => this.#ctx.computed(compute));
   }
 
+  /** @deprecated use {@link ThreadSafeContext#computed} (guarded, the only derived construction). */
   slot(compute) {
-    return this.#mutex.runExclusive(() => this.#ctx.slot(compute));
+    return this.#mutex.runExclusive(() => this.#ctx.computed(compute));
   }
 
   signal(compute) {
@@ -177,12 +184,14 @@ export class ThreadSafeContext {
 
   // -- Reads -------------------------------------------------------------
 
+  // #lzcellkernel unified read: reads both source and computed handles.
   get(handle) {
     return this.#mutex.runExclusive(() => this.#ctx.get(handle));
   }
 
+  /** @deprecated use {@link ThreadSafeContext#get} — the unified cell read (#lzcellkernel). */
   getCell(handle) {
-    return this.#mutex.runExclusive(() => this.#ctx.getCell(handle));
+    return this.#mutex.runExclusive(() => this.#ctx.get(handle));
   }
 
   getSignal(handle) {
@@ -195,8 +204,14 @@ export class ThreadSafeContext {
 
   // -- Writes / batch ----------------------------------------------------
 
+  // #lzcellkernel unified write: only a source cell is writable (write protection).
+  set(handle, value) {
+    return this.#mutex.runExclusive(() => this.#ctx.set(handle, value));
+  }
+
+  /** @deprecated use {@link ThreadSafeContext#set} — the unified cell write (#lzcellkernel). */
   setCell(handle, value) {
-    return this.#mutex.runExclusive(() => this.#ctx.setCell(handle, value));
+    return this.#mutex.runExclusive(() => this.#ctx.set(handle, value));
   }
 
   batch(run) {
@@ -327,8 +342,13 @@ export class ThreadSafeTeardownScope {
     return this.#mutex.runExclusive(() => this.#inner.adopt(handle));
   }
 
+  source(value, policy) {
+    return this.#mutex.runExclusive(() => this.#inner.source(value, policy));
+  }
+
+  /** @deprecated use {@link ThreadSafeTeardownScope#source}. */
   cell(value) {
-    return this.#mutex.runExclusive(() => this.#inner.cell(value));
+    return this.#mutex.runExclusive(() => this.#inner.source(value));
   }
 
   computed(compute) {

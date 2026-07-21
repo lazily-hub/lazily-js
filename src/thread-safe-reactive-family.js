@@ -78,7 +78,7 @@ export class ThreadSafeReactiveMap {
       return warm;
     }
     const handle =
-      this._kind === EntryKind.Cell ? this._ctx.cell(compute()) : this._ctx.computed(() => compute());
+      this._kind === EntryKind.Cell ? this._ctx.source(compute()) : this._ctx.computed(() => compute());
     return this._mutex.runExclusive(() => {
       const existing = this._materialized.get(key);
       if (existing !== undefined) {
@@ -92,7 +92,7 @@ export class ThreadSafeReactiveMap {
 
   /** Read a handle's value through the owning context. */
   _observe(handle) {
-    return this._kind === EntryKind.Cell ? this._ctx.getCell(handle) : this._ctx.get(handle);
+    return this._ctx.get(handle);
   }
 
   /**
@@ -178,7 +178,7 @@ export class ThreadSafeCellMap extends ThreadSafeReactiveMap {
   set(key, value) {
     const existing = this._mutex.runExclusive(() => this._materialized.get(key));
     if (existing !== undefined) {
-      this._ctx.setCell(existing, value);
+      this._ctx.set(existing, value);
       return;
     }
     this.getOrInsertHandle(key, () => value);

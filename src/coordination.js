@@ -63,10 +63,10 @@ export class LeaseCell {
   constructor(ctx) {
     this.ctx = ctx;
     this.core = new LeaseCore();
-    this.holderCell = ctx.cell(null);
+    this.holderCell = ctx.source(null);
   }
   #refresh(now) {
-    this.ctx.setCell(this.holderCell, this.core.holder(now));
+    this.ctx.set(this.holderCell, this.core.holder(now));
   }
   acquire(peer, now, ttl) {
     const r = this.core.acquire(peer, now, ttl);
@@ -114,10 +114,10 @@ export class LeaderCell {
     this.ctx = ctx;
     this.me = me;
     this.core = new LeaseCore();
-    this.currentLeaderCell = ctx.cell(null);
+    this.currentLeaderCell = ctx.source(null);
   }
   #refresh(now) {
-    this.ctx.setCell(this.currentLeaderCell, this.core.holder(now));
+    this.ctx.set(this.currentLeaderCell, this.core.holder(now));
   }
   campaign(now, ttl) {
     this.core.acquire(this.me, now, ttl);
@@ -153,10 +153,10 @@ export class LockCell {
   constructor(ctx) {
     this.ctx = ctx;
     this.core = new LeaseCore();
-    this.isLockedCell = ctx.cell(false);
+    this.isLockedCell = ctx.source(false);
   }
   #refresh(now) {
-    this.ctx.setCell(this.isLockedCell, this.core.isHeld(now));
+    this.ctx.set(this.isLockedCell, this.core.isHeld(now));
   }
   acquire(peer, now, ttl) {
     const r = this.core.acquire(peer, now, ttl);
@@ -214,10 +214,10 @@ export class SemaphoreCell {
   constructor(ctx, capacity) {
     this.ctx = ctx;
     this.core = new SemaphoreCore(capacity);
-    this.permitsAvailableCell = ctx.cell(capacity);
+    this.permitsAvailableCell = ctx.source(capacity);
   }
   #refresh() {
-    this.ctx.setCell(this.permitsAvailableCell, this.core.available());
+    this.ctx.set(this.permitsAvailableCell, this.core.available());
   }
   acquire() {
     const r = this.core.acquire();
@@ -229,7 +229,7 @@ export class SemaphoreCell {
     this.#refresh();
   }
   permitsAvailable() {
-    return this.ctx.getCell(this.permitsAvailableCell);
+    return this.ctx.get(this.permitsAvailableCell);
   }
 }
 
@@ -260,14 +260,14 @@ export class BarrierCell {
   constructor(ctx, required) {
     this.ctx = ctx;
     this.core = new BarrierCore(required);
-    this.isOpenCell = ctx.cell(this.core.isOpen());
+    this.isOpenCell = ctx.source(this.core.isOpen());
   }
   /** A quorum gate: opens at strict majority of `total`. */
   static quorum(ctx, total) {
     return new BarrierCell(ctx, Math.floor(total / 2) + 1);
   }
   #refresh() {
-    this.ctx.setCell(this.isOpenCell, this.core.isOpen());
+    this.ctx.set(this.isOpenCell, this.core.isOpen());
   }
   arrive(peer) {
     const r = this.core.arrive(peer);
@@ -278,6 +278,6 @@ export class BarrierCell {
     return this.core.count();
   }
   isOpen() {
-    return this.ctx.getCell(this.isOpenCell);
+    return this.ctx.get(this.isOpenCell);
   }
 }

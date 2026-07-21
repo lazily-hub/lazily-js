@@ -210,10 +210,16 @@ export class AsyncContext {
 
   // -- Creation ----------------------------------------------------------
 
-  cell(value) {
+  // #lzcellkernel v2 constructor: `source` is the canonical source-cell name.
+  source(value) {
     const id = this.#allocId();
     this.#nodes[id] = new AsyncCellNode(value);
     return new AsyncCellHandle(id);
+  }
+
+  /** @deprecated use {@link AsyncContext#source}. */
+  cell(value) {
+    return this.source(value);
   }
 
   computedAsync(compute) {
@@ -250,6 +256,7 @@ export class AsyncContext {
 
   // -- Cells (synchronous input layer) -----------------------------------
 
+  /** @deprecated use {@link AsyncContext#get} — the unified cell read (#lzcellkernel). */
   getCell(handle) {
     const node = this.#nodes[handle.id];
     if (node === undefined) {
@@ -261,6 +268,15 @@ export class AsyncContext {
     return node.value;
   }
 
+  /**
+   * The unified cell write of the Cell kernel (#lzcellkernel). Only a source
+   * cell is writable (write protection); a computed/slot handle throws.
+   */
+  set(handle, value) {
+    return this.setCell(handle, value);
+  }
+
+  /** @deprecated use {@link AsyncContext#set} — the unified cell write (#lzcellkernel). */
   setCell(handle, value) {
     const node = this.#nodes[handle.id];
     // A write that silently vanishes is the same failure mode as a read that
@@ -284,9 +300,22 @@ export class AsyncContext {
 
   // -- Slot reads --------------------------------------------------------
 
-  /** Synchronous snapshot: the resolved value, or `undefined` if not resolved. */
+  /**
+   * The unified cell read of the Cell kernel (#lzcellkernel). A source cell
+   * returns its stored value; a computed/slot returns its synchronous snapshot
+   * (the resolved value, or `undefined` if not resolved). Supersedes the
+   * deprecated {@link AsyncContext#getCell}.
+   */
   get(handle) {
     const node = this.#nodes[handle.id];
+    // A read of a disposed/absent node errors (mirrors the deprecated `getCell`
+    // and the synchronous unified `get`), so read-after-dispose is observable.
+    if (node === undefined) {
+      throw new DisposedNodeError(handle.id);
+    }
+    if (node instanceof AsyncCellNode) {
+      return node.value;
+    }
     if (node instanceof AsyncSlotNode && node.state === "resolved") {
       return node.value;
     }
@@ -668,6 +697,13 @@ export class AsyncContext {
     const self = this;
     return {
       signal,
+      // Unified cell read inside an async compute (#lzcellkernel): tracks the
+      // dependency, then reads the source value / slot snapshot.
+      get(handle) {
+        self.#registerDependency(handle.id, ownerId);
+        return self.get(handle);
+      },
+      /** @deprecated use `get` — the unified cell read (#lzcellkernel). */
       getCell(handle) {
         self.#registerDependency(handle.id, ownerId);
         return self.getCell(handle);
@@ -951,9 +987,14 @@ export class AsyncTeardownScope {
     return handle;
   }
 
-  /** Create a source cell owned by this scope. */
+  /** Create a source cell owned by this scope (#lzcellkernel). */
+  source(value) {
+    return this.adopt(this.#ctx.source(value));
+  }
+
+  /** @deprecated use {@link AsyncTeardownScope#source}. */
   cell(value) {
-    return this.adopt(this.#ctx.cell(value));
+    return this.adopt(this.#ctx.source(value));
   }
 
   /** Create an async computed slot owned by this scope. */

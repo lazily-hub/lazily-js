@@ -81,7 +81,7 @@ test("Lean send_preserves_chart: send never changes the transition function", ()
 test("reading state reactively invalidates a dependent slot on transition", () => {
   const ctx = new Context();
   const m = new StateMachine(ctx, "Red", traffic);
-  const stateView = ctx.slot(() => `state is ${m.state}`);
+  const stateView = ctx.computed(() => `state is ${m.state}`);
   assert.equal(ctx.get(stateView), "state is Red");
   m.send("advance");
   assert.equal(ctx.get(stateView), "state is Green"); // recomputed

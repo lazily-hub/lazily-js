@@ -62,10 +62,10 @@ import { ThreadSafeContext } from "../src/thread-safe.js";
 
 test("semantic 2 [Context]: an effect reached by a scope teardown is never scheduled", () => {
   const ctx = createContext();
-  const source = ctx.cell(1);
+  const source = ctx.source(1);
 
   const scope = ctx.scope();
-  const mid = scope.computed(() => ctx.getCell(source) + 10);
+  const mid = scope.computed(() => ctx.get(source) + 10);
 
   // The watcher lives OUTSIDE the scope and reads INTO it, so ending the scope
   // reaches it through the cascade rather than by disposing it directly.
@@ -102,10 +102,10 @@ test("semantic 2 [Context]: an effect reached by a scope teardown is never sched
 
 test("semantic 2 [AsyncContext]: an effect reached by a scope teardown is never scheduled", async () => {
   const ctx = new AsyncContext();
-  const source = ctx.cell(1);
+  const source = ctx.source(1);
 
   const scope = ctx.scope();
-  const mid = scope.memoAsync(async (cc) => cc.getCell(source) + 10);
+  const mid = scope.memoAsync(async (cc) => cc.get(source) + 10);
 
   let runs = 0;
   ctx.effectAsync(async (cc) => {
@@ -136,8 +136,8 @@ test("semantic 2 [AsyncContext]: an effect reached by a scope teardown is never 
 
 test("semantic 2 [Context]: a direct disposeSlot does not schedule either", () => {
   const ctx = createContext();
-  const source = ctx.cell(1);
-  const mid = ctx.computed(() => ctx.getCell(source) + 10);
+  const source = ctx.source(1);
+  const mid = ctx.computed(() => ctx.get(source) + 10);
 
   let runs = 0;
   ctx.effect(() => {
@@ -174,20 +174,20 @@ test("semantic 2 [Context]: a direct disposeSlot does not schedule either", () =
 
 test("semantic 3 [Context]: scope teardown runs cleanups in reverse creation order", () => {
   const ctx = createContext();
-  const source = ctx.cell(1);
+  const source = ctx.source(1);
   const order = [];
 
   const scope = ctx.scope();
   scope.effect(() => {
-    ctx.getCell(source);
+    ctx.get(source);
     return () => order.push("first");
   });
   scope.effect(() => {
-    ctx.getCell(source);
+    ctx.get(source);
     return () => order.push("second");
   });
   scope.effect(() => {
-    ctx.getCell(source);
+    ctx.get(source);
     return () => order.push("third");
   });
 
@@ -201,13 +201,13 @@ test("semantic 3 [Context]: scope teardown runs cleanups in reverse creation ord
 
 test("semantic 3 [AsyncContext]: scope teardown runs cleanups in reverse creation order", async () => {
   const ctx = new AsyncContext();
-  const source = ctx.cell(1);
+  const source = ctx.source(1);
   const order = [];
 
   const scope = ctx.scope();
   for (const name of ["first", "second", "third"]) {
     scope.effectAsync(async (cc) => {
-      cc.getCell(source);
+      cc.get(source);
       return () => order.push(name);
     });
     // Serialize registration so creation order is unambiguous; the async run
@@ -222,15 +222,15 @@ test("semantic 3 [AsyncContext]: scope teardown runs cleanups in reverse creatio
 
 test("semantic 3 [Context]: reverse order holds for a mixed slot/effect scope", () => {
   const ctx = createContext();
-  const source = ctx.cell(1);
+  const source = ctx.source(1);
   const order = [];
 
   const scope = ctx.scope();
   scope.effect(() => {
-    ctx.getCell(source);
+    ctx.get(source);
     return () => order.push("outer");
   });
-  const mid = scope.computed(() => ctx.getCell(source) + 1);
+  const mid = scope.computed(() => ctx.get(source) + 1);
   scope.effect(() => {
     // Reads a scope sibling, so a FORWARD teardown would tear `mid` out from
     // under this effect's cleanup while it is still registered.
@@ -309,11 +309,11 @@ test("scope: Symbol.dispose ends the scope (TC39 explicit resource management)",
 
 test("scope: disarm disposes nothing and leaves every edge intact", () => {
   const ctx = createContext();
-  const source = ctx.cell(1);
+  const source = ctx.source(1);
   let cleanups = 0;
 
   const scope = ctx.scope();
-  const escaped = scope.computed(() => ctx.getCell(source) + 1);
+  const escaped = scope.computed(() => ctx.get(source) + 1);
   scope.effect(() => {
     ctx.get(escaped);
     return () => {
@@ -334,30 +334,30 @@ test("scope: disarm disposes nothing and leaves every edge intact", () => {
 
 test("scope: adopt takes ownership of an externally built node", () => {
   const ctx = createContext();
-  const outside = ctx.cell(1);
+  const outside = ctx.source(1);
   const scope = ctx.scope();
   scope.adopt(outside);
   assert.equal(scope.size, 1);
   scope.end();
-  assert.throws(() => ctx.getCell(outside), DisposedNodeError);
+  assert.throws(() => ctx.get(outside), DisposedNodeError);
 });
 
 test("scope: adopting into an already-ended scope is a no-op, not an immediate dispose", () => {
   const ctx = createContext();
   const scope = ctx.scope();
   scope.end();
-  const late = ctx.cell(7);
+  const late = ctx.source(7);
   scope.adopt(late);
   assert.equal(scope.size, 0);
-  assert.equal(ctx.getCell(late), 7, "the scope's moment had passed");
+  assert.equal(ctx.get(late), 7, "the scope's moment had passed");
 });
 
 test("scope [AsyncContext]: the async scope has the same shape", async () => {
   const ctx = new AsyncContext();
   const scope = ctx.scope();
   assert.ok(scope instanceof AsyncTeardownScope);
-  const source = scope.cell(3);
-  const derived = scope.memoAsync(async (cc) => cc.getCell(source) + 1);
+  const source = scope.source(3);
+  const derived = scope.memoAsync(async (cc) => cc.get(source) + 1);
   assert.equal(await ctx.getAsync(derived), 4);
   assert.equal(scope.size, 2);
 
@@ -369,10 +369,10 @@ test("scope [AsyncContext]: the async scope has the same shape", async () => {
 
 test("scope [ThreadSafeContext]: scope operations forward through the mutex", () => {
   const ctx = new ThreadSafeContext();
-  const source = ctx.cell(1);
+  const source = ctx.source(1);
   let cleanups = 0;
   ctx.withScope((scope) => {
-    const mid = scope.computed(() => ctx.getCell(source) + 1);
+    const mid = scope.computed(() => ctx.get(source) + 1);
     scope.effect(() => {
       ctx.get(mid);
       return () => {
@@ -392,11 +392,11 @@ test("scope [ThreadSafeContext]: scope operations forward through the mutex", ()
 
 test("degrees: counts track live edges in both directions, and disposal returns them to baseline", () => {
   const ctx = createContext();
-  const source = ctx.cell(1);
+  const source = ctx.source(1);
   assert.equal(ctx.dependentCount(source), 0);
   assert.equal(ctx.dependencyCount(source), 0, "a cell is a pure source");
 
-  const mid = ctx.computed(() => ctx.getCell(source) + 1);
+  const mid = ctx.computed(() => ctx.get(source) + 1);
   const sink = ctx.computed(() => ctx.get(mid) + 1);
   assert.equal(ctx.get(sink), 3);
 
@@ -416,13 +416,13 @@ test("degrees: counts track live edges in both directions, and disposal returns 
 
 test("degrees: a subscribe/unsubscribe cycle leaves the source's dependent count unchanged", () => {
   const ctx = createContext();
-  const source = ctx.cell(0);
+  const source = ctx.source(0);
   const baseline = ctx.dependentCount(source);
 
   for (let i = 0; i < 200; i++) {
     ctx.withScope((scope) => {
       scope.effect(() => {
-        ctx.getCell(source);
+        ctx.get(source);
         return null;
       });
       assert.equal(ctx.dependentCount(source), baseline + 1, "one live subscriber");
@@ -439,8 +439,8 @@ test("degrees: a subscribe/unsubscribe cycle leaves the source's dependent count
 
 test("degrees: a signal handle resolves to its backing slot", () => {
   const ctx = createContext();
-  const source = ctx.cell(1);
-  const sig = ctx.signal(() => ctx.getCell(source) + 1);
+  const source = ctx.source(1);
+  const sig = ctx.signal(() => ctx.get(source) + 1);
   assert.equal(ctx.getSignal(sig), 2);
   // The signal's memo slot reads the cell, and its puller effect reads the slot.
   assert.equal(ctx.dependencyCount(sig), 1, "the backing slot's forward degree");
@@ -454,8 +454,8 @@ test("degrees: a signal handle resolves to its backing slot", () => {
 
 test("disposal: reads and writes after dispose raise DisposedNodeError, and dispose is idempotent", () => {
   const ctx = createContext();
-  const source = ctx.cell(1);
-  const derived = ctx.computed(() => ctx.getCell(source) + 1);
+  const source = ctx.source(1);
+  const derived = ctx.computed(() => ctx.get(source) + 1);
   assert.equal(ctx.get(derived), 2);
 
   ctx.disposeNode(derived);
@@ -463,13 +463,13 @@ test("disposal: reads and writes after dispose raise DisposedNodeError, and disp
   ctx.disposeNode(derived); // idempotent
 
   ctx.disposeNode(source);
-  assert.throws(() => ctx.getCell(source), DisposedNodeError);
-  assert.throws(() => ctx.setCell(source, 9), DisposedNodeError);
+  assert.throws(() => ctx.get(source), DisposedNodeError);
+  assert.throws(() => ctx.set(source, 9), DisposedNodeError);
 });
 
 test("disposal: disposeNode dispatches on the handle's class, so a stale handle cannot tear down its id's successor", () => {
   const ctx = createContext();
-  const sentinel = ctx.cell(99);
+  const sentinel = ctx.source(99);
   ctx.disposeNode(sentinel);
 
   // Ids are recycled, so the successor very likely occupies the sentinel's id.
@@ -484,8 +484,8 @@ test("disposal: disposeNode dispatches on the handle's class, so a stale handle 
 
 test("disposal: a reader that hits a disposed node leaves no dangling upstream edge", () => {
   const ctx = createContext();
-  const source = ctx.cell(1);
-  const mid = ctx.computed(() => ctx.getCell(source) + 1);
+  const source = ctx.source(1);
+  const mid = ctx.computed(() => ctx.get(source) + 1);
   const reader = ctx.computed(() => ctx.get(mid) + 1);
   assert.equal(ctx.get(reader), 3);
   assert.equal(ctx.dependencyCount(reader), 1);
@@ -501,8 +501,8 @@ test("disposal: a reader that hits a disposed node leaves no dangling upstream e
 
 test("disposal [AsyncContext]: a reader that hits a disposed node leaves no dangling upstream edge", async () => {
   const ctx = new AsyncContext();
-  const source = ctx.cell(1);
-  const mid = ctx.memoAsync(async (cc) => cc.getCell(source) + 1);
+  const source = ctx.source(1);
+  const mid = ctx.memoAsync(async (cc) => cc.get(source) + 1);
   const reader = ctx.memoAsync(async (cc) => (await cc.getAsync(mid)) + 1);
   assert.equal(await ctx.getAsync(reader), 3);
   assert.equal(ctx.dependencyCount(reader), 1);

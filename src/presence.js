@@ -42,10 +42,10 @@ export class EphemeralCell {
     this.plane = Plane.Ephemeral;
     this.ctx = ctx;
     this.core = new EphemeralCore();
-    this.valueCell = ctx.cell(null);
+    this.valueCell = ctx.source(null);
   }
   #refresh() {
-    this.ctx.setCell(this.valueCell, this.core.value());
+    this.ctx.set(this.valueCell, this.core.value());
   }
   set(value, now, ttl) {
     this.core.set(value, now, ttl);
@@ -56,7 +56,7 @@ export class EphemeralCell {
     this.#refresh();
   }
   value() {
-    return this.ctx.getCell(this.valueCell);
+    return this.ctx.get(this.valueCell);
   }
 }
 
@@ -114,16 +114,16 @@ class EphemeralMapCell {
     this.ctx = ctx;
     this.ttl = ttl;
     this.core = new EphemeralMapCore();
-    this.presentCell = ctx.cell({});
+    this.presentCell = ctx.source({});
   }
   _refresh(now) {
     const next = this.core.present(now);
-    if (!mapEquals(this.ctx.getCell(this.presentCell), next)) {
-      this.ctx.setCell(this.presentCell, next);
+    if (!mapEquals(this.ctx.get(this.presentCell), next)) {
+      this.ctx.set(this.presentCell, next);
     }
   }
   present() {
-    return this.ctx.getCell(this.presentCell);
+    return this.ctx.get(this.presentCell);
   }
   get(peer, now) {
     return this.core.get(peer, now);

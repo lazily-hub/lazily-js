@@ -195,7 +195,7 @@ function makeSyncLikeModel(name, makeContext) {
 
       const readId = (id) => {
         const handle = handles.get(id);
-        if (handle instanceof Source) return ctx.getCell(handle);
+        if (handle instanceof Source) return ctx.get(handle);
         if (handle instanceof SignalHandle) return ctx.getSignal(handle);
         return ctx.get(handle);
       };
@@ -205,7 +205,7 @@ function makeSyncLikeModel(name, makeContext) {
         cleanupLog,
         async cell(id, value, scopeName) {
           const handle =
-            scopeName == null ? ctx.cell(value) : scopes.get(scopeName).cell(value);
+            scopeName == null ? ctx.source(value) : scopes.get(scopeName).source(value);
           handles.set(id, handle);
         },
         async computed(id, reads, offset, scopeName) {
@@ -231,7 +231,7 @@ function makeSyncLikeModel(name, makeContext) {
         },
         async batch(writes) {
           ctx.batch(() => {
-            for (const w of writes) ctx.setCell(handles.get(w.id), w.value);
+            for (const w of writes) ctx.set(handles.get(w.id), w.value);
           });
         },
         computesOf: (id) => computes.of(id),
@@ -258,7 +258,7 @@ function makeSyncLikeModel(name, makeContext) {
           return readId(id);
         },
         async setCell(id, value) {
-          ctx.setCell(handles.get(id), value);
+          ctx.set(handles.get(id), value);
         },
         async dispose(id) {
           ctx.disposeNode(handles.get(id));
@@ -325,14 +325,14 @@ export const asyncModel = {
     // register the dependency edge before the value is produced.
     const readDep = async (cc, id) => {
       const handle = handles.get(id);
-      if (handle instanceof AsyncCellHandle) return cc.getCell(handle);
+      if (handle instanceof AsyncCellHandle) return cc.get(handle);
       if (handle instanceof AsyncSignalHandle) return await cc.getAsync(handle.slot);
       return await cc.getAsync(handle);
     };
 
     const readId = async (id) => {
       const handle = handles.get(id);
-      if (handle instanceof AsyncCellHandle) return ctx.getCell(handle);
+      if (handle instanceof AsyncCellHandle) return ctx.get(handle);
       if (handle instanceof AsyncSignalHandle) return await ctx.getSignalAsync(handle);
       return await ctx.getAsync(handle);
     };
@@ -342,7 +342,7 @@ export const asyncModel = {
       cleanupLog,
       async cell(id, value, scopeName) {
         const handle =
-          scopeName == null ? ctx.cell(value) : scopes.get(scopeName).cell(value);
+          scopeName == null ? ctx.source(value) : scopes.get(scopeName).source(value);
         handles.set(id, handle);
       },
       async computed(id, reads, offset, scopeName) {
@@ -382,7 +382,7 @@ export const asyncModel = {
       // comes from the scheduler rather than from `batch` itself.
       async batch(writes) {
         ctx.batch(() => {
-          for (const w of writes) ctx.setCell(handles.get(w.id), w.value);
+          for (const w of writes) ctx.set(handles.get(w.id), w.value);
         });
       },
       computesOf: (id) => computes.of(id),
@@ -406,7 +406,7 @@ export const asyncModel = {
         return readId(id);
       },
       async setCell(id, value) {
-        ctx.setCell(handles.get(id), value);
+        ctx.set(handles.get(id), value);
       },
       async dispose(id) {
         await ctx.disposeNode(handles.get(id));

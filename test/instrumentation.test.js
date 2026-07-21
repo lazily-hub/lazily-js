@@ -46,17 +46,17 @@ test("runBenchmarkSuite returns one result per reactive-core case", () => {
 test("Context instrumentation is off by default (zero overhead)", () => {
   const ctx = new Context();
   assert.equal(ctx.instrumentationSnapshot(), null);
-  const c = ctx.cell(1);
-  ctx.getCell(c);
+  const c = ctx.source(1);
+  ctx.get(c);
   assert.equal(ctx.instrumentationSnapshot(), null);
 });
 
 test("instrumented Context accumulates the JS-meaningful counter subset", () => {
   const ctx = new Context({ instrument: true });
-  const c = ctx.cell(1);
-  const d = ctx.computed(() => ctx.getCell(c) * 2);
+  const c = ctx.source(1);
+  const d = ctx.computed(() => ctx.get(c) * 2);
   assert.equal(ctx.get(d), 2); // recompute #1, edge added
-  ctx.setCell(c, 5); // edge removed on invalidation cascade
+  ctx.set(c, 5); // edge removed on invalidation cascade
   assert.equal(ctx.get(d), 10); // recompute #2
 
   const snap = ctx.instrumentationSnapshot();
@@ -67,7 +67,7 @@ test("instrumented Context accumulates the JS-meaningful counter subset", () => 
 
 test("resetInstrumentation zeroes the counters", () => {
   const ctx = new Context({ instrument: true });
-  ctx.cell(0);
+  ctx.source(0);
   assert.ok(ctx.instrumentationSnapshot().nodeAllocations > 0);
   ctx.resetInstrumentation();
   const snap = ctx.instrumentationSnapshot();
@@ -77,8 +77,8 @@ test("resetInstrumentation zeroes the counters", () => {
 
 test("withInstrumentation returns both the body result and a counter snapshot", () => {
   const { result, snapshot } = withInstrumentation((ctx) => {
-    const c = ctx.cell(3);
-    const d = ctx.computed(() => ctx.getCell(c) + 1);
+    const c = ctx.source(3);
+    const d = ctx.computed(() => ctx.get(c) + 1);
     return ctx.get(d);
   });
   assert.equal(result, 4);

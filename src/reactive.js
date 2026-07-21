@@ -142,8 +142,8 @@ export class DisposedNodeError extends Error {
 // the compile guarantee to a runtime panic, and JS simply has neither. Handles
 // created through a context carry a non-enumerable back-reference so the
 // instance methods can delegate to the closure API; handles built directly
-// (`new Source(id)`) carry none and are used through the functional
-// `ctx.get(handle)` / `ctx.setCell(handle, v)` surface.
+// (`new Source(id)`) carry none and are used through the functional unified
+// `ctx.get(handle)` / `ctx.set(handle, v)` surface (#lzcellkernel).
 
 class Cell {
   /** @internal */ constructor(id, ctx) {
@@ -174,11 +174,11 @@ export class Source extends Cell {
   }
   /** Read the current value (tracks a dependency inside a computation). */
   get() {
-    return this._ctx.getCell(this);
+    return this._ctx.get(this);
   }
   /** Replace the value outright (the keep-latest write). */
   set(value) {
-    this._ctx.setCell(this, value);
+    this._ctx.set(this, value);
   }
   /**
    * Fold `op` into the current value under this cell's policy. With no policy
@@ -188,9 +188,9 @@ export class Source extends Cell {
   merge(op) {
     const policy = this.policy;
     if (policy) {
-      this._ctx.setCell(this, policy.merge(this._ctx.getCell(this), op));
+      this._ctx.set(this, policy.merge(this._ctx.get(this), op));
     } else {
-      this._ctx.setCell(this, op);
+      this._ctx.set(this, op);
     }
   }
 }
@@ -606,10 +606,21 @@ function createContext(opts = {}) {
 
   // -- Read --------------------------------------------------------------
 
+  /**
+   * The unified cell read of the Cell kernel (#lzcellkernel). Reads BOTH a
+   * `Source` cell (returns its stored value) and a `Computed` cell (recomputes
+   * if necessary). Supersedes the deprecated {@link getCell}; dispatches on the
+   * node kind so a single call site works for either handle.
+   */
   function get(handle) {
-    return getSlotAny(handle.id);
+    const id = handle.id;
+    if (kinds[id] === KIND_CELL) {
+      return getCellAny(id);
+    }
+    return getSlotAny(id);
   }
 
+  /** @deprecated use {@link get} — the unified cell read (#lzcellkernel). */
   function getCell(handle) {
     return getCellAny(handle.id);
   }
@@ -661,6 +672,27 @@ function createContext(opts = {}) {
 
   // -- Write -------------------------------------------------------------
 
+  /**
+   * The unified cell write of the Cell kernel (#lzcellkernel). Writes a value
+   * to a `Source` cell, superseding the deprecated {@link setCell}. Only a
+   * `Source` handle is writable — passing a `Computed` (or any non-source)
+   * handle throws (write protection, design §3), mirroring lazily-rs where only
+   * `Source` implements `Write`.
+   */
+  function set(handle, value) {
+    const id = handle.id;
+    if (kinds[id] === KIND_NONE) {
+      throw new DisposedNodeError(id);
+    }
+    if (kinds[id] !== KIND_CELL) {
+      throw new Error(
+        `set on a non-source handle (id ${id}); writes require a Source cell`,
+      );
+    }
+    setCellAny(id, value);
+  }
+
+  /** @deprecated use {@link set} — the unified cell write (#lzcellkernel). */
   function setCell(handle, value) {
     setCellAny(handle.id, value);
   }
@@ -1440,7 +1472,10 @@ function createContext(opts = {}) {
     slot,
     signal,
     effect,
+    // #lzcellkernel unified read/write (v2): read both handle kinds; write source-only
     get,
+    set,
+    // deprecated split read/write (kept for the internal/test surface)
     getCell,
     getSignal,
     setCell,

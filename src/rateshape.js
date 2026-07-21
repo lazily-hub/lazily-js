@@ -46,18 +46,18 @@ export class DebounceCell {
   constructor(ctx, quiet) {
     this.ctx = ctx;
     this.core = new DebounceCore(quiet);
-    this.outputCell = ctx.cell(null);
+    this.outputCell = ctx.source(null);
   }
   input(now, v) {
     this.core.input(now, v);
   }
   tick(now) {
     const emitted = this.core.tick(now);
-    if (emitted !== null) this.ctx.setCell(this.outputCell, emitted);
+    if (emitted !== null) this.ctx.set(this.outputCell, emitted);
     return emitted;
   }
   output() {
-    return this.ctx.getCell(this.outputCell);
+    return this.ctx.get(this.outputCell);
   }
 }
 
@@ -108,20 +108,20 @@ export class ThrottleCell {
   constructor(ctx, edge, window) {
     this.ctx = ctx;
     this.core = new ThrottleCore(edge, window);
-    this.outputCell = ctx.cell(null);
+    this.outputCell = ctx.source(null);
   }
   input(now, v) {
     const emitted = this.core.input(now, v);
-    if (emitted !== null) this.ctx.setCell(this.outputCell, emitted);
+    if (emitted !== null) this.ctx.set(this.outputCell, emitted);
     return emitted;
   }
   tick(now) {
     const emitted = this.core.tick(now);
-    if (emitted !== null) this.ctx.setCell(this.outputCell, emitted);
+    if (emitted !== null) this.ctx.set(this.outputCell, emitted);
     return emitted;
   }
   output() {
-    return this.ctx.getCell(this.outputCell);
+    return this.ctx.get(this.outputCell);
   }
 }
 
@@ -167,20 +167,20 @@ export class SampleCell {
   constructor(ctx, mode) {
     this.ctx = ctx;
     this.core = new SampleCore(mode);
-    this.outputCell = ctx.cell(null);
+    this.outputCell = ctx.source(null);
   }
   input(v) {
     const emitted = this.core.input(v);
-    if (emitted !== null) this.ctx.setCell(this.outputCell, emitted);
+    if (emitted !== null) this.ctx.set(this.outputCell, emitted);
     return emitted;
   }
   tick(now) {
     const emitted = this.core.tick(now);
-    if (emitted !== null) this.ctx.setCell(this.outputCell, emitted);
+    if (emitted !== null) this.ctx.set(this.outputCell, emitted);
     return emitted;
   }
   output() {
-    return this.ctx.getCell(this.outputCell);
+    return this.ctx.get(this.outputCell);
   }
 }
 
@@ -220,19 +220,19 @@ export class ProbabilisticSampleCell {
     this.ctx = ctx;
     this.core = new ProbabilisticSampleCore(rate);
     this.rng = rng;
-    this.outputCell = ctx.cell(null);
+    this.outputCell = ctx.source(null);
   }
   input(v) {
     return this.inputWithDraw(v, this.rng.nextDouble());
   }
   inputWithDraw(v, draw) {
     if (this.core.decide(draw)) {
-      this.ctx.setCell(this.outputCell, v);
+      this.ctx.set(this.outputCell, v);
       return v;
     }
     return null;
   }
   output() {
-    return this.ctx.getCell(this.outputCell);
+    return this.ctx.get(this.outputCell);
   }
 }
