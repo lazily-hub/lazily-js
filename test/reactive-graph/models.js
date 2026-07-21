@@ -48,11 +48,11 @@
 // down -- so the kind comes from the class of the handle the model recorded,
 // which is also how `Context.disposeNode` dispatches.
 import {
-  CellHandle,
+  Source,
   DisposedNodeError,
-  EffectHandle,
+  Effect,
   SignalHandle,
-  SlotHandle,
+  Computed,
   createContext,
 } from "../../src/reactive.js";
 import {
@@ -117,9 +117,9 @@ function sumOffset(values, offset) {
 
 /** The kind of a node as the corpus names them, read from the handle's class. */
 function kindOfHandle(handle) {
-  if (handle instanceof CellHandle || handle instanceof AsyncCellHandle) return "cell";
-  if (handle instanceof EffectHandle || handle instanceof AsyncEffectHandle) return "effect";
-  if (handle instanceof SlotHandle || handle instanceof AsyncSlotHandle) return "slot";
+  if (handle instanceof Source || handle instanceof AsyncCellHandle) return "cell";
+  if (handle instanceof Effect || handle instanceof AsyncEffectHandle) return "effect";
+  if (handle instanceof Computed || handle instanceof AsyncSlotHandle) return "slot";
   if (handle instanceof SignalHandle || handle instanceof AsyncSignalHandle) return "signal";
   throw new Error("unrecognised handle class");
 }
@@ -195,7 +195,7 @@ function makeSyncLikeModel(name, makeContext) {
 
       const readId = (id) => {
         const handle = handles.get(id);
-        if (handle instanceof CellHandle) return ctx.getCell(handle);
+        if (handle instanceof Source) return ctx.getCell(handle);
         if (handle instanceof SignalHandle) return ctx.getSignal(handle);
         return ctx.get(handle);
       };

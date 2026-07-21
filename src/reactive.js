@@ -1,30 +1,31 @@
 // Reactive dependency graph (lazily-spec/docs/reactive-graph.md) — the native
 // JavaScript counterpart of lazily-kt's `Context` and lazily-rs's `Context`.
 //
-// The reactive family is the Cell kernel (#lzcellkernel): the genus `Cell` over
-// two value kinds — `SourceCell` (a value written from outside; `source`) and
-// `FormulaCell` (a value computed from upstream; `formula`, guarded by default)
-// — plus `Effect` (a value-less side-effecting sink). Reading a cell inside a
-// computation auto-registers a dependency edge; writing a source invalidates
-// dependents. See tasks/software/lazily-cell-kernel-design.md.
+// The reactive family is the Cell kernel (#lzcellkernel), naming v2: `Cell` is
+// the value-node CONCEPT over two value kinds — `Source` (a value written from
+// outside; `source`) and `Computed` (a value computed from upstream; `computed`,
+// always guarded) — plus `Effect` (a value-less side-effecting sink). Reading a
+// cell inside a computation auto-registers a dependency edge; writing a source
+// invalidates dependents. See tasks/software/lazily-cell-kernel-design.md +
+// naming-spec-v2.
 //
-// - Lazy formulas mark dirty on invalidation and recompute on the next read
-//   (pull-based, glitch-free: a formula always observes consistent inputs).
+// - Lazy computeds mark dirty on invalidation and recompute on the next read
+//   (pull-based, glitch-free: a computed always observes consistent inputs).
 // - Source cells use a `==` (PartialEq) guard: setting an equal value is a no-op.
-// - A guarded `formula` adds a `==` guard so an equal recompute suppresses
-//   downstream.
-// - Eager = a DRIVEN formula (`formula(f).drive()`): a puller effect keeps it
-//   materialized by the time the invalidating `set`/`batch` returns. Drivenness
-//   is graph state (the F_DRIVEN bit + `drivenBy` side table), not a kind, so
-//   the former `Signal` is retired and the #lzsignaleager puller bug cannot be
+// - Every `computed` is guarded: a `==` guard so an equal recompute suppresses
+//   downstream (matches TC39 `Signal.Computed`). There is no unguarded mode.
+// - Eager = an EAGER computed (`computed(f).eager()`): a puller effect keeps it
+//   materialized by the time the invalidating `set`/`batch` returns. Eagerness
+//   is graph state (the F_EAGER bit + `eagerBy` side table), not a kind, so the
+//   former `Signal` is retired and the #lzsignaleager puller bug cannot be
 //   written.
 // - Effects rerun after any tracked dependency invalidates.
 //
 // The read/write split has no compile-time (or, by design §4, runtime) gate in
-// JavaScript; it is expressed by METHOD PRESENCE — `SourceCell` has `set`/`merge`,
-// `FormulaCell` does not. The former handle-zoo names (`CellHandle`/`SlotHandle`/
-// `SignalHandle`) and constructors (`cell`/`computed`/`slot`/`memo`/`signal`)
-// remain as deprecated aliases.
+// JavaScript; it is expressed by METHOD PRESENCE — `Source` has `set`/`merge`,
+// `Computed` does not. The v1 handle names (`SourceCell`/`FormulaCell`,
+// `CellHandle`/`SlotHandle`) are retired; `signal` and `cell`/`slot`
+// constructors remain as deprecated aliases.
 //
 // #lzjsclosure: this module uses the closure factory technique (rmemo-style)
 // rather than `class` + `#private` fields. `createContext()` returns an object
@@ -117,32 +118,34 @@ export class DisposedNodeError extends Error {
   }
 }
 
-// -- Handles: the Cell kernel (#lzcellkernel) --------------------------------
+// -- Handles: the Cell kernel (#lzcellkernel), naming v2 ---------------------
 //
-// One genus `Cell` — a lightweight typed handle to a reactive node — over two
-// value kinds:
+// v2 (2026-07-21): the bare kind name is the HANDLE a caller holds; `Cell` is
+// the value-node CONCEPT (not a class you construct/hold). Two value handles:
 //
-//   Cell                          genus — a node with a readable value
-//   ├─ SourceCell (was CellHandle) written from outside; folds under a policy
-//   └─ FormulaCell (was SlotHandle) computed from upstream (guarded via formula)
+//   Cell                    concept — a value-bearing reactive node (not exported)
+//   ├─ Source (was SourceCell)   written from outside; folds under a policy
+//   └─ Computed (was FormulaCell) computed from upstream (guarded, always)
 //
-//   Effect (EffectHandle)          value-less sink — outside the hierarchy
+//   Effect (was EffectHandle)    value-less sink — outside the Cell hierarchy
 //
-// See tasks/software/lazily-cell-kernel-design.md. This replaces the former
-// SlotHandle/CellHandle/SignalHandle handle zoo and the `Reactive`/`Source`
-// read/write traits.
+// See tasks/software/lazily-cell-kernel-design.md + naming-spec-v2. This is a
+// rename over v1's `SourceCell`/`FormulaCell` handles + `Cell` genus base: the
+// handles are now `Source`/`Computed`/`Effect`, and `Cell` is an internal,
+// unexported shared base embodying the value-node concept (never constructed
+// bare). There is no `Reactive` trait/type uniting cells + effects.
 //
 // JavaScript has no compile-time kind enforcement, so the read/write split is
-// expressed by METHOD PRESENCE on the concrete class: a `SourceCell` object
-// exposes `set`/`merge`; a `FormulaCell` object does not (reading
-// `formulaCell.set` is `undefined`). No runtime gate is invented — design §4
-// rejected downgrading the compile guarantee to a runtime panic, and JS simply
-// has neither. Handles created through a context carry a non-enumerable
-// back-reference so the instance methods can delegate to the closure API;
-// handles built directly (legacy `new CellHandle(id)`) carry none and are used
-// through the functional `ctx.get(handle)` / `ctx.setCell(handle, v)` surface.
+// expressed by METHOD PRESENCE on the concrete class: a `Source` object
+// exposes `set`/`merge`; a `Computed` object does not (reading `computed.set`
+// is `undefined`). No runtime gate is invented — design §4 rejected downgrading
+// the compile guarantee to a runtime panic, and JS simply has neither. Handles
+// created through a context carry a non-enumerable back-reference so the
+// instance methods can delegate to the closure API; handles built directly
+// (`new Source(id)`) carry none and are used through the functional
+// `ctx.get(handle)` / `ctx.setCell(handle, v)` surface.
 
-export class Cell {
+class Cell {
   /** @internal */ constructor(id, ctx) {
     this.id = id;
     if (ctx !== undefined) {
@@ -157,11 +160,11 @@ export class Cell {
 
 /**
  * A cell written from outside, folding writes under an optional merge policy
- * (default keep-latest = replace). Subsumes the former `CellHandle` and the
- * `MergeCell` wrapper: `Cell ≡ SourceCell(KeepLatest)`. Exposes `set`/`merge` —
- * this is the writable kind.
+ * (default keep-latest = replace). Subsumes the former `MergeCell` wrapper:
+ * a keep-latest `Source` ≡ the old plain cell. Exposes `set`/`merge` — this is
+ * the writable kind (v1 `SourceCell`).
  */
-export class SourceCell extends Cell {
+export class Source extends Cell {
   /** @internal */ constructor(id, ctx, policy) {
     super(id, ctx);
     if (policy !== undefined && policy !== null) {
@@ -179,7 +182,7 @@ export class SourceCell extends Cell {
   }
   /**
    * Fold `op` into the current value under this cell's policy. With no policy
-   * (keep-latest) this is a plain replace (`Cell ≡ SourceCell(KeepLatest)`), so
+   * (keep-latest) this is a plain replace (keep-latest `Source`), so
    * the `==` store-guard + store-without-cascade apply unchanged.
    */
   merge(op) {
@@ -193,11 +196,12 @@ export class SourceCell extends Cell {
 }
 
 /**
- * A cell computed from upstream. Guarded (equality-suppressed) when built via
- * `formula`. Lazy by default; `formula(f).drive()` makes it eager (a driven
- * formula). Exposes no `set`/`merge` — it is not written from outside.
+ * A cell computed from upstream. Always guarded (equality-suppressed): an equal
+ * recompute suppresses downstream, matching TC39 `Signal.Computed`. Lazy by
+ * default; `computed(f).eager()` makes it eager. Exposes no `set`/`merge` — it
+ * is not written from outside (v1 `FormulaCell`).
  */
-export class FormulaCell extends Cell {
+export class Computed extends Cell {
   /** @internal */ constructor(id, ctx) {
     super(id, ctx);
     Object.freeze(this);
@@ -207,32 +211,33 @@ export class FormulaCell extends Cell {
     return this._ctx.get(this);
   }
   /**
-   * Drive this formula: make it eager by attaching a puller `Effect` that keeps
-   * it materialized after every invalidation, so the value goes `v1 -> v2` with
-   * no intermediate unset state. Idempotent (a second `drive` is a no-op) and
+   * Make this computed eager: attach a puller `Effect` that keeps it
+   * materialized after every invalidation, so the value goes `v1 -> v2` with no
+   * intermediate unset state. Idempotent (a second `eager()` is a no-op) and
    * returns the SAME handle (mutated graph state). This is the eager
-   * construction that retires the former `Signal`.
+   * construction that retired the former `Signal` (was `drive()`).
    */
-  drive() {
-    this._ctx.driveFormula(this.id);
+  eager() {
+    this._ctx.makeEager(this.id);
     return this;
   }
   /**
-   * Reverse of {@link drive}: stop eager recomputation and dispose the puller.
-   * The value remains readable and reverts to lazy. No-op if not driven.
+   * Reverse of {@link eager}: stop eager recomputation and dispose the puller.
+   * The value remains readable and reverts to lazy. No-op if already lazy (was
+   * `undrive()`).
    */
-  undrive() {
-    this._ctx.undriveFormula(this.id);
+  lazy() {
+    this._ctx.makeLazy(this.id);
     return this;
   }
-  /** Whether this formula currently has an active puller. */
-  isDriven() {
-    return this._ctx.isDriven(this);
+  /** Whether this computed is currently eager (has an active puller). */
+  isEager() {
+    return this._ctx.isEager(this);
   }
 }
 
-/** A value-less side-effecting sink. Outside the `Cell` hierarchy. */
-export class EffectHandle {
+/** A value-less side-effecting sink. Outside the `Cell` hierarchy (v1 `EffectHandle`). */
+export class Effect {
   /** @internal */ constructor(id, ctx) {
     this.id = id;
     if (ctx !== undefined) {
@@ -248,9 +253,9 @@ export class EffectHandle {
 
 /**
  * @deprecated Retired by the Cell kernel (#lzcellkernel): the eager construction
- * is now a driven `FormulaCell` (`ctx.formula(f).drive()`). Retained as a
- * compatibility shape for the thread-safe / async contexts (which keep their own
- * signal handles for now, mirroring lazily-rs) and the `state-machine` helper.
+ * is now `ctx.computed(f).eager()`. Retained as a compatibility shape for the
+ * thread-safe / async contexts (which keep their own signal handles for now,
+ * mirroring lazily-rs) and the `state-machine` helper.
  */
 export class SignalHandle {
   /** @internal */ constructor(slot, effect) {
@@ -260,10 +265,11 @@ export class SignalHandle {
   }
 }
 
-// Deprecated aliases — the former handle-zoo names now resolve to the kinded
-// genus. `instanceof CellHandle` and `new CellHandle(id)` keep working because
-// they ARE `SourceCell`; likewise `SlotHandle` IS `FormulaCell`.
-export { SourceCell as CellHandle, FormulaCell as SlotHandle };
+// v2 retired the v1 handle aliases `CellHandle`/`SlotHandle` (and the earlier
+// `SourceCell`/`FormulaCell` handle names). The canonical handles are `Source`
+// / `Computed` / `Effect`. The `.d.ts` keeps type-only `CellHandle`/`SlotHandle`
+// aliases so peripheral modules' declaration files still resolve during the
+// staged family-wide rename; no runtime alias is exported.
 
 // -- Node discriminators (replace `instanceof` in hot loops) ----------------
 // #lzjsarenanodes: the kind lives in the `kinds` Uint8Array arena (one byte
@@ -288,7 +294,7 @@ const F_DIRTY = 1 << 2;            // slot: invalidate-on-next-read marker
 const F_FORCE_RECOMPUTE = 1 << 3;  // slot: force a recompute even if not dirty
 const F_IN_PROGRESS = 1 << 4;      // slot: cycle-detection tripwire
 const F_FORCE_RUN = 1 << 5;        // effect: force the next run regardless
-const F_DRIVEN = 1 << 6;           // slot: this formula is driven (has a puller)
+const F_EAGER = 1 << 6;            // slot: this computed is eager (has a puller)
 
 // #lzspecedgeindex: width at which an edge list promotes from linear-scan dedup
 // to a hash index. Measured, not inherited — see the note on `edgeInsert`.
@@ -431,13 +437,13 @@ function createContext(opts = {}) {
   // occupant's index. See disposeSlot/disposeCell/disposeEffect.
   const dependentsIndex = new Map();
   const dependenciesIndex = new Map();
-  // #lzcellkernel: driven-formula side table (formula id -> puller effect id).
-  // Drivenness is graph state — the F_DRIVEN bit on the formula's node plus this
-  // owner-keyed table, cleared on dispose/undrive. One entry per DRIVEN formula,
+  // #lzcellkernel: eager-computed side table (computed id -> puller effect id).
+  // Eagerness is graph state — the F_EAGER bit on the computed's node plus this
+  // owner-keyed table, cleared on dispose/`.lazy()`. One entry per EAGER computed,
   // zero per lazy one (the EdgeIndex precedent: per-node bit for the common case,
-  // a side table for the rare one). Because ids are recycled, every teardown of a
-  // driven formula MUST drop its entry or a recycled id would alias a stale one.
-  const drivenBy = new Map();
+  // a side table for the rare one). Because ids are recycled, every teardown of an
+  // eager computed MUST drop its entry or a recycled id would alias a stale one.
+  const eagerBy = new Map();
   const trackingStack = [];
   let pendingEffects = [];
   let pendingHead = 0;
@@ -503,21 +509,23 @@ function createContext(opts = {}) {
 
   // -- Creation ----------------------------------------------------------
 
-  // #lzcellkernel constructor surface: `source` / `formula` / `.drive()`.
+  // #lzcellkernel constructor surface (v2): `source` / `computed` / `.eager()`.
   //
-  // `source(v)` (keep-latest) subsumes the former `cell`; `source(v, policy)`
-  // subsumes `merge_cell`. `formula(f)` is GUARDED by default (was: `memo`
-  // guarded, `computed` unguarded — one name now, picking the guard, a behaviour
-  // change for `computed` callers with a migration note). The eager construction
-  // is `formula(f).drive()`.
+  // `source(v)` (keep-latest) is the writable cell; `source(v, policy)` folds
+  // under a merge policy. `computed(f)` is GUARDED, ALWAYS (v2: every cell is
+  // guarded — an equal recompute suppresses downstream; matches TC39
+  // `Signal.Computed`). `memo` is removed (folded into guarded `computed`), and
+  // the v1 unguarded `computed` is gone — there is no unguarded mode. The eager
+  // construction is `computed(f).eager()`. `cell`/`slot` remain as deprecated
+  // aliases (`cell` -> `source`, `slot` -> `computed`) during the staged rename.
 
   function source(value, policy) {
-    return new SourceCell(cellAny(value), api, policy);
+    return new Source(cellAny(value), api, policy);
   }
 
   /** @deprecated use {@link source}. */
   function cell(value) {
-    return new SourceCell(cellAny(value), api);
+    return new Source(cellAny(value), api);
   }
 
   function cellAny(value) {
@@ -530,34 +538,29 @@ function createContext(opts = {}) {
     return id;
   }
 
-  /** A guarded formula (equality-suppressed) — the #lzcellkernel default. */
-  function formula(compute) {
-    return new FormulaCell(slotAny(true, compute), api);
-  }
-
-  /** @deprecated unguarded formula; use {@link formula} (guarded by default). */
+  /**
+   * A computed cell (guarded, always): an equal recompute suppresses downstream
+   * invalidation. The #lzcellkernel v2 derived construction. Lazy by default;
+   * `computed(f).eager()` makes it eager.
+   */
   function computed(compute) {
-    return new FormulaCell(slotAny(false, compute), api);
+    return new Computed(slotAny(compute), api);
   }
 
-  /** @deprecated use {@link formula}. */
+  /** @deprecated use {@link computed} (guarded, the only derived construction). */
   function slot(compute) {
     return computed(compute);
   }
 
-  /** @deprecated use {@link formula} (guarded by default). */
-  function memo(compute) {
-    return formula(compute);
-  }
-
-  function slotAny(memoFlag, compute) {
+  function slotAny(compute) {
     const id = allocId();
     // #lzjsarenanodes: kind + hasValue/dirty/forceRecompute/inProgress all
-    // start at 0/false; memo is the only flag that may be set at creation. The
-    // node object keeps value (varies), compute (closure), and the two lazy
-    // edge lists — down from 10 properties to 4.
+    // start at 0/false. v2: every computed is guarded, so F_MEMO (the
+    // equality-suppression bit) is set unconditionally at creation. The node
+    // object keeps value (varies), compute (closure), and the two lazy edge
+    // lists — down from 10 properties to 4.
     kinds[id] = KIND_SLOT;
-    flags[id] = memoFlag ? F_MEMO : 0;
+    flags[id] = F_MEMO;
     nodes[id] = {
       value: undefined,
       compute,
@@ -568,21 +571,21 @@ function createContext(opts = {}) {
   }
 
   /**
-   * @deprecated The eager construction is now a driven `FormulaCell` —
-   * `ctx.formula(compute).drive()`. Retained for the thread-safe / async
-   * contexts (which keep their own signal handles for now) and `state-machine`.
+   * @deprecated The eager construction is now `ctx.computed(compute).eager()`.
+   * Retained for the thread-safe / async contexts (which keep their own signal
+   * handles for now) and `state-machine`.
    */
   function signal(compute) {
-    const slot = slotAny(true, compute);
+    const slot = slotAny(compute);
     const effect = effectAny(() => {
       getSlotAny(slot);
       return null;
     });
-    return new SignalHandle(new FormulaCell(slot, api), new EffectHandle(effect, api));
+    return new SignalHandle(new Computed(slot, api), new Effect(effect, api));
   }
 
   function effect(run) {
-    return new EffectHandle(effectAny(run), api);
+    return new Effect(effectAny(run), api);
   }
 
   function effectAny(run) {
@@ -786,46 +789,46 @@ function createContext(opts = {}) {
     return isEffectActive(handle.effect);
   }
 
-  // -- Driven formulas (#lzcellkernel eager construction) ----------------
+  // -- Eager computeds (#lzcellkernel eager construction, v2) ------------
   //
-  // Eager = a driven `FormulaCell`, not a distinct kind. `driveFormula` attaches
-  // a puller `Effect` that re-reads (re-materializes) the formula after every
+  // Eager = an eager `Computed`, not a distinct kind. `makeEager` attaches a
+  // puller `Effect` that re-reads (re-materializes) the computed after every
   // invalidation; the puller is a SCHEDULED effect, so N invalidations in a
   // batch coalesce into one rerun — which is exactly why the `#lzsignaleager`
-  // per-write-puller bug is structurally unwritable here. Drivenness is graph
-  // state: the F_DRIVEN bit on the formula's node + the `drivenBy` side table,
-  // both cleared on undrive/dispose.
+  // per-write-puller bug is structurally unwritable here. Eagerness is graph
+  // state: the F_EAGER bit on the computed's node + the `eagerBy` side table,
+  // both cleared on `.lazy()`/dispose.
 
-  function driveFormula(id) {
+  function makeEager(id) {
     if (kinds[id] !== KIND_SLOT) {
-      throw new Error(`drive on non-formula id ${id}`);
+      throw new Error(`eager() on non-computed id ${id}`);
     }
-    if ((flags[id] & F_DRIVEN) !== 0) {
-      return; // idempotent: a second drive is a no-op
+    if ((flags[id] & F_EAGER) !== 0) {
+      return; // idempotent: a second eager() is a no-op
     }
     const eff = effectAny(() => {
       getSlotAny(id);
       return null;
     });
-    flags[id] |= F_DRIVEN;
-    drivenBy.set(id, eff);
+    flags[id] |= F_EAGER;
+    eagerBy.set(id, eff);
   }
 
-  function undriveFormula(id) {
-    if (kinds[id] !== KIND_SLOT || (flags[id] & F_DRIVEN) === 0) {
-      return; // no-op if not a driven formula
+  function makeLazy(id) {
+    if (kinds[id] !== KIND_SLOT || (flags[id] & F_EAGER) === 0) {
+      return; // no-op if not an eager computed
     }
-    const eff = drivenBy.get(id);
+    const eff = eagerBy.get(id);
     if (eff !== undefined) {
       disposeEffectAny(eff);
     }
-    drivenBy.delete(id);
-    flags[id] &= ~F_DRIVEN;
+    eagerBy.delete(id);
+    flags[id] &= ~F_EAGER;
   }
 
-  function isDriven(handle) {
+  function isEager(handle) {
     const id = typeof handle === "number" ? handle : handle.id;
-    return kinds[id] === KIND_SLOT && (flags[id] & F_DRIVEN) !== 0;
+    return kinds[id] === KIND_SLOT && (flags[id] & F_EAGER) !== 0;
   }
 
   // Tear down a lazy derived node (slot/computed/memo). A slot is both a consumer
@@ -840,16 +843,16 @@ function createContext(opts = {}) {
     if (kinds[id] !== KIND_SLOT) {
       return;
     }
-    // #lzcellkernel: a driven formula owns a puller effect — tear it down first,
-    // so disposing the formula never strands an orphaned puller (the regression
-    // the driven-bit design removes). The formula always knows whether it is
-    // driven, so no survivor is left behind.
-    if ((flags[id] & F_DRIVEN) !== 0) {
-      const eff = drivenBy.get(id);
+    // #lzcellkernel: an eager computed owns a puller effect — tear it down first,
+    // so disposing the computed never strands an orphaned puller (the regression
+    // the eager-bit design removes). The computed always knows whether it is
+    // eager, so no survivor is left behind.
+    if ((flags[id] & F_EAGER) !== 0) {
+      const eff = eagerBy.get(id);
       if (eff !== undefined) {
         disposeEffectAny(eff);
       }
-      drivenBy.delete(id);
+      eagerBy.delete(id);
     }
     const node = nodes[id];
     // Dirty the surviving readers BEFORE the edges are detached — once the
@@ -989,11 +992,11 @@ function createContext(opts = {}) {
    * (`dispose_stale_handle` in the corpus).
    */
   function disposeNode(handle) {
-    if (handle instanceof SourceCell) {
+    if (handle instanceof Source) {
       disposeCell(handle);
-    } else if (handle instanceof FormulaCell) {
+    } else if (handle instanceof Computed) {
       disposeSlot(handle);
-    } else if (handle instanceof EffectHandle) {
+    } else if (handle instanceof Effect) {
       disposeEffect(handle);
     } else if (handle instanceof SignalHandle) {
       disposeSignal(handle);
@@ -1426,17 +1429,15 @@ function createContext(opts = {}) {
   // `TeardownScope` without the scope reaching into closure internals: a scope
   // is a bookkeeper over the same public surface any caller has.
   const api = {
-    // #lzcellkernel primary surface
+    // #lzcellkernel primary surface (v2)
     source,
-    formula,
-    driveFormula,
-    undriveFormula,
-    isDriven,
+    computed,
+    makeEager,
+    makeLazy,
+    isEager,
     // deprecated constructor aliases (kept for the large internal/test surface)
     cell,
-    computed,
     slot,
-    memo,
     signal,
     effect,
     get,

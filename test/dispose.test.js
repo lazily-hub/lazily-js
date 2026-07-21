@@ -23,7 +23,7 @@ import { Context } from "../src/reactive.js";
 test("disposeSlot: upstream write no longer reaches a former downstream effect", () => {
   const ctx = new Context();
   const a = ctx.cell(1);
-  const m = ctx.memo(() => ctx.getCell(a) + 1);
+  const m = ctx.computed(() => ctx.getCell(a) + 1);
   let fires = 0;
   const eff = ctx.effect(() => {
     ctx.get(m);
@@ -53,7 +53,7 @@ test("disposeSlot: upstream write no longer reaches a former downstream effect",
 test("disposeSlot: downstream cleanup prevents a dangling ref in a surviving consumer", () => {
   const ctx = new Context();
   const a = ctx.cell(1);
-  const m = ctx.memo(() => ctx.getCell(a) + 1);
+  const m = ctx.computed(() => ctx.getCell(a) + 1);
   const eff = ctx.effect(() => {
     ctx.get(m);
     return null;
@@ -74,7 +74,7 @@ test("disposeSlot: downstream cleanup prevents a dangling ref in a surviving con
 test("disposeSlot: removes both the upstream and downstream edges (instrumented)", () => {
   const ctx = new Context({ instrument: true });
   const a = ctx.cell(1);
-  const m = ctx.memo(() => ctx.getCell(a) + 1); // edge a -> m
+  const m = ctx.computed(() => ctx.getCell(a) + 1); // edge a -> m
   ctx.effect(() => {
     ctx.get(m);
     return null;
@@ -96,7 +96,7 @@ test("disposeSlot: removes both the upstream and downstream edges (instrumented)
 test("disposeSlot: the node is freed (id recycled for the next allocation)", () => {
   const ctx = new Context();
   const a = ctx.cell(10);
-  const m = ctx.memo(() => ctx.getCell(a) + 1);
+  const m = ctx.computed(() => ctx.getCell(a) + 1);
   const mId = m.id;
   ctx.get(m); // materialize
   ctx.disposeSlot(m);
@@ -114,7 +114,7 @@ test("disposeSlot: the node is freed (id recycled for the next allocation)", () 
 test("disposeCell: detaches downstream edges (instrumented)", () => {
   const ctx = new Context({ instrument: true });
   const a = ctx.cell(1);
-  const m = ctx.memo(() => ctx.getCell(a) + 1); // edge a -> m
+  const m = ctx.computed(() => ctx.getCell(a) + 1); // edge a -> m
   ctx.get(m);
 
   const before = ctx.instrumentationSnapshot().dependencyEdgesRemoved;
@@ -144,7 +144,7 @@ test("disposeCell: a cell with no dependents disposes cleanly", () => {
 
 test("disposeSlot: a slot with no dependents and no dependencies disposes cleanly", () => {
   const ctx = new Context();
-  const m = ctx.memo(() => 42);
+  const m = ctx.computed(() => 42);
   ctx.get(m);
   assert.doesNotThrow(() => ctx.disposeSlot(m));
 });
@@ -155,7 +155,7 @@ test("disposeSlot: a slot with no dependents and no dependencies disposes cleanl
 test("dispose: double-dispose and wrong-kind dispose are no-ops", () => {
   const ctx = new Context();
   const a = ctx.cell(1);
-  const m = ctx.memo(() => ctx.getCell(a) + 1);
+  const m = ctx.computed(() => ctx.getCell(a) + 1);
   ctx.get(m);
 
   assert.doesNotThrow(() => ctx.disposeSlot(m));

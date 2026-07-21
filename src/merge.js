@@ -6,14 +6,14 @@
 // = reordering tax; idempotency = durability tax) select which overflow behaviour
 // is sound.
 //
-// #lzcellkernel: under the Cell kernel a "merge cell" is just a `SourceCell` with
-// a policy — `ctx.source(v, policy)` returns a `SourceCell` whose `.merge(op)`
-// folds under `policy`, and `Cell ≡ SourceCell(KeepLatest)`. The `MergeCell`
-// wrapper and the `asSource`/`asReactive` trait adapters below are the former
-// `Reactive`/`Source` read/write split; they are retained (deprecated) for
-// existing call sites, since the kernel now expresses that split directly by
-// method presence (a `SourceCell` has `set`/`merge`; a `FormulaCell` does not).
-// Backed by an ordinary cell, so it inherits the `==` store-guard.
+// #lzcellkernel: under the Cell kernel a "merge cell" is just a `Source` with
+// a policy — `ctx.source(v, policy)` returns a `Source` whose `.merge(op)` folds
+// under `policy`, and a keep-latest `Source` is the plain cell. The `MergeCell`
+// wrapper and the `asSource`/`asReactive` adapters below are the former
+// read/write split; they are retained (deprecated) for existing call sites,
+// since the kernel now expresses that split directly by method presence (a
+// `Source` has `set`/`merge`; a `Computed` does not). Backed by an ordinary
+// cell, so it inherits the `==` store-guard.
 
 // -- Merge policies ----------------------------------------------------------
 //

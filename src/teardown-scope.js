@@ -112,9 +112,9 @@ export class TeardownScope {
     return this.adopt(this.#ctx.source(value, policy));
   }
 
-  /** Create a guarded formula owned by this scope (#lzcellkernel). */
-  formula(compute) {
-    return this.adopt(this.#ctx.formula(compute));
+  /** Create a guarded computed owned by this scope (#lzcellkernel). */
+  computed(compute) {
+    return this.adopt(this.#ctx.computed(compute));
   }
 
   /** @deprecated use {@link source}. */
@@ -122,17 +122,12 @@ export class TeardownScope {
     return this.adopt(this.#ctx.cell(value));
   }
 
-  /** @deprecated unguarded formula; use {@link formula}. */
-  computed(compute) {
-    return this.adopt(this.#ctx.computed(compute));
+  /** @deprecated use {@link computed} (guarded, the only derived construction). */
+  slot(compute) {
+    return this.adopt(this.#ctx.slot(compute));
   }
 
-  /** @deprecated use {@link formula} (guarded by default). */
-  memo(compute) {
-    return this.adopt(this.#ctx.memo(compute));
-  }
-
-  /** Create an eager signal owned by this scope. */
+  /** @deprecated use {@link computed}`(f).eager()` for an eager signal. */
   signal(compute) {
     return this.adopt(this.#ctx.signal(compute));
   }

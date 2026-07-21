@@ -167,10 +167,6 @@ export class ThreadSafeContext {
     return this.#mutex.runExclusive(() => this.#ctx.slot(compute));
   }
 
-  memo(compute) {
-    return this.#mutex.runExclusive(() => this.#ctx.memo(compute));
-  }
-
   signal(compute) {
     return this.#mutex.runExclusive(() => this.#ctx.signal(compute));
   }
@@ -337,10 +333,6 @@ export class ThreadSafeTeardownScope {
 
   computed(compute) {
     return this.#mutex.runExclusive(() => this.#inner.computed(compute));
-  }
-
-  memo(compute) {
-    return this.#mutex.runExclusive(() => this.#inner.memo(compute));
   }
 
   signal(compute) {

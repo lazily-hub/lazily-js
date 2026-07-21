@@ -3,13 +3,13 @@
     "name": "reactive: Context",
     "path": "src/reactive.js",
     "import": "{ Context }",
-    "limit": "3350 B"
+    "limit": "3300 B"
   },
   {
     "name": "reactive: Context + handles + defaultEqual",
     "path": "src/reactive.js",
-    "import": "{ Context, SourceCell, FormulaCell, SignalHandle, EffectHandle, defaultEqual }",
-    "limit": "3370 B"
+    "import": "{ Context, Source, Computed, SignalHandle, Effect, defaultEqual }",
+    "limit": "3300 B"
   },
   {
     "name": "state-machine: StateMachine",
@@ -21,7 +21,7 @@
     "name": "sem-tree: SemTree",
     "path": "src/sem-tree.js",
     "import": "{ SemTree }",
-    "limit": "505 B"
+    "limit": "512 B"
   },
   {
     "name": "stable-id: contentHash",

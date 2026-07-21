@@ -23,62 +23,57 @@ export class DisposedNodeError extends Error {
 
 /** Any node handle a {@link Context} can address by degree or tear down. */
 export type NodeHandle =
-  | SourceCell<never>
-  | FormulaCell<never>
-  | EffectHandle
+  | Source<never>
+  | Computed<never>
+  | Effect
   | SignalHandle<never>;
 
 /**
- * The Cell kernel genus (`#lzcellkernel`) — a lightweight typed handle to a
- * reactive node. Two value kinds extend it: {@link SourceCell} (written from
- * outside) and {@link FormulaCell} (computed from upstream). `Effect` is a
- * value-less sink and stays outside the hierarchy.
+ * A cell written from outside, folding writes under an optional merge policy
+ * (default keep-latest = replace). Subsumes the former `MergeCell` wrapper: a
+ * keep-latest `Source` is the plain cell. The writable value handle (v1
+ * `SourceCell`).
  *
  * The read/write split has no compile-time enforcement in JavaScript; it is
- * expressed by METHOD PRESENCE — a `SourceCell` exposes `set`/`merge`, a
- * `FormulaCell` does not.
+ * expressed by METHOD PRESENCE — a `Source` exposes `set`/`merge`, a `Computed`
+ * does not.
  */
-export class Cell<T = unknown> {
+export class Source<T = unknown> {
   /** @internal */ constructor(id: number, ctx?: unknown);
   readonly id: number;
   /** Read the current value (tracks a dependency inside a computation). */
   get(): T;
-  /** Tear this node down (kind-agnostic; dispatches on the handle's class). */
-  dispose(): void;
-}
-
-/**
- * A cell written from outside, folding writes under an optional merge policy
- * (default keep-latest = replace). Subsumes the former `CellHandle` and the
- * `MergeCell` wrapper: `Cell ≡ SourceCell(KeepLatest)`.
- */
-export class SourceCell<T = unknown> extends Cell<T> {
   /** Replace the value outright (the keep-latest write). */
   set(value: T): void;
   /** Fold `op` into the current value under this cell's policy (replace if none). */
   merge(op: T): void;
+  /** Tear this node down. */
+  dispose(): void;
 }
 
 /**
- * A cell computed from upstream, guarded when built via `formula`. Lazy by
- * default; `formula(f).drive()` makes it eager (a driven formula). Exposes no
- * `set`/`merge`.
+ * A cell computed from upstream — always guarded (an equal recompute suppresses
+ * downstream; matches TC39 `Signal.Computed`). Lazy by default;
+ * `computed(f).eager()` makes it eager. Exposes no `set`/`merge` (v1
+ * `FormulaCell`).
  */
-export class FormulaCell<T = unknown> extends Cell<T> {
-  /** Make this formula eager (attach a puller). Idempotent; returns `this`. */
-  drive(): this;
-  /** Reverse of {@link drive}: revert to lazy and dispose the puller. */
-  undrive(): this;
-  /** Whether this formula currently has an active puller. */
-  isDriven(): boolean;
+export class Computed<T = unknown> {
+  /** @internal */ constructor(id: number, ctx?: unknown);
+  readonly id: number;
+  /** Read the current value (tracks a dependency inside a computation). */
+  get(): T;
+  /** Make this computed eager (attach a puller). Idempotent; returns `this`. */
+  eager(): this;
+  /** Reverse of {@link eager}: revert to lazy and dispose the puller. */
+  lazy(): this;
+  /** Whether this computed is currently eager (has an active puller). */
+  isEager(): boolean;
+  /** Tear this node down. */
+  dispose(): void;
 }
 
-/** @deprecated alias of {@link SourceCell} (#lzcellkernel). */
-export { SourceCell as CellHandle };
-/** @deprecated alias of {@link FormulaCell} (#lzcellkernel). */
-export { FormulaCell as SlotHandle };
-
-export class EffectHandle {
+/** A value-less side-effecting sink. Outside the Cell hierarchy (v1 `EffectHandle`). */
+export class Effect {
   /** @internal */ constructor(id: number, ctx?: unknown);
   readonly id: number;
   /** Dispose this effect (unsubscribe). */
@@ -86,14 +81,25 @@ export class EffectHandle {
 }
 
 /**
+ * @deprecated v1 type aliases retained so peripheral modules' declaration files
+ * still resolve during the staged family-wide rename. The canonical handles are
+ * {@link Source} / {@link Computed} / {@link Effect}. No runtime alias exists.
+ */
+export type CellHandle<T = unknown> = Source<T>;
+/** @deprecated use {@link Computed}. */
+export type SlotHandle<T = unknown> = Computed<T>;
+/** @deprecated use {@link Effect}. */
+export type EffectHandle = Effect;
+
+/**
  * @deprecated Retired by the Cell kernel (#lzcellkernel): the eager construction
- * is a driven {@link FormulaCell} (`ctx.formula(f).drive()`). Retained as a
- * compatibility shape for the thread-safe / async contexts and `state-machine`.
+ * is `ctx.computed(f).eager()`. Retained as a compatibility shape for the
+ * thread-safe / async contexts and `state-machine`.
  */
 export class SignalHandle<T = unknown> {
-  /** @internal */ constructor(slot: FormulaCell<T>, effect: EffectHandle);
-  readonly slot: FormulaCell<T>;
-  readonly effect: EffectHandle;
+  /** @internal */ constructor(slot: Computed<T>, effect: Effect);
+  readonly slot: Computed<T>;
+  readonly effect: Effect;
 }
 
 export interface InstrumentationSnapshot {
@@ -106,7 +112,7 @@ export interface InstrumentationSnapshot {
 }
 
 /**
- * A reactive context: the graph owning all SourceCell/FormulaCell/Effect nodes
+ * A reactive context: the graph owning all Source/Computed/Effect nodes
  * (the Cell kernel, `#lzcellkernel`).
  *
  * Declared as an interface so it can be used as a type
@@ -124,52 +130,47 @@ export interface MergePolicy<T> {
 }
 
 export interface Context {
-  // -- Cell kernel (#lzcellkernel) primary surface --
+  // -- Cell kernel (#lzcellkernel) primary surface (v2) --
   /** A source cell (keep-latest); `source(v, policy)` folds under `policy`. */
-  source<T>(value: T, policy?: MergePolicy<T>): SourceCell<T>;
-  /** A guarded formula (equality-suppressed) — the default derived construction. */
-  formula<T>(compute: ComputeFn<T>): FormulaCell<T>;
-  /** Make a formula eager by id (prefer {@link FormulaCell.drive}). Idempotent. */
-  driveFormula(id: number): void;
-  /** Reverse of {@link driveFormula}. */
-  undriveFormula(id: number): void;
-  /** Whether the formula is driven. */
-  isDriven(handle: FormulaCell<unknown> | number): boolean;
+  source<T>(value: T, policy?: MergePolicy<T>): Source<T>;
+  /** A guarded computed (equality-suppressed, always) — the derived construction. */
+  computed<T>(compute: ComputeFn<T>): Computed<T>;
+  /** Make a computed eager by id (prefer {@link Computed.eager}). Idempotent. */
+  makeEager(id: number): void;
+  /** Reverse of {@link makeEager}. */
+  makeLazy(id: number): void;
+  /** Whether the computed is eager. */
+  isEager(handle: Computed<unknown> | number): boolean;
 
   // -- Deprecated constructor aliases --
   /** @deprecated use {@link source}. */
-  cell<T>(value: T): SourceCell<T>;
-  /** @deprecated unguarded formula; use {@link formula} (guarded by default). */
-  computed<T>(compute: ComputeFn<T>): FormulaCell<T>;
-  /** @deprecated use {@link formula}. */
-  slot<T>(compute: ComputeFn<T>): FormulaCell<T>;
-  /** @deprecated use {@link formula} (guarded by default). */
-  memo<T>(compute: ComputeFn<T>): FormulaCell<T>;
-  /** @deprecated the eager construction is `formula(f).drive()`. */
+  cell<T>(value: T): Source<T>;
+  /** @deprecated use {@link computed} (guarded, the only derived construction). */
+  slot<T>(compute: ComputeFn<T>): Computed<T>;
+  /** @deprecated the eager construction is `computed(f).eager()`. */
   signal<T>(compute: ComputeFn<T>): SignalHandle<T>;
-  effect(run: EffectRun): EffectHandle;
-  get<T>(handle: FormulaCell<T>): T;
-  getCell<T>(handle: SourceCell<T>): T;
+  effect(run: EffectRun): Effect;
+  get<T>(handle: Computed<T>): T;
+  getCell<T>(handle: Source<T>): T;
   getSignal<T>(handle: SignalHandle<T>): T;
-  setCell<T>(handle: SourceCell<T>, value: T): void;
+  setCell<T>(handle: Source<T>, value: T): void;
   batch(run: () => void): void;
-  disposeEffect(handle: EffectHandle): void;
-  isEffectActive(handle: EffectHandle): boolean;
+  disposeEffect(handle: Effect): void;
+  isEffectActive(handle: Effect): boolean;
   disposeSignal(handle: SignalHandle<unknown>): void;
   isSignalActive(handle: SignalHandle<unknown>): boolean;
   /**
-   * Tear down a lazy derived node (slot/computed/memo): detach its upstream and
-   * downstream dependency edges, free the node, and recycle its id. No-op on an
-   * already-disposed handle or the wrong kind. Callers must ensure no live compute
-   * still reads the slot.
+   * Tear down a lazy computed: detach its upstream and downstream dependency
+   * edges, free the node, and recycle its id. No-op on an already-disposed handle
+   * or the wrong kind. Callers must ensure no live compute still reads it.
    */
-  disposeSlot<T>(handle: FormulaCell<T>): void;
+  disposeSlot<T>(handle: Computed<T>): void;
   /**
    * Tear down a source cell: detach its downstream edges, free the node, and
    * recycle its id. No-op on an already-disposed handle or the wrong kind. Callers
-   * must ensure no live slot still reads the cell (its next recompute would throw).
+   * must ensure no live computed still reads the cell (its next recompute would throw).
    */
-  disposeCell<T>(handle: SourceCell<T>): void;
+  disposeCell<T>(handle: Source<T>): void;
   /**
    * Tear down whatever kind of node `handle` names. Dispatch is on the handle's
    * CLASS, not on the node currently occupying its id: ids are recycled, and a
@@ -197,7 +198,7 @@ export interface Context {
   scope(): TeardownScope;
   /** Run `body` with a fresh scope and end it in a `finally`. */
   withScope<R>(body: (scope: TeardownScope) => R): R;
-  isSet<T>(handle: FormulaCell<T>): boolean;
+  isSet<T>(handle: Computed<T>): boolean;
   /** Instrumentation counters, or `null` if not enabled at construction. */
   instrumentationSnapshot(): InstrumentationSnapshot | null;
   /** Zero the instrumentation counters (no-op when instrumentation is off). */
@@ -233,18 +234,16 @@ export class TeardownScope {
   readonly ended: boolean;
   adopt<H extends NodeHandle>(handle: H): H;
   /** Create a source cell owned by this scope (#lzcellkernel). */
-  source<T>(value: T, policy?: MergePolicy<T>): SourceCell<T>;
-  /** Create a guarded formula owned by this scope (#lzcellkernel). */
-  formula<T>(compute: ComputeFn<T>): FormulaCell<T>;
+  source<T>(value: T, policy?: MergePolicy<T>): Source<T>;
+  /** Create a guarded computed owned by this scope (#lzcellkernel). */
+  computed<T>(compute: ComputeFn<T>): Computed<T>;
   /** @deprecated use {@link source}. */
-  cell<T>(value: T): SourceCell<T>;
-  /** @deprecated unguarded formula; use {@link formula}. */
-  computed<T>(compute: ComputeFn<T>): FormulaCell<T>;
-  /** @deprecated use {@link formula} (guarded by default). */
-  memo<T>(compute: ComputeFn<T>): FormulaCell<T>;
-  /** @deprecated the eager construction is `formula(f).drive()`. */
+  cell<T>(value: T): Source<T>;
+  /** @deprecated use {@link computed} (guarded, the only derived construction). */
+  slot<T>(compute: ComputeFn<T>): Computed<T>;
+  /** @deprecated the eager construction is `computed(f).eager()`. */
   signal<T>(compute: ComputeFn<T>): SignalHandle<T>;
-  effect(run: EffectRun): EffectHandle;
+  effect(run: EffectRun): Effect;
   /** Cancel this scope's teardown. The nodes are untouched — same values, same
    * edges, still individually disposable. */
   disarm(): void;

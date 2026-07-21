@@ -11,15 +11,15 @@
 // map is fixed at build time, per the lazily-rs/lazily-kt contract); removals
 // are covered by incrementality because the parent's child-list cell changes.
 
-import { Context, SlotHandle } from "./reactive.js";
+import { Context } from "./reactive.js";
 
 class SemNode {
   constructor(id, value, ctx) {
     this.id = id;
     this.valueCell = ctx.cell(value);
     this.childKeysCell = ctx.cell([]); // array of child ids (reactive membership/order)
-    this.childSlots = new Map(); // child id -> SlotHandle (captured at build)
-    this.slot = null; // memo SlotHandle for this node's derived value
+    this.childSlots = new Map(); // child id -> Computed (captured at build)
+    this.slot = null; // guarded Computed for this node's derived value
   }
 }
 
@@ -62,7 +62,7 @@ export class SemTree {
     const ctx = this.#ctx;
     const fold = this.#fold;
     const self = this;
-    node.slot = ctx.memo(() => {
+    node.slot = ctx.computed(() => {
       const v = ctx.getCell(node.valueCell);
       const kids = ctx.getCell(node.childKeysCell);
       const ds = [];

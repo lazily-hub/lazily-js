@@ -68,7 +68,7 @@ export class StateMachine {
 
   // An eager signal that is `true` while in `target`, else `false`.
   stateIs(target) {
-    const slot = this.#ctx.memo(() => this.state === target);
+    const slot = this.#ctx.computed(() => this.state === target);
     const effect = this.#ctx.effect(() => {
       this.#ctx.get(slot);
       return null;

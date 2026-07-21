@@ -46,7 +46,6 @@ export class ThreadSafeContext {
   cell<T>(value: T): CellHandle<T>;
   computed<T>(compute: () => T): SlotHandle<T>;
   slot<T>(compute: () => T): SlotHandle<T>;
-  memo<T>(compute: () => T): SlotHandle<T>;
   signal<T>(compute: () => T): SignalHandle<T>;
   effect(run: () => void | (() => void)): EffectHandle;
 
@@ -91,7 +90,6 @@ export class ThreadSafeTeardownScope {
   adopt<H extends NodeHandle>(handle: H): H;
   cell<T>(value: T): CellHandle<T>;
   computed<T>(compute: () => T): SlotHandle<T>;
-  memo<T>(compute: () => T): SlotHandle<T>;
   signal<T>(compute: () => T): SignalHandle<T>;
   effect(run: () => void | (() => void)): EffectHandle;
   disarm(): void;

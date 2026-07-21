@@ -53,7 +53,7 @@ test("ThreadSafeContext mirrors single-threaded reactive semantics", () => {
   assert.equal(ctx.get(sum), 13);
 
   // memo suppresses equal recompute downstream; signal is eager.
-  const doubled = ctx.memo(() => ctx.get(sum) * 2);
+  const doubled = ctx.computed(() => ctx.get(sum) * 2);
   assert.equal(ctx.get(doubled), 26);
 });
 

@@ -5,38 +5,42 @@ JavaScript / Node.js port of the lazily reactive-signals family.
 ## Architecture — the Cell kernel (`#lzcellkernel`)
 
 `src/reactive.js` is the reactive graph. It follows the Cell kernel design
-(`tasks/software/lazily-cell-kernel-design.md`): one genus `Cell` — a lightweight
-handle to a reactive node — over two value kinds, plus `Effect` as a value-less
-sink outside the hierarchy.
+(`tasks/software/lazily-cell-kernel-design.md` + naming v2): `Cell` is the
+value-node *concept* over two value kinds; the bare kind name is the **handle** a
+caller holds. `Effect` is a value-less sink outside the hierarchy.
 
-- `SourceCell` (was `CellHandle`) — written from outside; exposes `get`/`set`/
-  `merge`. `ctx.source(v)` is keep-latest; `ctx.source(v, policy)` folds `.merge`
-  under an associative `MergePolicy` (`Cell ≡ SourceCell(KeepLatest)`, so
-  `SourceCell` subsumes the former `MergeCell`).
-- `FormulaCell` (was `SlotHandle`) — computed from upstream; exposes `get` and no
-  `set`/`merge`. `ctx.formula(f)` is **guarded by default** (equality-suppressed).
-- `Effect` (`EffectHandle`) — a sink; `get` nothing, depended on by nothing.
+- `Source` (v1 `SourceCell`) — written from outside; exposes `get`/`set`/`merge`.
+  `ctx.source(v)` is keep-latest; `ctx.source(v, policy)` folds `.merge` under an
+  associative `MergePolicy` (a keep-latest `Source` is the plain cell, so `Source`
+  subsumes the former `MergeCell`).
+- `Computed` (v1 `FormulaCell`) — computed from upstream; exposes `get` and no
+  `set`/`merge`. `ctx.computed(f)` is **always guarded** (an equal recompute
+  suppresses downstream; matches TC39 `Signal.Computed`). There is no unguarded
+  mode, and `memo` is removed (folded into guarded `computed`).
+- `Effect` (v1 `EffectHandle`) — a sink; reads nothing, depended on by nothing.
 
 **Read/write split without a compile guarantee.** JavaScript has neither a
 compile-time nor (by design §4) a runtime kind gate, so the split is expressed by
-METHOD PRESENCE: a `SourceCell` object has `set`/`merge`; a `FormulaCell` object
-does not (`formulaCell.set` is `undefined`). No panic is invented.
+METHOD PRESENCE: a `Source` object has `set`/`merge`; a `Computed` object does not
+(`computed.set` is `undefined`). No panic is invented.
 
-**Eager = a driven formula, not a kind (`formula(f).drive()`).** `.drive()`
-attaches a puller `Effect` that keeps the formula materialized; it is idempotent
-and returns the SAME handle. Drivenness is graph state — the `F_DRIVEN` bit on the
-formula's node plus the `drivenBy` side table (formula id → puller effect id),
-cleared on `undrive`/dispose. Because the puller is a scheduled effect,
-invalidations coalesce, so the `#lzsignaleager` per-write-puller bug is
-structurally unwritable. This retires `Signal`; the former `SignalHandle` and
-`ctx.signal()` remain only as deprecated compatibility for the thread-safe / async
-contexts (which keep their own signal handles for now, mirroring lazily-rs) and
-`state-machine`.
+**Eager = an eager computed, not a kind (`computed(f).eager()`).** `.eager()`
+attaches a puller `Effect` that keeps the computed materialized; it is idempotent
+and returns the SAME handle. `.lazy()` reverts, `.isEager()` queries. Eagerness is
+graph state — the `F_EAGER` bit on the computed's node plus the `eagerBy` side
+table (computed id → puller effect id), cleared on `.lazy()`/dispose. Because the
+puller is a scheduled effect, invalidations coalesce, so the `#lzsignaleager`
+per-write-puller bug is structurally unwritable. This retires `Signal`; the former
+`SignalHandle` and `ctx.signal()` remain only as deprecated compatibility for the
+thread-safe / async contexts (which keep their own signal handles for now,
+mirroring lazily-rs) and `state-machine`.
 
-Deprecated aliases kept for the large internal/test surface: `CellHandle`/
-`SlotHandle` (→ `SourceCell`/`FormulaCell`), and the constructors `cell`/
-`computed`/`slot`/`memo` (→ `source`/`formula`). The storage `id`/arena vocabulary
-is unchanged.
+v2 retired the `SourceCell`/`FormulaCell`/`CellHandle`/`SlotHandle`/`EffectHandle`
+handle names, the `formula`/`memo` constructors, and the unguarded `computed`. The
+`cell`/`slot` constructors remain as deprecated aliases (→ `source`/`computed`);
+the `.d.ts` keeps type-only `CellHandle`/`SlotHandle`/`EffectHandle` aliases for
+peripheral modules during the staged family-wide rename. The storage `id`/arena
+vocabulary is unchanged.
 
 ## Commit & Push
 

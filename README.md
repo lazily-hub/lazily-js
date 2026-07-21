@@ -5,8 +5,8 @@ is the JavaScript/TypeScript binding alongside [`lazily-rs`][rs],
 [`lazily-py`][py], [`lazily-zig`][zig], [`lazily-kt`][kt], and
 [`lazily-dart`][dart]. It ships:
 
-- a full reactive graph — the Cell kernel (`Context`, `SourceCell`,
-  `FormulaCell`, `Effect`; eager = a driven `FormulaCell`);
+- a full reactive graph — the Cell kernel (`Context`, `Source`,
+  `Computed`, `Effect`; eager = an eager `Computed`, `computed().eager()`);
 - an async reactive graph (`AsyncContext`) for Promise-driven derivations, with
   revision-guarded stale-completion discard, in-flight deduplication, and
   cancellation;
@@ -39,7 +39,7 @@ notes and platform carve-outs lives in
 <!-- coverage-table:start -->
 | Feature | Rust | Python | Kotlin | JS | Dart | Zig | Go | C++ |
 | --------- | :----: | :------: | :------: | :--: | :----: | :---: | :--: | :---: |
-| Reactive graph — kernel `Cell<T, K>` (`SourceCell` / `FormulaCell` / `Effect`) + driven `FormulaCell` (`formula().drive()`) / guarded formulas / batch | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Reactive graph — two cell kinds (nodes `SourceCell` / `ComputedCell`; handles `Source<T, M>` / `Computed<T>`) + `Effect` sink + eager `Computed` (`computed().eager()`) / all cells guarded / batch | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Keyed-map materialization (`SlotMap`) — mint-on-access derived slots: transparency + deferral (`#lzmatmode`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Thread-safe keyed map (`ThreadSafeSlotMap`) — `Send + Sync` + materialization confluence (`#lzmatmode`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Async keyed map (`AsyncSlotMap`) — eventual transparency (`#lzmatmode`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
@@ -54,7 +54,7 @@ notes and platform carve-outs lives in
 | Reactive queue (`QueueCell` SPSC/MPSC + `QueueStorage` adapter) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Broadcast topic (`TopicCell`) — independent cursors + durable replay + safe GC (`#lztopiccell`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Competing-consumer work queue (`WorkQueueCell`) — exclusive leases + ack/nack + redelivery + DLQ (`#lzworkqueue`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Merge algebra + `SourceCell<T, M>` — associative `MergePolicy` (`KeepLatest`/`Sum`/`Max`/`SetUnion`/`RawFifo`), `Cell ≡ SourceCell<KeepLatest>`, read-genus/write-`Source<M>` split (`#relaycell`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Merge algebra + `Source<T, M>` — associative `MergePolicy` (`KeepLatest`/`Sum`/`Max`/`SetUnion`/`RawFifo`), `Cell ≡ Source<KeepLatest>`, read-any-cell/write-`Source` split (`#relaycell`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | RelayCell — conflating relay + `BackpressurePolicy` + `SpillStore` + `Transport` + Inbox/Outbox + Rate/Window/Expiry/Priority/keyed policies (`#relaycell`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Free-text character CRDT (`TextCrdt`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `TextCrdt` delta sync (`version_vector` / `delta_since` / `apply_delta`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
@@ -102,7 +102,7 @@ and JSON Schemas in `lazily-spec` and the Lean models in `lazily-formal`.
 |--------|------------|
 | `@lazily-hub/lazily-js` | `lazily-spec` IPC wire types: `Snapshot`, `Delta`, `DeltaOp`, `IpcMessage` (`Snapshot` / `Delta` / `CrdtSync`), `NodeState`, `IpcValue`, `PeerPermissions`, `SessionHandshake`, `BINDING_CAPABILITIES` |
 | `@lazily-hub/lazily-js/transport` | Cross-process zero-copy transport (`#lzzcpy`): `ShmBlobArena`, `InProcessBackend` / `ArrowBackend`, `BlobRouter`, `spillMessage` / `resolveValue`, and the FFI-gated `createShmBackend` (Node/Bun/Deno). Isomorphic — no FFI import; browser-safe |
-| `@lazily-hub/lazily-js/reactive` | Reactive dependency graph — the Cell kernel: `createContext` (alias `Context`), `SourceCell`, `FormulaCell`, `Effect` (eager = a driven `FormulaCell`, `formula().drive()`). Closure-based core (#lzjsclosure) — 2-8x faster reads than the prior class implementation |
+| `@lazily-hub/lazily-js/reactive` | Reactive dependency graph — the Cell kernel: `createContext` (alias `Context`), `Source`, `Computed`, `Effect` (eager = an eager `Computed`, `computed().eager()`). Closure-based core (#lzjsclosure) — 2-8x faster reads than the prior class implementation |
 | `@lazily-hub/lazily-js/reactive-async` | Async reactive graph: `AsyncContext` — Promise-driven slots/effects with revision-guarded stale-completion discard, in-flight dedup, and cancellation |
 | `@lazily-hub/lazily-js/reactive-family` | Unified keyed reactive map: `ReactiveMap<K,V,H>` (reactive membership/order, `getOrInsertWith` mint-on-access, `remove`, `move`) + `CellMap` (adds cell-only `set` + eager `entry`/`entryWith`) and `SlotMap` (lazy `getOrInsertWith` + eager `materializeAll`; no `set`) specializations. No eager/lazy mode flag (`#reactivemap`) |
 | `@lazily-hub/lazily-js/async-reactive-family` | Async keyed reactive map: `AsyncReactiveMap` + `AsyncCellMap` / `AsyncSlotMap` over `AsyncContext` — eventual transparency (a pending slot observes `undefined` and resolves to the canonical value; eager ≡ lazy once resolved) (`#reactivemap`) |
@@ -134,29 +134,32 @@ run 2-8x faster than the prior class implementation (see `bench/context.bench.mj
 and `BENCHMARKS.md`). Both `createContext()` and the historical `new Context()`
 are the same function — an alias, not a wrapper.
 
-The family is the **Cell kernel** (`#lzcellkernel`) — one genus `Cell` (a node
-with a readable value) over two value kinds, plus `Effect` outside the hierarchy:
+The family is the **Cell kernel** (`#lzcellkernel`, naming v2) — `Cell` is the
+value-node *concept* over two value kinds, and the bare kind name is the
+**handle** a caller holds; `Effect` sits outside the hierarchy:
 
-- **SourceCell** — a value written from outside (`ctx.source(v)`); exposes
+- **Source** — a value written from outside (`ctx.source(v)`); exposes
   `get`/`set`/`merge`. `ctx.source(v, policy)` folds `.merge` under an associative
-  `MergePolicy`, so `SourceCell` subsumes the former `MergeCell`
-  (`Cell ≡ SourceCell(KeepLatest)`).
-- **FormulaCell** — a value computed from upstream (`ctx.formula(f)`); exposes
-  `get` and **not** `set`/`merge`. `formula` is **guarded by default**
-  (equality-suppressed).
-- **Effect** — side-effecting observer with cleanup; a value-less sink.
+  `MergePolicy`, so `Source` subsumes the former `MergeCell` (a keep-latest
+  `Source` is the plain cell). (v1 `SourceCell`.)
+- **Computed** — a value computed from upstream (`ctx.computed(f)`); exposes
+  `get` and **not** `set`/`merge`. `computed` is **always guarded**
+  (an equal recompute suppresses downstream — matches TC39 `Signal.Computed`).
+  (v1 `FormulaCell`.)
+- **Effect** — side-effecting observer with cleanup; a value-less sink. (v1
+  `EffectHandle`.)
 
 **The read/write split is by method presence.** JavaScript has no compile-time
-kind gate and (by design) no runtime one, so a `SourceCell` object simply has
-`set`/`merge` and a `FormulaCell` object does not.
+kind gate and (by design) no runtime one, so a `Source` object simply has
+`set`/`merge` and a `Computed` object does not.
 
-**Eager is a driven formula, not a kind.** `ctx.formula(f).drive()` attaches a
-puller `Effect` that keeps the formula materialized as soon as a dependency
-invalidates; `.drive()` is idempotent and returns the same handle, and
-`.undrive()` reverts it. This retires the former `Signal`.
+**Eager is an eager computed, not a kind.** `ctx.computed(f).eager()` attaches a
+puller `Effect` that keeps the computed materialized as soon as a dependency
+invalidates; `.eager()` is idempotent and returns the same handle, `.lazy()`
+reverts it, and `.isEager()` queries the state. This retires the former `Signal`.
 
-Dependencies are discovered dynamically while a formula/effect computes.
-Invalidation is pull-based and glitch-free; guarded formulas use an equality
+Dependencies are discovered dynamically while a computed/effect computes.
+Invalidation is pull-based and glitch-free; every computed uses an equality
 guard to suppress downstream work when a recompute produces the same value.
 `batch` coalesces invalidations and effect reruns.
 
@@ -167,21 +170,22 @@ const ctx = createContext(); // idiomatic; `new Context()` is the same call
 const a = ctx.source(2);
 const b = ctx.source(3);
 
-const sum = ctx.formula(() => a.get() + b.get());
+const sum = ctx.computed(() => a.get() + b.get());
 sum.get(); // 5
 
 a.set(10);
 sum.get(); // 13, recomputed lazily on read
 
-const parity = ctx.formula(() => (a.get() % 2 === 0 ? "even" : "odd")).drive();
+const parity = ctx.computed(() => (a.get() % 2 === 0 ? "even" : "odd")).eager();
 a.set(11);
-parity.get(); // "odd", already materialized (driven)
+parity.get(); // "odd", already materialized (eager)
 ```
 
-The former handle/constructor names — `CellHandle`/`SlotHandle`,
-`cell`/`computed`/`slot`/`memo`/`signal`, and `getCell`/`getSignal`/`setCell` —
-remain as deprecated aliases and the functional `ctx.get(handle)` surface is
-unchanged, so existing code keeps working.
+`memo` and the unguarded `computed` are removed (folded into the guarded
+`computed`); `SourceCell`/`FormulaCell`/`CellHandle`/`SlotHandle` handle names
+are retired. The `cell`/`slot`/`signal` constructors and the functional
+`ctx.get(handle)` / `getCell` / `setCell` surface remain (`cell`/`slot` as
+deprecated aliases), so existing code keeps working.
 
 ## Async reactive context
 
@@ -346,7 +350,7 @@ survive moves; and an atomic move bumps order without touching values.
 `reconcileCollections` emits the LIS-minimized `{ insert, remove, move, update }`
 operation set. `SemTree` adds a memoized ancestor-chain fold: editing one leaf
 recomputes only that leaf's ancestor path, and equal folded results are
-suppressed by the memo guard.
+suppressed by the computed equality guard.
 
 ```js
 import { CellMap, reconcileCollections } from "@lazily-hub/lazily-js/collections";
@@ -660,7 +664,7 @@ built on a zero-dependency `node:perf_hooks` harness:
 - **Micro-benchmarks** ([`bench/context.bench.mjs`](bench/context.bench.mjs)) — a
   1:1 port of the single-threaded `Context` cases in lazily-rs's
   `benches/context.rs` (cached reads, cold first get, dependency fan-out,
-  set-cell invalidation, memo equality suppression, effect flushing, batch
+  set-cell invalidation, computed equality suppression, effect flushing, batch
   storms, typed cache reads) so JS and Rust numbers are directly comparable.
 - **Scale** ([`bench/scale.bench.mjs`](bench/scale.bench.mjs)) — a
   spreadsheet-shaped graph (`N` input cells + `N` formula slots,
@@ -698,10 +702,10 @@ npm run test:size        # gate: fails CI if any entry exceeds its budget
 
 | Import | Size | Budget |
 |---|---:|---:|
-| reactive: Context | 3.24 KB ✓ | 3.35 KB |
-| reactive: Context + handles + defaultEqual | 3.25 KB ✓ | 3.37 KB |
-| state-machine: StateMachine | 265 B ✓ | 267 B |
-| sem-tree: SemTree | 505 B ✓ | 505 B |
+| reactive: Context | 3.22 KB ✓ | 3.30 KB |
+| reactive: Context + handles + defaultEqual | 3.22 KB ✓ | 3.30 KB |
+| state-machine: StateMachine | 267 B ✓ | 267 B |
+| sem-tree: SemTree | 507 B ✓ | 512 B |
 | stable-id: contentHash | 152 B ✓ | 152 B |
 | collections: CellMap + CellTree + reconcileCollections | 1.65 KB ✓ | 1.65 KB |
 | index: PROTOCOL_ID + Snapshot (tree-shaken kitchen sink) | 2.41 KB ✓ | 2.41 KB |

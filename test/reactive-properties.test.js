@@ -82,7 +82,7 @@ test("Lean recomputeSlot_equal_preserves_dependents: a memo slot that recomputes
   // A memo slot whose OUTPUT is stable even when its input flips: it derives
   // a constant `42` regardless of `toggle`. The memo guard must observe
   // equality and suppress downstream propagation.
-  const stable = ctx.memo(() => {
+  const stable = ctx.computed(() => {
     ctx.getCell(toggle); // register the edge, even though output is constant
     return 42;
   });
@@ -114,7 +114,7 @@ test("Lean recomputeSlot_equal_preserves_dependents: a memo slot that recomputes
 test("Lean recomputeSlot_different_invalidates_dependents: a strictly-different memo recompute invalidates every direct dependent", () => {
   const ctx = new Context();
   const src = ctx.cell(1);
-  const m = ctx.memo(() => ctx.getCell(src) * 2);
+  const m = ctx.computed(() => ctx.getCell(src) * 2);
 
   const lazyChild = ctx.slot(() => ctx.get(m) + 1);
   let effectFires = 0;

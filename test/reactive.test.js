@@ -31,11 +31,11 @@ test("Cell == guard: setting an equal value is a no-op (no invalidation)", () =>
   assert.equal(runs, 2);
 });
 
-test("memo: an equal recompute suppresses downstream invalidation", () => {
+test("computed: an equal recompute suppresses downstream invalidation (guarded)", () => {
   const ctx = new Context();
   const a = ctx.cell(1);
   // memo always returns 0 regardless of input — downstream must not re-run.
-  const constant = ctx.memo(() => {
+  const constant = ctx.computed(() => {
     ctx.getCell(a); // subscribe
     return 0;
   });
@@ -170,7 +170,7 @@ test("#lzspecedgeindex: wide fan-out keeps an exact edge set across the promote 
     const source = ctx.cell(1);
     const subs = [];
     for (let i = 0; i < width; i++) {
-      subs.push(ctx.memo(() => ctx.getCell(source) * 2));
+      subs.push(ctx.computed(() => ctx.getCell(source) * 2));
     }
     for (const s of subs) assert.equal(ctx.get(s), 2);
     ctx.setCell(source, 5);
@@ -260,7 +260,7 @@ test("#lzspecedgeindex: a recycled id does not inherit a stale edge index", () =
   const subs = [];
   // Push `wide` well past the promote threshold so it definitely has an index.
   for (let i = 0; i < 400; i++) {
-    const s = ctx.memo(() => ctx.getCell(wide) + 1);
+    const s = ctx.computed(() => ctx.getCell(wide) + 1);
     ctx.get(s);
     subs.push(s);
   }
@@ -268,7 +268,7 @@ test("#lzspecedgeindex: a recycled id does not inherit a stale edge index", () =
   ctx.disposeCell(wide); // (1) strands a full index on the recycled id
   const fresh = ctx.cell(10); // (2) pops that id
   ctx.disposeSlot(subs[399]); // (3) frees an id the stale index has a key for
-  const revived = ctx.memo(() => ctx.getCell(fresh) * 3);
+  const revived = ctx.computed(() => ctx.getCell(fresh) * 3);
 
   assert.equal(ctx.get(revived), 30);
   ctx.setCell(fresh, 20);
@@ -315,7 +315,7 @@ test("#lzspecedgeindex: dynamic dependencies stay exact on a promoted list", () 
   // Pad `a` past the promote threshold so its dependents list is indexed.
   const pad = [];
   for (let i = 0; i < 300; i++) {
-    const s = ctx.memo(() => ctx.getCell(a));
+    const s = ctx.computed(() => ctx.getCell(a));
     ctx.get(s);
     pad.push(s);
   }
@@ -432,10 +432,10 @@ test("#lzspecedgeindex: an id recycled mid-flush runs exactly once", () => {
 
 // -- Cell kernel (#lzcellkernel) ---------------------------------------------
 
-test("kernel: source exposes set/merge, formula does not (read/write split by method presence)", () => {
+test("kernel: source exposes set/merge, computed does not (read/write split by method presence)", () => {
   const ctx = new Context();
   const n = ctx.source(1);
-  const f = ctx.formula(() => n.get() * 2);
+  const f = ctx.computed(() => n.get() * 2);
   assert.equal(typeof n.set, "function");
   assert.equal(typeof n.merge, "function");
   // The write/protection is expressed as method ABSENCE on the formula object.
@@ -446,12 +446,12 @@ test("kernel: source exposes set/merge, formula does not (read/write split by me
   assert.equal(f.get(), 10);
 });
 
-test("kernel: formula is guarded by default (equal recompute suppresses downstream)", () => {
+test("kernel: computed is guarded by default (equal recompute suppresses downstream)", () => {
   const ctx = new Context();
   const a = ctx.source(2);
   let downstream = 0;
-  const parity = ctx.formula(() => a.get() % 2);
-  const dep = ctx.formula(() => {
+  const parity = ctx.computed(() => a.get() % 2);
+  const dep = ctx.computed(() => {
     downstream++;
     return parity.get();
   });
@@ -462,19 +462,19 @@ test("kernel: formula is guarded by default (equal recompute suppresses downstre
   assert.equal(downstream, 1, "guarded formula suppresses an equal recompute");
 });
 
-test("kernel: formula().drive() is idempotent, eager, and returns the same handle", () => {
+test("kernel: computed().eager() is idempotent, eager, and returns the same handle", () => {
   const ctx = new Context();
   const n = ctx.source(1);
   let computes = 0;
-  const f = ctx.formula(() => {
+  const f = ctx.computed(() => {
     computes++;
     return n.get() * 2;
   });
-  const g = f.drive();
+  const g = f.eager();
   assert.equal(g, f, "drive returns the same handle");
-  assert.ok(f.isDriven());
+  assert.ok(f.isEager());
   const after = computes;
-  f.drive(); // idempotent no-op
+  f.eager(); // idempotent no-op
   assert.equal(computes, after, "a second drive attaches no second puller");
   const c0 = computes;
   n.set(9); // eager: recomputes without a read
@@ -482,21 +482,21 @@ test("kernel: formula().drive() is idempotent, eager, and returns the same handl
   assert.equal(f.get(), 18);
 });
 
-test("kernel: disposing a driven formula tears down its puller; undrive reverts to lazy", () => {
+test("kernel: disposing an eager computed tears down its puller; lazy() reverts to lazy", () => {
   const ctx = new Context();
   const n = ctx.source(1);
-  const f = ctx.formula(() => n.get() + 1).drive();
-  assert.ok(f.isDriven());
-  f.undrive();
-  assert.ok(!f.isDriven());
-  const f2 = ctx.formula(() => n.get() + 1).drive();
+  const f = ctx.computed(() => n.get() + 1).eager();
+  assert.ok(f.isEager());
+  f.lazy();
+  assert.ok(!f.isEager());
+  const f2 = ctx.computed(() => n.get() + 1).eager();
   f2.dispose();
   assert.ok(ctx.isNodeDisposed(f2), "disposed driven formula frees its node");
   // A surviving write must not throw through a stranded puller.
   n.set(7);
 });
 
-test("kernel: source(v, policy) folds under the policy (SourceCell subsumes MergeCell)", () => {
+test("kernel: source(v, policy) folds under the policy (Source subsumes MergeCell)", () => {
   const ctx = new Context();
   const Sum = { name: "Sum", merge: (o, x) => o + x };
   const acc = ctx.source(0, Sum);
