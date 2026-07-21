@@ -64,19 +64,46 @@ import { MODELS } from "./reactive-graph/models.js";
 
 // Fixtures a model cannot replay, as `<model>/<fixture>` -> reason.
 //
-// EMPTY, and asserted as an exact match in both directions: every fixture now
-// replays against every context lazily-js ships. The eight entries this ledger
-// used to carry all named the same missing surface -- `ctx.scope()` /
-// `TeardownScope`, per-node `disposeNode`, and dependency-edge degree
-// introspection -- which `lazily-rs` was the only binding to have shipped. That
-// surface now exists on `Context`, `AsyncContext`, and `ThreadSafeContext`
-// (`#lzspecedgeindex`), so a skip here would be a regression, not a gap.
+// Asserted as an exact match in both directions. The `#lzspecedgeindex` surface
+// (`ctx.scope()` / `TeardownScope`, per-node `disposeNode`, dependency-edge
+// degree introspection) now exists on all three contexts, so the eight entries
+// this ledger once carried for that gap are gone.
+//
+// What remains are the six `#lzmergefeed` fixtures that landed on spec main
+// (Step 3), replayed by no context because they exercise a surface this runner
+// does not model -- exactly as `lazily-cpp` (`d36130b`) and the rest of the
+// family recorded them:
+//
+//   * five assert the mergefeed fold via the `merge_cell` op, which is not in
+//     `ALL_OPS`. `unsupportedReason` reports the op before it reaches the
+//     `merges_of` assertion those fixtures also use, so the reason names the op.
+//   * `feedback_drain_bound_reports_exhaustion` uses only modelled ops but
+//     asserts `drain_exhausted` (with `writes_own_cone` in the corpus), keys not
+//     in `ALL_ASSERTIONS`. It is parked on the assertion.
+//
+// These are accounted-for skips, never faked passes: the ops/assertions are
+// genuinely unimplemented and the fixtures are unedited. When `merge_cell` and
+// the drain keys are modelled, each entry fails the build until removed.
 //
 // An entry may only be added with the specific op or assertion named, and only
 // when the underlying context genuinely lacks the API -- never to route around a
 // failing assertion. A failing fixture belongs in `KNOWN_DIVERGENCES`, where it
 // is visible as a finding.
+const MERGE_FIXTURES = [
+  "exact_fold_paths_stay_exact.json",
+  "merge_cell_acquires_no_dependency_edge.json",
+  "merge_feed_through_a_formula_coalesces.json",
+  "merge_folds_synchronously_in_batch.json",
+  "merge_per_settled_cone_not_per_write.json",
+];
 const EXPECTED_SKIPS = {};
+for (const model of ["Context", "AsyncContext", "ThreadSafeContext"]) {
+  for (const fixture of MERGE_FIXTURES) {
+    EXPECTED_SKIPS[`${model}/${fixture}`] = "unsupported op: merge_cell";
+  }
+  EXPECTED_SKIPS[`${model}/feedback_drain_bound_reports_exhaustion.json`] =
+    "unsupported assertion: drain_exhausted";
+}
 
 /**
  * Fixture assertions an execution model does not satisfy today, as
@@ -100,12 +127,17 @@ const EXPECTED_SKIPS = {};
  */
 const KNOWN_DIVERGENCES = [];
 
-// The fixtures each model must replay. Asserted as an exact set, so a fixture
-// dropping out of the replay path fails rather than shrinking the run silently.
+// The fixtures each model must replay: the full corpus minus that model's
+// skips. Asserted as an exact set, so a fixture dropping out of the replay path
+// fails rather than shrinking the run silently, and a skipped fixture that
+// becomes replayable fails until it is added back here.
+function expectedReplaysFor(model) {
+  return FIXTURES.filter((name) => !(`${model}/${name}` in EXPECTED_SKIPS));
+}
 const EXPECTED_REPLAYS = {
-  Context: FIXTURES,
-  AsyncContext: FIXTURES,
-  ThreadSafeContext: FIXTURES,
+  Context: expectedReplaysFor("Context"),
+  AsyncContext: expectedReplaysFor("AsyncContext"),
+  ThreadSafeContext: expectedReplaysFor("ThreadSafeContext"),
 };
 
 test("reactive-graph corpus is the canonical sibling's, unmodified", () => {

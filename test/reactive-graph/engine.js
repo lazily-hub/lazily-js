@@ -67,6 +67,17 @@ export const FIXTURES = [
   "disposal_does_not_run_surviving_effects.json",
   "dispose_detaches_edges_both_directions.json",
   "dispose_signal_reverts_to_lazy.json",
+  // #lzmergefeed: the mergefeed/feedback fixtures landed on spec main (Step 3).
+  // Five use the `merge_cell` op this runner does not model, and
+  // `feedback_drain_bound_reports_exhaustion` asserts the parked
+  // `drain_exhausted` key -- all accounted-for skips in `EXPECTED_SKIPS`, not
+  // faked passes. They are listed here so the on-disk drift check stays green.
+  "exact_fold_paths_stay_exact.json",
+  "feedback_drain_bound_reports_exhaustion.json",
+  "merge_cell_acquires_no_dependency_edge.json",
+  "merge_feed_through_a_formula_coalesces.json",
+  "merge_folds_synchronously_in_batch.json",
+  "merge_per_settled_cone_not_per_write.json",
   "read_after_dispose_is_an_error.json",
   "recycled_id_inherits_nothing.json",
   "scope_teardown_equals_fold_of_disposals.json",
