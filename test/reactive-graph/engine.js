@@ -223,12 +223,18 @@ async function replaySteps(model, steps, label, assertFn, divergences, tail) {
           await instance.computed(op.id, op.reads ?? [], op.offset ?? 0, op.scope ?? null);
           break;
         case "signal":
+        // #lzcellkernel: dual-accept `drive` alongside the fixture's `signal`.
+        // The eager construction is now a driven FormulaCell (`formula().drive()`);
+        // both op names route to the same model method until the corpus renames.
+        case "drive":
           // Eager: the value must be materialized by the time this returns, and
           // deliberately NOT read here -- reading would materialize a lazy
           // binding and hide the very thing `computes_of` is asserting.
           await instance.signal(op.id, op.reads ?? [], op.offset ?? 0, op.scope ?? null);
           break;
         case "dispose_signal":
+        // #lzcellkernel: dual-accept `undrive` alongside `dispose_signal`.
+        case "undrive":
           // The eager puller only -- see clause 4. Not a node teardown, which is
           // why this is not routed through `dispose`.
           await instance.disposeSignal(op.id);

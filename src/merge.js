@@ -1,13 +1,19 @@
-// Phase 1 of the RelayCell backpressure plan (#relaycell) — the merge algebra
-// and the Reactive/Source read/write split.
+// Phase 1 of the RelayCell backpressure plan (#relaycell) — the merge algebra.
 //
 // See lazily-spec/docs/reactive-graph.md § "MergeCell and the merge algebra" and
 // relaycell-backpressure-analysis.md §4.0/§4.3. A merge policy is an *associative*
 // fold ⊕: T×T→T; the properties it satisfies (associativity always; commutativity
 // = reordering tax; idempotency = durability tax) select which overflow behaviour
-// is sound. `MergeCell` generalizes a plain `Cell` — `Cell ≡ MergeCell(KeepLatest)`
-// — a source whose write is a merge. Backed by an ordinary cell, so it inherits
-// the Phase-0 `==` store-guard and store-without-cascade.
+// is sound.
+//
+// #lzcellkernel: under the Cell kernel a "merge cell" is just a `SourceCell` with
+// a policy — `ctx.source(v, policy)` returns a `SourceCell` whose `.merge(op)`
+// folds under `policy`, and `Cell ≡ SourceCell(KeepLatest)`. The `MergeCell`
+// wrapper and the `asSource`/`asReactive` trait adapters below are the former
+// `Reactive`/`Source` read/write split; they are retained (deprecated) for
+// existing call sites, since the kernel now expresses that split directly by
+// method presence (a `SourceCell` has `set`/`merge`; a `FormulaCell` does not).
+// Backed by an ordinary cell, so it inherits the `==` store-guard.
 
 // -- Merge policies ----------------------------------------------------------
 //

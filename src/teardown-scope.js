@@ -107,17 +107,27 @@ export class TeardownScope {
     return handle;
   }
 
-  /** Create a source cell owned by this scope. */
+  /** Create a source cell owned by this scope (#lzcellkernel). */
+  source(value, policy) {
+    return this.adopt(this.#ctx.source(value, policy));
+  }
+
+  /** Create a guarded formula owned by this scope (#lzcellkernel). */
+  formula(compute) {
+    return this.adopt(this.#ctx.formula(compute));
+  }
+
+  /** @deprecated use {@link source}. */
   cell(value) {
     return this.adopt(this.#ctx.cell(value));
   }
 
-  /** Create a lazily-computed slot owned by this scope. */
+  /** @deprecated unguarded formula; use {@link formula}. */
   computed(compute) {
     return this.adopt(this.#ctx.computed(compute));
   }
 
-  /** Create an equality-guarded memo owned by this scope. */
+  /** @deprecated use {@link formula} (guarded by default). */
   memo(compute) {
     return this.adopt(this.#ctx.memo(compute));
   }

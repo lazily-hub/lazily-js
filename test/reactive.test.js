@@ -429,3 +429,80 @@ test("#lzspecedgeindex: an id recycled mid-flush runs exactly once", () => {
   ctx.setCell(source, 1);
   assert.equal(recycledRuns, 50, "each recycled effect runs exactly once");
 });
+
+// -- Cell kernel (#lzcellkernel) ---------------------------------------------
+
+test("kernel: source exposes set/merge, formula does not (read/write split by method presence)", () => {
+  const ctx = new Context();
+  const n = ctx.source(1);
+  const f = ctx.formula(() => n.get() * 2);
+  assert.equal(typeof n.set, "function");
+  assert.equal(typeof n.merge, "function");
+  // The write/protection is expressed as method ABSENCE on the formula object.
+  assert.equal(typeof f.set, "undefined");
+  assert.equal(typeof f.merge, "undefined");
+  assert.equal(f.get(), 2);
+  n.set(5);
+  assert.equal(f.get(), 10);
+});
+
+test("kernel: formula is guarded by default (equal recompute suppresses downstream)", () => {
+  const ctx = new Context();
+  const a = ctx.source(2);
+  let downstream = 0;
+  const parity = ctx.formula(() => a.get() % 2);
+  const dep = ctx.formula(() => {
+    downstream++;
+    return parity.get();
+  });
+  dep.get();
+  assert.equal(downstream, 1);
+  a.set(4); // parity unchanged (0) -> guarded, no downstream recompute
+  dep.get();
+  assert.equal(downstream, 1, "guarded formula suppresses an equal recompute");
+});
+
+test("kernel: formula().drive() is idempotent, eager, and returns the same handle", () => {
+  const ctx = new Context();
+  const n = ctx.source(1);
+  let computes = 0;
+  const f = ctx.formula(() => {
+    computes++;
+    return n.get() * 2;
+  });
+  const g = f.drive();
+  assert.equal(g, f, "drive returns the same handle");
+  assert.ok(f.isDriven());
+  const after = computes;
+  f.drive(); // idempotent no-op
+  assert.equal(computes, after, "a second drive attaches no second puller");
+  const c0 = computes;
+  n.set(9); // eager: recomputes without a read
+  assert.ok(computes > c0, "a driven formula recomputes eagerly on upstream change");
+  assert.equal(f.get(), 18);
+});
+
+test("kernel: disposing a driven formula tears down its puller; undrive reverts to lazy", () => {
+  const ctx = new Context();
+  const n = ctx.source(1);
+  const f = ctx.formula(() => n.get() + 1).drive();
+  assert.ok(f.isDriven());
+  f.undrive();
+  assert.ok(!f.isDriven());
+  const f2 = ctx.formula(() => n.get() + 1).drive();
+  f2.dispose();
+  assert.ok(ctx.isNodeDisposed(f2), "disposed driven formula frees its node");
+  // A surviving write must not throw through a stranded puller.
+  n.set(7);
+});
+
+test("kernel: source(v, policy) folds under the policy (SourceCell subsumes MergeCell)", () => {
+  const ctx = new Context();
+  const Sum = { name: "Sum", merge: (o, x) => o + x };
+  const acc = ctx.source(0, Sum);
+  acc.merge(3);
+  acc.merge(4);
+  assert.equal(acc.get(), 7);
+  acc.set(0); // set is a plain replace, bypassing the policy
+  assert.equal(acc.get(), 0);
+});

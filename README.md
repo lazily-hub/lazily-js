@@ -5,7 +5,8 @@ is the JavaScript/TypeScript binding alongside [`lazily-rs`][rs],
 [`lazily-py`][py], [`lazily-zig`][zig], [`lazily-kt`][kt], and
 [`lazily-dart`][dart]. It ships:
 
-- a full reactive graph (`Context`, `Cell`, `Slot`, `Signal`, `Effect`);
+- a full reactive graph — the Cell kernel (`Context`, `SourceCell`,
+  `FormulaCell`, `Effect`; eager = a driven `FormulaCell`);
 - an async reactive graph (`AsyncContext`) for Promise-driven derivations, with
   revision-guarded stale-completion discard, in-flight deduplication, and
   cancellation;
@@ -38,7 +39,7 @@ notes and platform carve-outs lives in
 <!-- coverage-table:start -->
 | Feature | Rust | Python | Kotlin | JS | Dart | Zig | Go | C++ |
 | --------- | :----: | :------: | :------: | :--: | :----: | :---: | :--: | :---: |
-| Reactive graph — core `Cell` / `Slot` / `Effect` (+ derived `Signal` = `Slot.eager`) / memo / batch | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Reactive graph — kernel `Cell<T, K>` (`SourceCell` / `FormulaCell` / `Effect`) + driven `FormulaCell` (`formula().drive()`) / guarded formulas / batch | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Keyed-map materialization (`SlotMap`) — mint-on-access derived slots: transparency + deferral (`#lzmatmode`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Thread-safe keyed map (`ThreadSafeSlotMap`) — `Send + Sync` + materialization confluence (`#lzmatmode`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Async keyed map (`AsyncSlotMap`) — eventual transparency (`#lzmatmode`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
@@ -53,7 +54,7 @@ notes and platform carve-outs lives in
 | Reactive queue (`QueueCell` SPSC/MPSC + `QueueStorage` adapter) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Broadcast topic (`TopicCell`) — independent cursors + durable replay + safe GC (`#lztopiccell`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Competing-consumer work queue (`WorkQueueCell`) — exclusive leases + ack/nack + redelivery + DLQ (`#lzworkqueue`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Merge algebra + `MergeCell` — associative `MergePolicy` (`KeepLatest`/`Sum`/`Max`/`SetUnion`/`RawFifo`), `Cell ≡ MergeCell<KeepLatest>`, `Reactive`/`Source` split (`#relaycell`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Merge algebra + `SourceCell<T, M>` — associative `MergePolicy` (`KeepLatest`/`Sum`/`Max`/`SetUnion`/`RawFifo`), `Cell ≡ SourceCell<KeepLatest>`, read-genus/write-`Source<M>` split (`#relaycell`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | RelayCell — conflating relay + `BackpressurePolicy` + `SpillStore` + `Transport` + Inbox/Outbox + Rate/Window/Expiry/Priority/keyed policies (`#relaycell`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Free-text character CRDT (`TextCrdt`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `TextCrdt` delta sync (`version_vector` / `delta_since` / `apply_delta`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
@@ -101,7 +102,7 @@ and JSON Schemas in `lazily-spec` and the Lean models in `lazily-formal`.
 |--------|------------|
 | `@lazily-hub/lazily-js` | `lazily-spec` IPC wire types: `Snapshot`, `Delta`, `DeltaOp`, `IpcMessage` (`Snapshot` / `Delta` / `CrdtSync`), `NodeState`, `IpcValue`, `PeerPermissions`, `SessionHandshake`, `BINDING_CAPABILITIES` |
 | `@lazily-hub/lazily-js/transport` | Cross-process zero-copy transport (`#lzzcpy`): `ShmBlobArena`, `InProcessBackend` / `ArrowBackend`, `BlobRouter`, `spillMessage` / `resolveValue`, and the FFI-gated `createShmBackend` (Node/Bun/Deno). Isomorphic — no FFI import; browser-safe |
-| `@lazily-hub/lazily-js/reactive` | Reactive dependency graph: `createContext` (alias `Context`), `Cell`, `Slot`, `Signal`, `Effect`. Closure-based core (#lzjsclosure) — 2-8x faster reads than the prior class implementation |
+| `@lazily-hub/lazily-js/reactive` | Reactive dependency graph — the Cell kernel: `createContext` (alias `Context`), `SourceCell`, `FormulaCell`, `Effect` (eager = a driven `FormulaCell`, `formula().drive()`). Closure-based core (#lzjsclosure) — 2-8x faster reads than the prior class implementation |
 | `@lazily-hub/lazily-js/reactive-async` | Async reactive graph: `AsyncContext` — Promise-driven slots/effects with revision-guarded stale-completion discard, in-flight dedup, and cancellation |
 | `@lazily-hub/lazily-js/reactive-family` | Unified keyed reactive map: `ReactiveMap<K,V,H>` (reactive membership/order, `getOrInsertWith` mint-on-access, `remove`, `move`) + `CellMap` (adds cell-only `set` + eager `entry`/`entryWith`) and `SlotMap` (lazy `getOrInsertWith` + eager `materializeAll`; no `set`) specializations. No eager/lazy mode flag (`#reactivemap`) |
 | `@lazily-hub/lazily-js/async-reactive-family` | Async keyed reactive map: `AsyncReactiveMap` + `AsyncCellMap` / `AsyncSlotMap` over `AsyncContext` — eventual transparency (a pending slot observes `undefined` and resolves to the canonical value; eager ≡ lazy once resolved) (`#reactivemap`) |
@@ -133,38 +134,54 @@ run 2-8x faster than the prior class implementation (see `bench/context.bench.mj
 and `BENCHMARKS.md`). Both `createContext()` and the historical `new Context()`
 are the same function — an alias, not a wrapper.
 
-The family is:
+The family is the **Cell kernel** (`#lzcellkernel`) — one genus `Cell` (a node
+with a readable value) over two value kinds, plus `Effect` outside the hierarchy:
 
-- **Slot** - lazy, memoized derived value;
-- **Cell** - mutable source value;
-- **Effect** - side-effecting observer with cleanup.
+- **SourceCell** — a value written from outside (`ctx.source(v)`); exposes
+  `get`/`set`/`merge`. `ctx.source(v, policy)` folds `.merge` under an associative
+  `MergePolicy`, so `SourceCell` subsumes the former `MergeCell`
+  (`Cell ≡ SourceCell(KeepLatest)`).
+- **FormulaCell** — a value computed from upstream (`ctx.formula(f)`); exposes
+  `get` and **not** `set`/`merge`. `formula` is **guarded by default**
+  (equality-suppressed).
+- **Effect** — side-effecting observer with cleanup; a value-less sink.
 
-The core primitives are **Cell** / **Slot** / **Effect**. **`Signal` is a
-derived construct, not a core primitive** — `Signal ≡ Slot.eager`, a memo Slot
-plus a puller Effect that re-materializes as soon as a dependency invalidates.
+**The read/write split is by method presence.** JavaScript has no compile-time
+kind gate and (by design) no runtime one, so a `SourceCell` object simply has
+`set`/`merge` and a `FormulaCell` object does not.
 
-Dependencies are discovered dynamically while a slot/effect/signal computes.
-Invalidation is pull-based and glitch-free; `memo`/`Signal` use equality guards
-to suppress downstream work when a recompute produces the same value. `batch`
-coalesces invalidations and effect reruns.
+**Eager is a driven formula, not a kind.** `ctx.formula(f).drive()` attaches a
+puller `Effect` that keeps the formula materialized as soon as a dependency
+invalidates; `.drive()` is idempotent and returns the same handle, and
+`.undrive()` reverts it. This retires the former `Signal`.
+
+Dependencies are discovered dynamically while a formula/effect computes.
+Invalidation is pull-based and glitch-free; guarded formulas use an equality
+guard to suppress downstream work when a recompute produces the same value.
+`batch` coalesces invalidations and effect reruns.
 
 ```js
-import { Context, createContext } from "@lazily-hub/lazily-js/reactive";
+import { createContext } from "@lazily-hub/lazily-js/reactive";
 
 const ctx = createContext(); // idiomatic; `new Context()` is the same call
-const a = ctx.cell(2);
-const b = ctx.cell(3);
+const a = ctx.source(2);
+const b = ctx.source(3);
 
-const sum = ctx.memo(() => ctx.getCell(a) + ctx.getCell(b));
-ctx.get(sum); // 5
+const sum = ctx.formula(() => a.get() + b.get());
+sum.get(); // 5
 
-ctx.setCell(a, 10);
-ctx.get(sum); // 13, recomputed lazily on read
+a.set(10);
+sum.get(); // 13, recomputed lazily on read
 
-const parity = ctx.signal(() => (ctx.getCell(a) % 2 === 0 ? "even" : "odd"));
-ctx.setCell(a, 11);
-ctx.getSignal(parity); // "odd", already materialized
+const parity = ctx.formula(() => (a.get() % 2 === 0 ? "even" : "odd")).drive();
+a.set(11);
+parity.get(); // "odd", already materialized (driven)
 ```
+
+The former handle/constructor names — `CellHandle`/`SlotHandle`,
+`cell`/`computed`/`slot`/`memo`/`signal`, and `getCell`/`getSignal`/`setCell` —
+remain as deprecated aliases and the functional `ctx.get(handle)` surface is
+unchanged, so existing code keeps working.
 
 ## Async reactive context
 
@@ -670,7 +687,7 @@ shipped bytes.
 
 <!-- size-limits:start -->
 
-Generated for package `@lazily-hub/lazily-js` version `0.24.0`. Every entry is **minified + brotlied, tree-shaken to the named import** (`size-limit` + esbuild, the same pipeline Webpack/Rollup/Vite apply via `"sideEffects": false`).
+Generated for package `@lazily-hub/lazily-js` version `0.25.0`. Every entry is **minified + brotlied, tree-shaken to the named import** (`size-limit` + esbuild, the same pipeline Webpack/Rollup/Vite apply via `"sideEffects": false`).
 
 Refresh command:
 
@@ -681,9 +698,9 @@ npm run test:size        # gate: fails CI if any entry exceeds its budget
 
 | Import | Size | Budget |
 |---|---:|---:|
-| reactive: Context | 2.88 KB ✓ | 2.90 KB |
-| reactive: Context + handles + defaultEqual | 2.90 KB ✓ | 2.92 KB |
-| state-machine: StateMachine | 267 B ✓ | 267 B |
+| reactive: Context | 3.24 KB ✓ | 3.35 KB |
+| reactive: Context + handles + defaultEqual | 3.25 KB ✓ | 3.37 KB |
+| state-machine: StateMachine | 265 B ✓ | 267 B |
 | sem-tree: SemTree | 505 B ✓ | 505 B |
 | stable-id: contentHash | 152 B ✓ | 152 B |
 | collections: CellMap + CellTree + reconcileCollections | 1.65 KB ✓ | 1.65 KB |
