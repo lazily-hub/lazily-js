@@ -1,6 +1,13 @@
 export type ComputeFn<T> = () => T;
 export type EffectRun = () => (() => void) | null | undefined;
 export type EqualFn<T> = (a: T, b: T) => boolean;
+/**
+ * Custom propagate predicate for {@link Context.computedRippleWhen}: return
+ * `true` to PROPAGATE the recompute downstream, `false` to SUPPRESS it. MUST be
+ * pure in `(old, new)` — value-carried state (version/counter) is fine; external
+ * mutable state is not.
+ */
+export type ChangedFn<T> = (old: T, next: T) => boolean;
 
 /**
  * Default structural equality used by cells and memos: identity, then
@@ -135,6 +142,15 @@ export interface Context {
   source<T>(value: T, policy?: MergePolicy<T>): Source<T>;
   /** A guarded computed (equality-suppressed, always) — the derived construction. */
   computed<T>(compute: ComputeFn<T>): Computed<T>;
+  /**
+   * A guarded computed whose downstream propagation is gated by an explicit,
+   * PURE predicate `changed(old, new)` (`true` = propagate, `false` = suppress)
+   * instead of the natural {@link defaultEqual} (#lzcellkernel). Always computes
+   * (propagate guard, not compute guard). `computed(f)` ≡
+   * `computedRippleWhen(f, (o, n) => !defaultEqual(o, n))`; a pass-through
+   * (always propagate) is `computedRippleWhen(f, () => true)`.
+   */
+  computedRippleWhen<T>(compute: ComputeFn<T>, changed: ChangedFn<T>): Computed<T>;
   /** Make a computed eager by id (prefer {@link Computed.eager}). Idempotent. */
   makeEager(id: number): void;
   /** Reverse of {@link makeEager}. */
@@ -244,6 +260,8 @@ export class TeardownScope {
   source<T>(value: T, policy?: MergePolicy<T>): Source<T>;
   /** Create a guarded computed owned by this scope (#lzcellkernel). */
   computed<T>(compute: ComputeFn<T>): Computed<T>;
+  /** Create a guarded computed with a custom propagate predicate, owned by this scope (#lzcellkernel). */
+  computedRippleWhen<T>(compute: ComputeFn<T>, changed: ChangedFn<T>): Computed<T>;
   /** @deprecated use {@link source}. */
   cell<T>(value: T): Source<T>;
   /** @deprecated use {@link computed} (guarded, the only derived construction). */

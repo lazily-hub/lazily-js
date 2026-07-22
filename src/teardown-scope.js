@@ -117,6 +117,11 @@ export class TeardownScope {
     return this.adopt(this.#ctx.computed(compute));
   }
 
+  /** Create a guarded computed with a custom propagate predicate, owned by this scope (#lzcellkernel). */
+  computedRippleWhen(compute, changed) {
+    return this.adopt(this.#ctx.computedRippleWhen(compute, changed));
+  }
+
   /** @deprecated use {@link source}. */
   cell(value) {
     return this.adopt(this.#ctx.source(value));

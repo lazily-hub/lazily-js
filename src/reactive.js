@@ -444,6 +444,14 @@ function createContext(opts = {}) {
   // a side table for the rare one). Because ids are recycled, every teardown of an
   // eager computed MUST drop its entry or a recycled id would alias a stale one.
   const eagerBy = new Map();
+  // #lzcellkernel: custom propagate-guard side table (slot id -> equals fn).
+  // A guarded computed normally suppresses on `defaultEqual`; `computedRippleWhen`
+  // installs a custom `equals(old, new)` (true = equal = SUPPRESS, the negation of
+  // the public `changed` predicate) here. Same rare-case-side-table precedent as
+  // `eagerBy`: zero entries for an ordinary `computed`, one per custom-guard slot,
+  // and — because ids are recycled — every teardown MUST drop its entry or a
+  // recycled id would inherit a stale guard.
+  const slotEquals = new Map();
   const trackingStack = [];
   let pendingEffects = [];
   let pendingHead = 0;
@@ -550,6 +558,49 @@ function createContext(opts = {}) {
   /** @deprecated use {@link computed} (guarded, the only derived construction). */
   function slot(compute) {
     return computed(compute);
+  }
+
+  /**
+   * A **guarded computed** with an explicit change predicate (#lzcellkernel).
+   *
+   * Like {@link computed}, but downstream propagation is gated by
+   * `changed(old, new)` instead of the value's natural {@link defaultEqual}:
+   * `changed` returns `true` to **propagate** the recompute downstream, `false`
+   * to **suppress** it (treat it as "no meaningful change"). So:
+   *
+   * - `computed(f)` ≡ `computedRippleWhen(f, (o, n) => !defaultEqual(o, n))`
+   *   (the binding's natural equality — how a `computed` guards). For primitives
+   *   that is exactly `(o, n) => o !== n`.
+   * - a **pass-through** slot (always propagate, no suppression) is
+   *   `computedRippleWhen(f, () => true)`. NB: the deprecated `slot` alias is
+   *   NOT this in lazily-js v2 — it is a guarded `computed` (there is no unguarded
+   *   mode); the pass-through construction is the `() => true` predicate here.
+   *
+   * The value is **ALWAYS computed** — this is a *propagate* guard, not a compute
+   * guard: the predicate needs `new`, so `f` runs every refresh; `changed` gates
+   * only the downstream cascade.
+   *
+   * `changed` MUST be a **pure** function of `(old, new)`. Reading value-carried
+   * state (a version/counter/sequence embedded in the value) is fine and stays
+   * deterministic; capturing external mutable state is NOT — it keys off
+   * recompute/read frequency under laziness and breaks determinism.
+   */
+  function computedRippleWhen(compute, changed) {
+    // The internal engine guards on equality (true = equal = suppress); `changed`
+    // is its negation (true = propagate). Installed as a per-slot equals override.
+    const equals = (old, next) => !changed(old, next);
+    return new Computed(slotWithEqualsAny(compute, equals), api);
+  }
+
+  // Create a guarded slot whose equality-suppression uses `equals(old, new)`
+  // (true = equal = suppress) instead of the default `defaultEqual`. Passing
+  // `undefined` yields the ordinary `defaultEqual`-guarded computed.
+  function slotWithEqualsAny(compute, equals) {
+    const id = slotAny(compute);
+    if (equals !== undefined) {
+      slotEquals.set(id, equals);
+    }
+    return id;
   }
 
   function slotAny(compute) {
@@ -886,6 +937,11 @@ function createContext(opts = {}) {
       }
       eagerBy.delete(id);
     }
+    // #lzcellkernel: drop any custom propagate-guard before the id is recycled,
+    // so a reused id never inherits a stale `computedRippleWhen` predicate.
+    if (slotEquals.size !== 0) {
+      slotEquals.delete(id);
+    }
     const node = nodes[id];
     // Dirty the surviving readers BEFORE the edges are detached — once the
     // downstream loop below runs, nothing can reach them again.
@@ -1181,6 +1237,18 @@ function createContext(opts = {}) {
     }
   }
 
+  // Suppression test for a guarded computed: the per-slot custom equals from
+  // `computedRippleWhen` if one is installed, else the natural `defaultEqual`.
+  function slotGuardEqual(id, old, next) {
+    if (slotEquals.size !== 0) {
+      const eq = slotEquals.get(id);
+      if (eq !== undefined) {
+        return eq(old, next);
+      }
+    }
+    return defaultEqual(old, next);
+  }
+
   function recomputeSlotNow(id, node, f) {
     if (instrument) {
       counters.slotRecomputes++;
@@ -1213,7 +1281,11 @@ function createContext(opts = {}) {
     }
     const isMemo = (f & F_MEMO) !== 0;
     const hadValue = (f & F_HAS_VALUE) !== 0;
-    const unchanged = isMemo && hadValue && defaultEqual(node.value, result);
+    // #lzcellkernel: a `computedRippleWhen` slot carries a custom guard in the
+    // `slotEquals` side table (true = equal = suppress); everything else uses the
+    // natural `defaultEqual`. Guarded by size so an ordinary computed pays nothing.
+    const unchanged =
+      isMemo && hadValue && slotGuardEqual(id, node.value, result);
     // Clear dirty/forceRecompute for the next cycle. Use `&=` (not assignment
     // from `f`) so F_IN_PROGRESS — set by the caller and cleared by its finally
     // — stays set for the duration of the recompute (cycle detection).
@@ -1464,6 +1536,7 @@ function createContext(opts = {}) {
     // #lzcellkernel primary surface (v2)
     source,
     computed,
+    computedRippleWhen,
     makeEager,
     makeLazy,
     isEager,
