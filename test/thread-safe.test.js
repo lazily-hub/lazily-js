@@ -47,13 +47,13 @@ test("ThreadSafeContext mirrors single-threaded reactive semantics", () => {
   const ctx = new ThreadSafeContext();
   const a = ctx.source(2);
   const b = ctx.source(3);
-  const sum = ctx.computed(() => ctx.get(a) + ctx.get(b));
+  const sum = ctx.computed((cx) => cx.get(a) + cx.get(b));
   assert.equal(ctx.get(sum), 5);
   ctx.set(a, 10);
   assert.equal(ctx.get(sum), 13);
 
   // memo suppresses equal recompute downstream; signal is eager.
-  const doubled = ctx.computed(() => ctx.get(sum) * 2);
+  const doubled = ctx.computed((cx) => cx.get(sum) * 2);
   assert.equal(ctx.get(doubled), 26);
 });
 
@@ -61,8 +61,8 @@ test("ThreadSafeContext.batch coalesces to one invalidation pass (flushBatch ≡
   const ctx = new ThreadSafeContext();
   const c = ctx.source(0);
   let runs = 0;
-  ctx.effect(() => {
-    ctx.get(c);
+  ctx.effect((cx) => {
+    cx.get(c);
     runs += 1;
   });
   assert.equal(runs, 1, "effect runs once on registration");
@@ -78,7 +78,7 @@ test("ThreadSafeContext.batch coalesces to one invalidation pass (flushBatch ≡
 test("ThreadSafeContext effect dispose + signal lifecycle", () => {
   const ctx = new ThreadSafeContext();
   const c = ctx.source(1);
-  const sig = ctx.signal(() => ctx.get(c) + 1);
+  const sig = ctx.signal((cx) => cx.get(c) + 1);
   assert.equal(ctx.getSignal(sig), 2);
   ctx.set(c, 5);
   assert.equal(ctx.getSignal(sig), 6);
@@ -106,7 +106,7 @@ test("ThreadSafeContext passes through opt-in instrumentation", () => {
   assert.equal(plain.instrumentationSnapshot(), null);
   const ctx = new ThreadSafeContext({ instrument: true });
   const c = ctx.source(1);
-  const d = ctx.computed(() => ctx.get(c) + 1);
+  const d = ctx.computed((cx) => cx.get(c) + 1);
   ctx.get(d);
   const snap = ctx.instrumentationSnapshot();
   assert.ok(snap && snap.nodeAllocations >= 2);

@@ -27,7 +27,7 @@ function loadFixture(name) {
 // Replay a fixture, asserting the emitted value, the projected output, and that
 // the output reader invalidates exactly on an emit (via ctx.isSet).
 function replay(ctx, fx, cell, drive) {
-  const observed = ctx.computed(() => ctx.get(cell.outputCell));
+  const observed = ctx.computed((cx) => cx.get(cell.outputCell));
   ctx.get(observed);
   for (const step of fx.steps) {
     const emitted = drive(step);

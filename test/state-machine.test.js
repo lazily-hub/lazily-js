@@ -81,7 +81,10 @@ test("Lean send_preserves_chart: send never changes the transition function", ()
 test("reading state reactively invalidates a dependent slot on transition", () => {
   const ctx = new Context();
   const m = new StateMachine(ctx, "Red", traffic);
-  const stateView = ctx.computed(() => `state is ${m.state}`);
+  // The `m.state` getter reads through the machine's captured ctx (untracked),
+  // so a reactive observer must subscribe to the backing state cell through its
+  // Compute view (#lzcellkernel — the sole tracking surface).
+  const stateView = ctx.computed((cx) => `state is ${cx.get(m.stateHandle())}`);
   assert.equal(ctx.get(stateView), "state is Red");
   m.send("advance");
   assert.equal(ctx.get(stateView), "state is Green"); // recomputed

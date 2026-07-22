@@ -109,8 +109,8 @@ test("idempotent merge no-ops via the == store-guard (no effect rerun)", () => {
   const ctx = new Context();
   const mc = mergeCell(ctx, 10, Max);
   let runs = 0;
-  ctx.effect(() => {
-    mc.get();
+  ctx.effect((cx) => {
+    mc.get(cx);
     runs += 1;
   });
   assert.equal(runs, 1);
@@ -150,8 +150,8 @@ test("mergecell_algebra.json fixture: cross-language converged determinism", (t)
     const ctx = new Context();
     const mc = mergeCell(ctx, scenario.initial, policy);
     let runs = 0;
-    ctx.effect(() => {
-      mc.get();
+    ctx.effect((cx) => {
+      mc.get(cx);
       runs += 1;
     });
     let prev = runs;

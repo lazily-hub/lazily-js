@@ -88,9 +88,14 @@ export class MergeCell {
     Object.freeze(this);
   }
 
-  /** Read the current converged value (tracks a dependency inside a computation). */
-  get() {
-    return this.ctx.get(this.cell);
+  /**
+   * Read the current converged value. Thread the {@link import("./reactive.js").Compute}
+   * view (`cx`) a compute/effect closure received to register a dependency edge
+   * (#lzcellkernel value-threaded tracking); a bare `get()` at top level reads
+   * untracked (there is no ambient tracking carrier).
+   */
+  get(cx) {
+    return cx !== undefined ? cx.get(this.cell) : this.ctx.get(this.cell);
   }
 
   /** Replace the value outright (the keep-latest write), bypassing the policy. */

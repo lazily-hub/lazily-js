@@ -2,7 +2,7 @@
 // the Reactive/Source read/write split. See lazily-spec/docs/reactive-graph.md
 // § "MergeCell and the merge algebra".
 
-import type { CellHandle, Context } from "./reactive.js";
+import type { CellHandle, ComputeOps, Context } from "./reactive.js";
 
 /** An associative merge policy `⊕: T×T→T` with its transport-selected flags. */
 export interface MergePolicy<T> {
@@ -29,8 +29,12 @@ export class MergeCell<T> {
   readonly cell: CellHandle<T>;
   readonly policy: MergePolicy<T>;
   constructor(ctx: Context, cell: CellHandle<T>, policy: MergePolicy<T>);
-  /** Read the current converged value. */
-  get(): T;
+  /**
+   * Read the current converged value. Thread the {@link ComputeOps} view (`cx`)
+   * a compute/effect closure received to register a dependency edge; a bare
+   * `get()` at top level reads untracked.
+   */
+  get(cx?: ComputeOps): T;
   /** Replace the value (keep-latest write). */
   set(value: T): void;
   /** Fold `op` into the value under the policy. */

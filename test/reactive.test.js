@@ -7,7 +7,7 @@ test("Cell + computed: lazy slot computes on first read and recomputes after a c
   const ctx = new Context();
   const a = ctx.source(2);
   const b = ctx.source(3);
-  const sum = ctx.computed(() => ctx.get(a) + ctx.get(b));
+  const sum = ctx.computed((cx) => cx.get(a) + cx.get(b));
   assert.equal(ctx.get(sum), 5);
   ctx.set(a, 10);
   assert.equal(ctx.get(sum), 13);
@@ -17,9 +17,9 @@ test("Cell == guard: setting an equal value is a no-op (no invalidation)", () =>
   const ctx = new Context();
   const a = ctx.source(1);
   let runs = 0;
-  const doubler = ctx.computed(() => {
+  const doubler = ctx.computed((cx) => {
     runs++;
-    return ctx.get(a) * 2;
+    return cx.get(a) * 2;
   });
   ctx.get(doubler); // prime
   assert.equal(runs, 1);
@@ -35,13 +35,13 @@ test("computed: an equal recompute suppresses downstream invalidation (guarded)"
   const ctx = new Context();
   const a = ctx.source(1);
   // memo always returns 0 regardless of input — downstream must not re-run.
-  const constant = ctx.computed(() => {
-    ctx.get(a); // subscribe
+  const constant = ctx.computed((cx) => {
+    cx.get(a); // subscribe
     return 0;
   });
   let downstreamRuns = 0;
-  const downstream = ctx.computed(() => {
-    ctx.get(constant);
+  const downstream = ctx.computed((cx) => {
+    cx.get(constant);
     return ++downstreamRuns;
   });
   assert.equal(ctx.get(downstream), 1);
@@ -52,7 +52,7 @@ test("computed: an equal recompute suppresses downstream invalidation (guarded)"
 test("Signal is eager: materialized before setCell/batch returns", () => {
   const ctx = new Context();
   const a = ctx.source(2);
-  const parity = ctx.signal(() => (ctx.get(a) % 2 === 0 ? "even" : "odd"));
+  const parity = ctx.signal((cx) => (cx.get(a) % 2 === 0 ? "even" : "odd"));
   assert.equal(ctx.getSignal(parity), "even");
   ctx.set(a, 11);
   assert.equal(ctx.getSignal(parity), "odd"); // already updated
@@ -62,8 +62,8 @@ test("Effect reruns on tracked dependency change; cleanup runs before rerun and 
   const ctx = new Context();
   const a = ctx.source(1);
   const log = [];
-  const handle = ctx.effect(() => {
-    const v = ctx.get(a);
+  const handle = ctx.effect((cx) => {
+    const v = cx.get(a);
     log.push(`body:${v}`);
     return () => log.push("cleanup");
   });
@@ -79,9 +79,9 @@ test("batch coalesces multiple writes into one effect flush", () => {
   const a = ctx.source(1);
   const b = ctx.source(1);
   let effectRuns = 0;
-  ctx.effect(() => {
-    ctx.get(a);
-    ctx.get(b);
+  ctx.effect((cx) => {
+    cx.get(a);
+    cx.get(b);
     effectRuns++;
     return null;
   });
@@ -97,8 +97,8 @@ test("batch coalesces multiple writes into one effect flush", () => {
 test("glitch-free: a slot observes consistent inputs during refresh", () => {
   const ctx = new Context();
   const a = ctx.source(10);
-  const b = ctx.computed(() => ctx.get(a) + 1); // b = a + 1
-  const sumEq = ctx.computed(() => ctx.get(a) + ctx.get(b) === 2 * ctx.get(a) + 1);
+  const b = ctx.computed((cx) => cx.get(a) + 1); // b = a + 1
+  const sumEq = ctx.computed((cx) => cx.get(a) + cx.get(b) === 2 * cx.get(a) + 1);
   assert.equal(ctx.get(sumEq), true);
   ctx.set(a, 50);
   assert.equal(ctx.get(sumEq), true); // still consistent after recompute
@@ -106,7 +106,7 @@ test("glitch-free: a slot observes consistent inputs during refresh", () => {
 
 test("cycle detection throws", () => {
   const ctx = new Context();
-  const slot = ctx.computed(() => ctx.get(slot)); // self-reference
+  const slot = ctx.computed((cx) => cx.get(slot)); // self-reference
   assert.throws(() => ctx.get(slot), /circular dependency/);
 });
 
@@ -115,7 +115,7 @@ test("dynamic dependencies: a slot that reads a different branch on rerun update
   const flag = ctx.source(true);
   const a = ctx.source(1);
   const b = ctx.source(100);
-  const cond = ctx.computed(() => (ctx.get(flag) ? ctx.get(a) : ctx.get(b)));
+  const cond = ctx.computed((cx) => (cx.get(flag) ? cx.get(a) : cx.get(b)));
   assert.equal(ctx.get(cond), 1);
   ctx.set(b, 999); // cond doesn't read b yet -> stays cached
   assert.equal(ctx.get(cond), 1);
@@ -129,7 +129,7 @@ test("dynamic dependencies: a slot that reads a different branch on rerun update
 test("isSet reports cached freshness", () => {
   const ctx = new Context();
   const a = ctx.source(1);
-  const s = ctx.computed(() => ctx.get(a) + 1);
+  const s = ctx.computed((cx) => cx.get(a) + 1);
   assert.equal(ctx.isSet(s), false); // never read
   ctx.get(s);
   assert.equal(ctx.isSet(s), true);
@@ -143,9 +143,9 @@ test("Uint8Array values use structural equality in the == guard", () => {
   const ctx = new Context();
   const a = ctx.source(Uint8Array.of(1, 2, 3));
   let runs = 0;
-  const s = ctx.computed(() => {
+  const s = ctx.computed((cx) => {
     runs++;
-    return ctx.get(a);
+    return cx.get(a);
   });
   ctx.get(s);
   ctx.set(a, Uint8Array.of(1, 2, 3)); // equal-by-value -> no-op
@@ -170,7 +170,7 @@ test("#lzspecedgeindex: wide fan-out keeps an exact edge set across the promote 
     const source = ctx.source(1);
     const subs = [];
     for (let i = 0; i < width; i++) {
-      subs.push(ctx.computed(() => ctx.get(source) * 2));
+      subs.push(ctx.computed((cx) => cx.get(source) * 2));
     }
     for (const s of subs) assert.equal(ctx.get(s), 2);
     ctx.set(source, 5);
@@ -184,9 +184,9 @@ test("#lzspecedgeindex: repeated reads of the same dep register exactly one edge
   for (const reads of [4, 200]) {
     const ctx = new Context({ instrument: true });
     const a = ctx.source(1);
-    const s = ctx.computed(() => {
+    const s = ctx.computed((cx) => {
       let acc = 0;
-      for (let i = 0; i < reads; i++) acc += ctx.get(a);
+      for (let i = 0; i < reads; i++) acc += cx.get(a);
       return acc;
     });
     ctx.get(s);
@@ -204,8 +204,8 @@ test("#lzspecedgeindex: disposal invalidates surviving readers", () => {
   // disposed node's own source can move it.
   const ctx = new Context();
   const src = ctx.source(4);
-  const derived = ctx.computed(() => ctx.get(src));
-  const reader = ctx.computed(() => ctx.get(derived) + 1);
+  const derived = ctx.computed((cx) => cx.get(src));
+  const reader = ctx.computed((cx) => cx.get(derived) + 1);
   assert.equal(ctx.get(reader), 5);
 
   ctx.disposeSlot(derived);
@@ -224,11 +224,11 @@ test("#lzspecedgeindex: disposal does not run effects during teardown", () => {
   // `dispose` itself into a throw and breaking teardown idempotence.
   const ctx = new Context();
   const src = ctx.source(1);
-  const derived = ctx.computed(() => ctx.get(src));
+  const derived = ctx.computed((cx) => cx.get(src));
   let runs = 0;
-  ctx.effect(() => {
+  ctx.effect((cx) => {
     runs += 1;
-    return ctx.get(derived);
+    return cx.get(derived);
   });
   const afterSetup = runs;
 
@@ -260,7 +260,7 @@ test("#lzspecedgeindex: a recycled id does not inherit a stale edge index", () =
   const subs = [];
   // Push `wide` well past the promote threshold so it definitely has an index.
   for (let i = 0; i < 400; i++) {
-    const s = ctx.computed(() => ctx.get(wide) + 1);
+    const s = ctx.computed((cx) => cx.get(wide) + 1);
     ctx.get(s);
     subs.push(s);
   }
@@ -268,7 +268,7 @@ test("#lzspecedgeindex: a recycled id does not inherit a stale edge index", () =
   ctx.disposeCell(wide); // (1) strands a full index on the recycled id
   const fresh = ctx.source(10); // (2) pops that id
   ctx.disposeSlot(subs[399]); // (3) frees an id the stale index has a key for
-  const revived = ctx.computed(() => ctx.get(fresh) * 3);
+  const revived = ctx.computed((cx) => cx.get(fresh) * 3);
 
   assert.equal(ctx.get(revived), 30);
   ctx.set(fresh, 20);
@@ -315,11 +315,11 @@ test("#lzspecedgeindex: dynamic dependencies stay exact on a promoted list", () 
   // Pad `a` past the promote threshold so its dependents list is indexed.
   const pad = [];
   for (let i = 0; i < 300; i++) {
-    const s = ctx.computed(() => ctx.get(a));
+    const s = ctx.computed((cx) => cx.get(a));
     ctx.get(s);
     pad.push(s);
   }
-  const swing = ctx.computed(() => (ctx.get(toggle) ? ctx.get(a) : ctx.get(b)));
+  const swing = ctx.computed((cx) => (cx.get(toggle) ? cx.get(a) : cx.get(b)));
   assert.equal(ctx.get(swing), 1);
   // Swing off `a` and onto `b`.
   ctx.set(toggle, false);
@@ -343,8 +343,8 @@ test("#lzspecedgeindex: effects on a promoted source fire exactly once per publi
   const effects = [];
   for (let i = 0; i < 300; i++) {
     effects.push(
-      ctx.effect(() => {
-        ctx.get(source);
+      ctx.effect((cx) => {
+        cx.get(source);
         runs++;
         return null;
       }),
@@ -374,15 +374,15 @@ test("#lzspecedgeindex: an effect disposed mid-flush does not run, and the queue
   for (let i = 0; i < 200; i++) {
     const n = i;
     victims.push(
-      ctx.effect(() => {
+      ctx.effect((cx) => {
         victimRuns.push(n);
-        ctx.get(source);
+        cx.get(source);
       }),
     );
   }
   let armed = false;
-  ctx.effect(() => {
-    ctx.get(source);
+  ctx.effect((cx) => {
+    cx.get(source);
     if (!armed) return;
     for (const v of victims) ctx.disposeEffect(v);
   });
@@ -407,20 +407,20 @@ test("#lzspecedgeindex: an id recycled mid-flush runs exactly once", () => {
   const source = ctx.source(0);
   const victims = [];
   for (let i = 0; i < 50; i++) {
-    victims.push(ctx.effect(() => ctx.get(source)));
+    victims.push(ctx.effect((cx) => cx.get(source)));
   }
   let recycledRuns = 0;
   let armed = false;
-  ctx.effect(() => {
-    ctx.get(source);
+  ctx.effect((cx) => {
+    cx.get(source);
     if (!armed) return;
     armed = false;
     for (const v of victims) ctx.disposeEffect(v);
     // Claim the just-freed ids from inside the same flush.
     for (let i = 0; i < 50; i++) {
-      ctx.effect(() => {
+      ctx.effect((cx2) => {
         recycledRuns++;
-        ctx.get(source);
+        cx2.get(source);
       });
     }
   });
@@ -435,7 +435,7 @@ test("#lzspecedgeindex: an id recycled mid-flush runs exactly once", () => {
 test("kernel: source exposes set/merge, computed does not (read/write split by method presence)", () => {
   const ctx = new Context();
   const n = ctx.source(1);
-  const f = ctx.computed(() => n.get() * 2);
+  const f = ctx.computed((cx) => n.get(cx) * 2);
   assert.equal(typeof n.set, "function");
   assert.equal(typeof n.merge, "function");
   // The write/protection is expressed as method ABSENCE on the formula object.
@@ -450,10 +450,10 @@ test("kernel: computed is guarded by default (equal recompute suppresses downstr
   const ctx = new Context();
   const a = ctx.source(2);
   let downstream = 0;
-  const parity = ctx.computed(() => a.get() % 2);
-  const dep = ctx.computed(() => {
+  const parity = ctx.computed((cx) => a.get(cx) % 2);
+  const dep = ctx.computed((cx) => {
     downstream++;
-    return parity.get();
+    return parity.get(cx);
   });
   dep.get();
   assert.equal(downstream, 1);
@@ -466,9 +466,9 @@ test("kernel: computed().eager() is idempotent, eager, and returns the same hand
   const ctx = new Context();
   const n = ctx.source(1);
   let computes = 0;
-  const f = ctx.computed(() => {
+  const f = ctx.computed((cx) => {
     computes++;
-    return n.get() * 2;
+    return n.get(cx) * 2;
   });
   const g = f.eager();
   assert.equal(g, f, "drive returns the same handle");
@@ -485,11 +485,11 @@ test("kernel: computed().eager() is idempotent, eager, and returns the same hand
 test("kernel: disposing an eager computed tears down its puller; lazy() reverts to lazy", () => {
   const ctx = new Context();
   const n = ctx.source(1);
-  const f = ctx.computed(() => n.get() + 1).eager();
+  const f = ctx.computed((cx) => n.get(cx) + 1).eager();
   assert.ok(f.isEager());
   f.lazy();
   assert.ok(!f.isEager());
-  const f2 = ctx.computed(() => n.get() + 1).eager();
+  const f2 = ctx.computed((cx) => n.get(cx) + 1).eager();
   f2.dispose();
   assert.ok(ctx.isNodeDisposed(f2), "disposed driven formula frees its node");
   // A surviving write must not throw through a stranded puller.

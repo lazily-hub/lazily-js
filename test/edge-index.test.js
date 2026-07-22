@@ -65,15 +65,15 @@ test("semantic 2 [Context]: an effect reached by a scope teardown is never sched
   const source = ctx.source(1);
 
   const scope = ctx.scope();
-  const mid = scope.computed(() => ctx.get(source) + 10);
+  const mid = scope.computed((cx) => cx.get(source) + 10);
 
   // The watcher lives OUTSIDE the scope and reads INTO it, so ending the scope
   // reaches it through the cascade rather than by disposing it directly.
   let runs = 0;
-  ctx.effect(() => {
+  ctx.effect((cx) => {
     runs++;
     try {
-      ctx.get(mid);
+      cx.get(mid);
     } catch (err) {
       // The read-after-dispose this effect would hit IF it were wrongly rerun.
       // Swallowed so the failure surfaces as a run count, not as a stray throw
@@ -137,13 +137,13 @@ test("semantic 2 [AsyncContext]: an effect reached by a scope teardown is never 
 test("semantic 2 [Context]: a direct disposeSlot does not schedule either", () => {
   const ctx = createContext();
   const source = ctx.source(1);
-  const mid = ctx.computed(() => ctx.get(source) + 10);
+  const mid = ctx.computed((cx) => cx.get(source) + 10);
 
   let runs = 0;
-  ctx.effect(() => {
+  ctx.effect((cx) => {
     runs++;
     try {
-      ctx.get(mid);
+      cx.get(mid);
     } catch (err) {
       if (!(err instanceof DisposedNodeError)) throw err;
     }
@@ -178,16 +178,16 @@ test("semantic 3 [Context]: scope teardown runs cleanups in reverse creation ord
   const order = [];
 
   const scope = ctx.scope();
-  scope.effect(() => {
-    ctx.get(source);
+  scope.effect((cx) => {
+    cx.get(source);
     return () => order.push("first");
   });
-  scope.effect(() => {
-    ctx.get(source);
+  scope.effect((cx) => {
+    cx.get(source);
     return () => order.push("second");
   });
-  scope.effect(() => {
-    ctx.get(source);
+  scope.effect((cx) => {
+    cx.get(source);
     return () => order.push("third");
   });
 
@@ -226,15 +226,15 @@ test("semantic 3 [Context]: reverse order holds for a mixed slot/effect scope", 
   const order = [];
 
   const scope = ctx.scope();
-  scope.effect(() => {
-    ctx.get(source);
+  scope.effect((cx) => {
+    cx.get(source);
     return () => order.push("outer");
   });
-  const mid = scope.computed(() => ctx.get(source) + 1);
-  scope.effect(() => {
+  const mid = scope.computed((cx) => cx.get(source) + 1);
+  scope.effect((cx) => {
     // Reads a scope sibling, so a FORWARD teardown would tear `mid` out from
     // under this effect's cleanup while it is still registered.
-    ctx.get(mid);
+    cx.get(mid);
     return () => order.push("inner");
   });
 
@@ -313,9 +313,9 @@ test("scope: disarm disposes nothing and leaves every edge intact", () => {
   let cleanups = 0;
 
   const scope = ctx.scope();
-  const escaped = scope.computed(() => ctx.get(source) + 1);
-  scope.effect(() => {
-    ctx.get(escaped);
+  const escaped = scope.computed((cx) => cx.get(source) + 1);
+  scope.effect((cx) => {
+    cx.get(escaped);
     return () => {
       cleanups++;
     };
@@ -372,9 +372,9 @@ test("scope [ThreadSafeContext]: scope operations forward through the mutex", ()
   const source = ctx.source(1);
   let cleanups = 0;
   ctx.withScope((scope) => {
-    const mid = scope.computed(() => ctx.get(source) + 1);
-    scope.effect(() => {
-      ctx.get(mid);
+    const mid = scope.computed((cx) => cx.get(source) + 1);
+    scope.effect((cx) => {
+      cx.get(mid);
       return () => {
         cleanups++;
       };
@@ -396,8 +396,8 @@ test("degrees: counts track live edges in both directions, and disposal returns 
   assert.equal(ctx.dependentCount(source), 0);
   assert.equal(ctx.dependencyCount(source), 0, "a cell is a pure source");
 
-  const mid = ctx.computed(() => ctx.get(source) + 1);
-  const sink = ctx.computed(() => ctx.get(mid) + 1);
+  const mid = ctx.computed((cx) => cx.get(source) + 1);
+  const sink = ctx.computed((cx) => cx.get(mid) + 1);
   assert.equal(ctx.get(sink), 3);
 
   assert.equal(ctx.dependentCount(source), 1);
@@ -421,8 +421,8 @@ test("degrees: a subscribe/unsubscribe cycle leaves the source's dependent count
 
   for (let i = 0; i < 200; i++) {
     ctx.withScope((scope) => {
-      scope.effect(() => {
-        ctx.get(source);
+      scope.effect((cx) => {
+        cx.get(source);
         return null;
       });
       assert.equal(ctx.dependentCount(source), baseline + 1, "one live subscriber");
@@ -440,7 +440,7 @@ test("degrees: a subscribe/unsubscribe cycle leaves the source's dependent count
 test("degrees: a signal handle resolves to its backing slot", () => {
   const ctx = createContext();
   const source = ctx.source(1);
-  const sig = ctx.signal(() => ctx.get(source) + 1);
+  const sig = ctx.signal((cx) => cx.get(source) + 1);
   assert.equal(ctx.getSignal(sig), 2);
   // The signal's memo slot reads the cell, and its puller effect reads the slot.
   assert.equal(ctx.dependencyCount(sig), 1, "the backing slot's forward degree");
@@ -455,7 +455,7 @@ test("degrees: a signal handle resolves to its backing slot", () => {
 test("disposal: reads and writes after dispose raise DisposedNodeError, and dispose is idempotent", () => {
   const ctx = createContext();
   const source = ctx.source(1);
-  const derived = ctx.computed(() => ctx.get(source) + 1);
+  const derived = ctx.computed((cx) => cx.get(source) + 1);
   assert.equal(ctx.get(derived), 2);
 
   ctx.disposeNode(derived);
@@ -485,8 +485,8 @@ test("disposal: disposeNode dispatches on the handle's class, so a stale handle 
 test("disposal: a reader that hits a disposed node leaves no dangling upstream edge", () => {
   const ctx = createContext();
   const source = ctx.source(1);
-  const mid = ctx.computed(() => ctx.get(source) + 1);
-  const reader = ctx.computed(() => ctx.get(mid) + 1);
+  const mid = ctx.computed((cx) => cx.get(source) + 1);
+  const reader = ctx.computed((cx) => cx.get(mid) + 1);
   assert.equal(ctx.get(reader), 3);
   assert.equal(ctx.dependencyCount(reader), 1);
 

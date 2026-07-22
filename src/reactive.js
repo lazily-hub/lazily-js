@@ -172,9 +172,15 @@ export class Source extends Cell {
     }
     Object.freeze(this);
   }
-  /** Read the current value (tracks a dependency inside a computation). */
-  get() {
-    return this._ctx.get(this);
+  /**
+   * Read the current value. Pass the {@link Compute} view (`cx`) a
+   * compute/effect closure received to REGISTER a dependency edge against the
+   * recomputing node (#lzcellkernel value-threaded tracking); a bare `get()` at
+   * top level — or inside `untracked()` — reads WITHOUT forming an edge. There
+   * is no ambient tracking carrier, so an in-closure read must thread `cx`.
+   */
+  get(cx) {
+    return cx !== undefined ? cx.get(this) : this._ctx.get(this);
   }
   /** Replace the value outright (the keep-latest write). */
   set(value) {
@@ -206,9 +212,15 @@ export class Computed extends Cell {
     super(id, ctx);
     Object.freeze(this);
   }
-  /** Read the current value (tracks a dependency inside a computation). */
-  get() {
-    return this._ctx.get(this);
+  /**
+   * Read the current value. Pass the {@link Compute} view (`cx`) a
+   * compute/effect closure received to REGISTER a dependency edge against the
+   * recomputing node (#lzcellkernel value-threaded tracking); a bare `get()` at
+   * top level — or inside `untracked()` — reads WITHOUT forming an edge. There
+   * is no ambient tracking carrier, so an in-closure read must thread `cx`.
+   */
+  get(cx) {
+    return cx !== undefined ? cx.get(this) : this._ctx.get(this);
   }
   /**
    * Make this computed eager: attach a puller `Effect` that keeps it
@@ -452,16 +464,15 @@ function createContext(opts = {}) {
   // and — because ids are recycled — every teardown MUST drop its entry or a
   // recycled id would inherit a stale guard.
   const slotEquals = new Map();
-  // #lzcellkernel: the value-threaded `Compute` view is the PRIMARY tracking
-  // surface (`readTracked` / `readTrackedId`). This ambient stack survives as a
-  // NARROW compatibility bridge for the still-un-migrated closures that read
-  // through a captured `ctx` / a bare `handle.get()` — the handle read API
-  // (`Source.get()` / `Computed.get()`) and the large existing test surface.
-  // Mirrors lazily-rs, which keeps its thread-local frame as the same bridge.
-  // Fully deleting it requires threading a ComputeOps surface through
-  // `handle.get()` and every reactive-read method (see reactive.d.ts / the
-  // family read methods), which the migrated closures already do.
-  const trackingStack = [];
+  // #lzcellkernel: the value-threaded `Compute` view is the LITERAL sole
+  // tracking surface (`readTracked` / `readTrackedId`). There is NO ambient
+  // tracking carrier: a dependency edge is registered only when a read threads
+  // the recomputing node's id as a value (the `Compute` view carries it in
+  // `_slotId`). A bare `handle.get()` / `ctx.get(handle)` at top level — and any
+  // read that does not thread the view — forms no edge. This matches the sibling
+  // static bindings (lazily-cpp / lazily-go / lazily-dart), which all deleted
+  // their ambient recompute stack. The thread-safe / async contexts keep their
+  // own separate scoping paths.
   let pendingEffects = [];
   let pendingHead = 0;
   const scheduledEffects = new Set();
@@ -702,13 +713,9 @@ function createContext(opts = {}) {
     if (kinds[id] === KIND_NONE) {
       throw new DisposedNodeError(id);
     }
-    // #lzcellkernel bridge: a bare read attributes to the ambient recompute frame
-    // if one is active (an un-migrated captured-`ctx` / `handle.get()` read);
-    // migrated closures value-thread through the `Compute` view instead.
-    const len = trackingStack.length;
-    if (len > 0) {
-      registerDependency(id, trackingStack[len - 1]);
-    }
+    // #lzcellkernel: the top-level unified read is UNTRACKED — no ambient carrier
+    // exists, so a bare `get`/`handle.get()` forms no edge. A tracked read goes
+    // through the value-threaded `Compute` view (`readTracked`/`readTrackedId`).
     refreshSlot(id);
     // After refreshSlot, F_HAS_VALUE is set iff `id` is a SLOT that has
     // produced a value: non-slot kinds (CELL/EFFECT/NONE) never carry the
@@ -726,11 +733,8 @@ function createContext(opts = {}) {
     if (kinds[id] === KIND_NONE) {
       throw new DisposedNodeError(id);
     }
-    // #lzcellkernel bridge (see getSlotAny): attribute to the ambient frame if any.
-    const len = trackingStack.length;
-    if (len > 0) {
-      registerDependency(id, trackingStack[len - 1]);
-    }
+    // #lzcellkernel: the top-level cell read is UNTRACKED (see getSlotAny) — no
+    // ambient carrier, so a bare read forms no edge; tracked reads thread the view.
     if (kinds[id] !== KIND_CELL) {
       throw new Error(`get_cell on non-cell id ${id}`);
     }
@@ -738,9 +742,10 @@ function createContext(opts = {}) {
   }
 
   // Value-threaded tracked read (#lzcellkernel fortified compute view): register
-  // the dependency against an EXPLICIT recomputing-node id passed as a VALUE, not
-  // the ambient `trackingStack` top. `trackId === 0` (never a live id — `nextId`
-  // starts at 1) reads untracked. This is the read primitive the `Compute` view
+  // the dependency against an EXPLICIT recomputing-node id passed as a VALUE.
+  // `trackId === 0` (never a live id — `nextId` starts at 1) reads untracked, and
+  // there is no ambient carrier to fall back to. This is the read primitive the
+  // `Compute` view
   // (and the migrated internal pullers) call, so attribution survives suspension:
   // the id is captured in the view, not looked up from ambient state at read time
   // (the browser has no `AsyncLocalStorage`, so value-threading is the only
@@ -1330,19 +1335,16 @@ function createContext(opts = {}) {
         dependenciesIndex.delete(id);
       }
     }
-    // The fortified value-threaded compute view (#lzcellkernel): its `get` tracks
-    // against `id` by construction. The ambient `trackingStack` push is the narrow
-    // bridge (see its declaration) that keeps un-migrated closures reading through
-    // a captured `ctx` / bare `handle.get()` tracking; migrated closures read
-    // through `view` and add nothing to it.
-    trackingStack.push(id);
+    // The fortified value-threaded compute view (#lzcellkernel) is the sole
+    // tracking surface: its `get` registers each edge against `id` by
+    // construction. No ambient frame is pushed — a read that does not thread this
+    // view (a bare `handle.get()`) forms no edge, by design.
     const view = makeCompute(id);
     let result;
     try {
       result = node.compute(view);
     } finally {
       view._live = false; // fortification: a read on the stale view now throws
-      trackingStack.pop();
     }
     const isMemo = (f & F_MEMO) !== 0;
     const hadValue = (f & F_HAS_VALUE) !== 0;
@@ -1562,16 +1564,14 @@ function createContext(opts = {}) {
       cleanup();
     }
     // Effects track through the same fortified compute view as slots
-    // (#lzcellkernel); the ambient push is the narrow compatibility bridge (see
-    // recomputeSlotNow / the trackingStack declaration).
-    trackingStack.push(id);
+    // (#lzcellkernel): the view is the sole tracking surface and no ambient frame
+    // is pushed — the effect body reads via `view.get(...)` / `handle.get(view)`.
     const view = makeCompute(id);
     let nextCleanup;
     try {
       nextCleanup = node.run(view);
     } finally {
       view._live = false;
-      trackingStack.pop();
     }
     if (kinds[id] === KIND_EFFECT) {
       nodes[id].cleanup = typeof nextCleanup === "function" ? nextCleanup : null;
@@ -1660,16 +1660,16 @@ function createContext(opts = {}) {
   //     (`_live = false`), so it cannot be stored and later replayed to register
   //     an edge against the wrong node — a read on a stale view throws.
   //
-  // The `Compute` view is the PRIMARY tracking surface (#lzcellkernel): a read
-  // through it (`compute.get(...)` → `readTrackedId`) registers by construction.
-  // The internal eager pullers (`signal` / `makeEager`), relay / sem-tree /
-  // state-machine / reactive-family / instrumentation closures all read through
-  // the view. The ambient `trackingStack` survives as a NARROW bridge (see its
-  // declaration) for the still-un-migrated surface: bare `handle.get()` and the
-  // large existing test/closure body that reads through a captured `ctx`. Fully
-  // deleting it requires threading a ComputeOps surface through `handle.get()`
-  // and every reactive-read method. The thread-safe / async contexts keep their
-  // own separate tracking paths.
+  // The `Compute` view is the LITERAL SOLE tracking surface (#lzcellkernel): a
+  // read through it (`compute.get(...)` → `readTrackedId`) registers by
+  // construction, and there is NO ambient carrier — the former `trackingStack`
+  // is deleted. Every compute/effect closure (the internal eager pullers
+  // `signal`/`makeEager`, relay / sem-tree / state-machine / reactive-family /
+  // instrumentation, and every consumer) reads through the view it receives:
+  // `compute.get(h)` or the ergonomic `handle.get(compute)`. A bare
+  // `handle.get()` / top-level `ctx.get(h)` forms no edge. This matches the
+  // sibling static bindings (lazily-cpp / lazily-go / lazily-dart). The
+  // thread-safe / async contexts keep their own separate scoping paths.
   const untrackedView = {
     __proto__: api,
     get(handle) {

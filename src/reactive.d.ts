@@ -1,5 +1,5 @@
-export type ComputeFn<T> = () => T;
-export type EffectRun = () => (() => void) | null | undefined;
+export type ComputeFn<T> = (cx: Compute) => T;
+export type EffectRun = (cx: Compute) => (() => void) | null | undefined;
 /**
  * The compute-time READ surface (#lzcellkernel): the subset of {@link Context}
  * that registers dependency tracking. Both the owning `Context` (an untracked
@@ -10,6 +10,18 @@ export type EffectRun = () => (() => void) | null | undefined;
  */
 export interface ComputeOps {
   get<T>(handle: Source<T> | Computed<T>): T;
+}
+/**
+ * The per-recompute fortified compute view handed to a compute/effect closure
+ * (#lzcellkernel). It is the LITERAL sole tracking surface — there is no ambient
+ * carrier — so a read through it (`cx.get(h)` or `handle.get(cx)`) registers a
+ * dependency edge against the recomputing node, and {@link Compute.untracked}
+ * yields a sibling surface whose reads form none. The view is retired the moment
+ * its recompute returns; a read on a stale view throws.
+ */
+export interface Compute extends ComputeOps {
+  /** The untracked escape: reads through the returned surface form no edge. */
+  untracked(): ComputeOps;
 }
 export type EqualFn<T> = (a: T, b: T) => boolean;
 /**
@@ -59,8 +71,12 @@ export type NodeHandle =
 export class Source<T = unknown> {
   /** @internal */ constructor(id: number, ctx?: unknown);
   readonly id: number;
-  /** Read the current value (tracks a dependency inside a computation). */
-  get(): T;
+  /**
+   * Read the current value. Thread the {@link Compute} view (`cx`) a
+   * compute/effect closure received to register a dependency edge; a bare
+   * `get()` at top level (or inside `untracked()`) forms no edge.
+   */
+  get(cx?: ComputeOps): T;
   /** Replace the value outright (the keep-latest write). */
   set(value: T): void;
   /** Fold `op` into the current value under this cell's policy (replace if none). */
@@ -78,8 +94,12 @@ export class Source<T = unknown> {
 export class Computed<T = unknown> {
   /** @internal */ constructor(id: number, ctx?: unknown);
   readonly id: number;
-  /** Read the current value (tracks a dependency inside a computation). */
-  get(): T;
+  /**
+   * Read the current value. Thread the {@link Compute} view (`cx`) a
+   * compute/effect closure received to register a dependency edge; a bare
+   * `get()` at top level (or inside `untracked()`) forms no edge.
+   */
+  get(cx?: ComputeOps): T;
   /** Make this computed eager (attach a puller). Idempotent; returns `this`. */
   eager(): this;
   /** Reverse of {@link eager}: revert to lazy and dispose the puller. */

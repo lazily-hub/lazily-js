@@ -702,8 +702,8 @@ npm run test:size        # gate: fails CI if any entry exceeds its budget
 
 | Import | Size | Budget |
 |---|---:|---:|
-| reactive: Context | 3.52 KB ✓ | 3.60 KB |
-| reactive: Context + handles + defaultEqual | 3.53 KB ✓ | 3.60 KB |
+| reactive: Context | 3.50 KB ✓ | 3.60 KB |
+| reactive: Context + handles + defaultEqual | 3.50 KB ✓ | 3.60 KB |
 | state-machine: StateMachine | 274 B ✓ | 280 B |
 | sem-tree: SemTree | 503 B ✓ | 512 B |
 | stable-id: contentHash | 152 B ✓ | 152 B |

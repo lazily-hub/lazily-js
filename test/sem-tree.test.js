@@ -75,9 +75,9 @@ test("memo guard: an edit that does not change the folded count does not re-run 
     FOLDS.count_positive,
   );
   let downstreamRuns = 0;
-  const downstream = ctx.computed(() => {
+  const downstream = ctx.computed((cx) => {
     t.rootHandle();
-    ctx.get(t.rootHandle());
+    cx.get(t.rootHandle());
     return ++downstreamRuns;
   });
   ctx.get(downstream); // prime -> root count = 1 (only b is positive)
@@ -117,8 +117,8 @@ test("conformance: semtree_incremental.json", () => {
     // Attach a downstream consumer if the scenario checks the memo guard.
     let downstreamRuns = 0;
     if (scenario.expect_after.downstream_consumer_reran !== undefined) {
-      const downstream = ctx.computed(() => {
-        ctx.get(t.rootHandle());
+      const downstream = ctx.computed((cx) => {
+        cx.get(t.rootHandle());
         return ++downstreamRuns;
       });
       ctx.get(downstream); // prime

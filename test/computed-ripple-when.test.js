@@ -22,17 +22,17 @@ test("computedRippleWhen: custom significance propagates only on proxy (bucket) 
   // Derived value carries a `bucket` proxy; propagate only when the bucket
   // changes, ignoring the raw payload.
   const derived = ctx.computedRippleWhen(
-    () => {
-      const v = ctx.get(input);
+    (cx) => {
+      const v = cx.get(input);
       return [v, Math.floor(v / 10)]; // [payload, bucket]
     },
     (old, next) => old[1] !== next[1], // propagate when bucket changed
   );
 
   let recomputes = 0;
-  const observer = ctx.computed(() => {
+  const observer = ctx.computed((cx) => {
     recomputes++;
-    return ctx.get(derived)[0];
+    return cx.get(derived)[0];
   });
 
   assert.equal(ctx.get(observer), 0);
@@ -57,14 +57,14 @@ test("computedRippleWhen: propagate-every-N via a value-carried counter", () => 
   // value, so the predicate is a pure function of (old, new): propagate only
   // when the count crosses a size-3 window boundary.
   const sampled = ctx.computedRippleWhen(
-    () => ctx.get(input),
+    (cx) => cx.get(input),
     (old, next) => Math.floor(next / 3) !== Math.floor(old / 3),
   );
 
   let seen = 0;
-  const observer = ctx.computed(() => {
+  const observer = ctx.computed((cx) => {
     seen++;
-    return ctx.get(sampled);
+    return cx.get(sampled);
   });
 
   assert.equal(ctx.get(observer), 0);
@@ -86,21 +86,21 @@ test("computed(f) matches computedRippleWhen(f, (o, n) => o !== n)", () => {
   const ctx = new Context();
   const input = ctx.source(0);
 
-  const viaComputed = ctx.computed(() => Math.min(ctx.get(input), 1));
+  const viaComputed = ctx.computed((cx) => Math.min(cx.get(input), 1));
   const viaWhen = ctx.computedRippleWhen(
-    () => Math.min(ctx.get(input), 1),
+    (cx) => Math.min(cx.get(input), 1),
     (o, n) => o !== n,
   );
 
   let ca = 0;
   let cb = 0;
-  const obsA = ctx.computed(() => {
+  const obsA = ctx.computed((cx) => {
     ca++;
-    return ctx.get(viaComputed);
+    return cx.get(viaComputed);
   });
-  const obsB = ctx.computed(() => {
+  const obsB = ctx.computed((cx) => {
     cb++;
-    return ctx.get(viaWhen);
+    return cx.get(viaWhen);
   });
   assert.equal(ctx.get(obsA), 0);
   assert.equal(ctx.get(obsB), 0);
@@ -130,17 +130,17 @@ test("pass-through computedRippleWhen(() => true) always propagates", () => {
   // propagates (the v2 pass-through construction; the deprecated `slot` alias is
   // guarded and would NOT re-fire here).
   const passthrough = ctx.computedRippleWhen(
-    () => {
-      ctx.get(input); // depend on input, but always yield the same value
+    (cx) => {
+      cx.get(input); // depend on input, but always yield the same value
       return 0;
     },
     () => true,
   );
 
   let recomputes = 0;
-  const observer = ctx.computed(() => {
+  const observer = ctx.computed((cx) => {
     recomputes++;
-    return ctx.get(passthrough);
+    return cx.get(passthrough);
   });
 
   assert.equal(ctx.get(observer), 0);
@@ -161,17 +161,17 @@ test("computedRippleWhen guard is cleared on dispose (no stale predicate on a re
   const input = ctx.source(0);
 
   // A never-suppress slot, then dispose it so its id returns to the free list.
-  const first = ctx.computedRippleWhen(() => ctx.get(input), () => true);
+  const first = ctx.computedRippleWhen((cx) => cx.get(input), () => true);
   assert.equal(ctx.get(first), 0);
   ctx.disposeNode(first);
 
   // A fresh ordinary computed likely reuses the recycled id; it must guard on the
   // natural equality (suppress an equal recompute), not inherit `() => true`.
-  const reused = ctx.computed(() => Math.min(ctx.get(input), 1));
+  const reused = ctx.computed((cx) => Math.min(cx.get(input), 1));
   let recomputes = 0;
-  const observer = ctx.computed(() => {
+  const observer = ctx.computed((cx) => {
     recomputes++;
-    return ctx.get(reused);
+    return cx.get(reused);
   });
   assert.equal(ctx.get(observer), 0);
   const base = recomputes;

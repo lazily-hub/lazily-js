@@ -20,7 +20,7 @@ function loadFixture(name) {
 // that cell lets us observe invalidation via `ctx.isSet` — the reader stays
 // cached unless the tick fired.
 function observe(ctx, cell) {
-  const slot = ctx.computed(() => ctx.get(cell));
+  const slot = ctx.computed((cx) => cx.get(cell));
   ctx.get(slot);
   return slot;
 }

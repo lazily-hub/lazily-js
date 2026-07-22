@@ -54,7 +54,7 @@ test("Context instrumentation is off by default (zero overhead)", () => {
 test("instrumented Context accumulates the JS-meaningful counter subset", () => {
   const ctx = new Context({ instrument: true });
   const c = ctx.source(1);
-  const d = ctx.computed(() => ctx.get(c) * 2);
+  const d = ctx.computed((cx) => cx.get(c) * 2);
   assert.equal(ctx.get(d), 2); // recompute #1, edge added
   ctx.set(c, 5); // edge removed on invalidation cascade
   assert.equal(ctx.get(d), 10); // recompute #2
@@ -78,7 +78,7 @@ test("resetInstrumentation zeroes the counters", () => {
 test("withInstrumentation returns both the body result and a counter snapshot", () => {
   const { result, snapshot } = withInstrumentation((ctx) => {
     const c = ctx.source(3);
-    const d = ctx.computed(() => ctx.get(c) + 1);
+    const d = ctx.computed((cx) => cx.get(c) + 1);
     return ctx.get(d);
   });
   assert.equal(result, 4);

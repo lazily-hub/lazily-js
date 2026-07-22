@@ -21,13 +21,13 @@ test("Lean setCell_equal_preserves_graph: equal setCell invalidates no dependent
   const ctx = new Context();
   const a = ctx.source(2);
   const seenSlot = [];
-  const dependent = ctx.computed(() => {
-    seenSlot.push(ctx.get(a));
-    return ctx.get(a);
+  const dependent = ctx.computed((cx) => {
+    seenSlot.push(cx.get(a));
+    return cx.get(a);
   });
   const seenEffect = [];
-  ctx.effect(() => {
-    ctx.get(a);
+  ctx.effect((cx) => {
+    cx.get(a);
     seenEffect.push("fired");
   });
 
@@ -52,11 +52,11 @@ test("Lean setCell_different_invalidates_dependents: different setCell invalidat
   const a = ctx.source(1);
 
   // Three flavors of direct dependent: lazy slot, eager signal, side-effect.
-  const lazy = ctx.computed(() => ctx.get(a) + 1);
-  const eager = ctx.signal(() => ctx.get(a) * 10);
+  const lazy = ctx.computed((cx) => cx.get(a) + 1);
+  const eager = ctx.signal((cx) => cx.get(a) * 10);
   let effectReads = 0;
-  ctx.effect(() => {
-    ctx.get(a);
+  ctx.effect((cx) => {
+    cx.get(a);
     effectReads++;
   });
 
@@ -82,13 +82,13 @@ test("Lean recomputeSlot_equal_preserves_dependents: a memo slot that recomputes
   // A memo slot whose OUTPUT is stable even when its input flips: it derives
   // a constant `42` regardless of `toggle`. The memo guard must observe
   // equality and suppress downstream propagation.
-  const stable = ctx.computed(() => {
-    ctx.get(toggle); // register the edge, even though output is constant
+  const stable = ctx.computed((cx) => {
+    cx.get(toggle); // register the edge, even though output is constant
     return 42;
   });
   const downstreamFires = [];
-  ctx.effect(() => {
-    ctx.get(stable);
+  ctx.effect((cx) => {
+    cx.get(stable);
     downstreamFires.push("ran");
   });
   const firesBeforeFirst = downstreamFires.length;
@@ -114,17 +114,17 @@ test("Lean recomputeSlot_equal_preserves_dependents: a memo slot that recomputes
 test("Lean recomputeSlot_different_invalidates_dependents: a strictly-different memo recompute invalidates every direct dependent", () => {
   const ctx = new Context();
   const src = ctx.source(1);
-  const m = ctx.computed(() => ctx.get(src) * 2);
+  const m = ctx.computed((cx) => cx.get(src) * 2);
 
-  const lazyChild = ctx.computed(() => ctx.get(m) + 1);
+  const lazyChild = ctx.computed((cx) => cx.get(m) + 1);
   let effectFires = 0;
-  ctx.effect(() => {
-    ctx.get(m);
+  ctx.effect((cx) => {
+    cx.get(m);
     effectFires++;
   });
 
   ctx.get(lazyChild); // materialize
-  ctx.getSignal(ctx.signal(() => ctx.get(m))); // seed another dependent
+  ctx.getSignal(ctx.signal((cx) => cx.get(m))); // seed another dependent
   const effectFiresBefore = effectFires;
 
   ctx.set(src, 5); // m recomputes 2 → 10: strictly different
@@ -143,7 +143,7 @@ test("Lean recomputeSlot_different_invalidates_dependents: a strictly-different 
 test("Lean signal_materialized_after_recompute: after setCell the signal is already materialized (not lazy)", () => {
   const ctx = new Context();
   const a = ctx.source(1);
-  const sig = ctx.signal(() => ctx.get(a) + 100);
+  const sig = ctx.signal((cx) => cx.get(a) + 100);
 
   ctx.getSignal(sig); // materialize
 
