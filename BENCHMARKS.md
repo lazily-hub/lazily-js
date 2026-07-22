@@ -74,11 +74,11 @@ Mean wall-clock time per iteration; 95% CI half-width from the standard error.
 | `cached_reads` | `context` | `bench_cached_reads` / context | Steady-state cached `ctx.get(slot)` (no recompute). |
 | `cold_first_get` | `context` | `bench_cold_first_get` / context | First (uncached) read of a freshly built slot. |
 | `dependency_fan_out` | `context / {32,256}` | `bench_dependency_fan_out` / context | One root cell invalidates N dependents, then all are re-read. |
-| `set_cell_invalidation` | `high_fan_out / 512` | `bench_set_cell_invalidation` / high_fan_out | Cost of `setCell` invalidating a 512-wide fan-out (no recompute). |
+| `set_cell_invalidation` | `high_fan_out / 512` | `bench_set_cell_invalidation` / high_fan_out | Cost of `set` invalidating a 512-wide fan-out (no recompute). |
 | `memo_equality_suppression` | `context` | `bench_memo_equality_suppression` / context | Memo chain that stays equal downstream (guard suppresses recompute). |
 | `effect_flushing` | `context` | `bench_effect_flushing` / context | Effect re-runs on every cell change. |
 | `batch_storms` | `context / 64` | `bench_batch_storms` / context | Coalesced batched writes to 64 cells (one effect flush). |
-| `typed_cache_reads` | `context_slot`, `context_cell` | `bench_typed_cache_reads` / context_* | Direct `ctx.get(slot)` vs `ctx.getCell(cell)`. |
+| `typed_cache_reads` | `context_slot`, `context_cell` | `bench_typed_cache_reads` / context_* | Direct `ctx.get(computed)` vs `ctx.get(source)`. |
 
 ### Running
 
@@ -100,7 +100,7 @@ make bench                   # via the Makefile
 - **`bench.batched(group, case, setup, routine)`** — `iter_batched` timing
   (criterion `BatchSize::SmallInput`): fresh `setup()` before every single
   measured call, setup excluded from timing. Use when the operation mutates graph
-  state a second call would skip — e.g. the `==` guard on `setCell`, or a cold
+  state a second call would skip — e.g. the `==` guard on `set`, or a cold
   first read that caches on first access.
 
 ### Regression workflow

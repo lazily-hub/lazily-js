@@ -56,11 +56,11 @@ import {
   createContext,
 } from "../../src/reactive.js";
 import {
-  AsyncCellHandle,
+  AsyncSource,
   AsyncContext,
   AsyncEffectHandle,
   AsyncSignalHandle,
-  AsyncSlotHandle,
+  AsyncComputed,
 } from "../../src/reactive-async.js";
 import { ThreadSafeContext } from "../../src/thread-safe.js";
 
@@ -117,9 +117,9 @@ function sumOffset(values, offset) {
 
 /** The kind of a node as the corpus names them, read from the handle's class. */
 function kindOfHandle(handle) {
-  if (handle instanceof Source || handle instanceof AsyncCellHandle) return "cell";
+  if (handle instanceof Source || handle instanceof AsyncSource) return "cell";
   if (handle instanceof Effect || handle instanceof AsyncEffectHandle) return "effect";
-  if (handle instanceof Computed || handle instanceof AsyncSlotHandle) return "slot";
+  if (handle instanceof Computed || handle instanceof AsyncComputed) return "slot";
   if (handle instanceof SignalHandle || handle instanceof AsyncSignalHandle) return "signal";
   throw new Error("unrecognised handle class");
 }
@@ -215,7 +215,7 @@ function makeSyncLikeModel(name, makeContext) {
       return {
         runLog,
         cleanupLog,
-        async cell(id, value, scopeName) {
+        async source(id, value, scopeName) {
           const handle =
             scopeName == null ? ctx.source(value) : scopes.get(scopeName).source(value);
           handles.set(id, handle);
@@ -274,7 +274,7 @@ function makeSyncLikeModel(name, makeContext) {
         async read(id) {
           return readId(id);
         },
-        async setCell(id, value) {
+        async set(id, value) {
           ctx.set(handles.get(id), value);
         },
         async dispose(id) {
@@ -342,14 +342,14 @@ export const asyncModel = {
     // register the dependency edge before the value is produced.
     const readDep = async (cc, id) => {
       const handle = handles.get(id);
-      if (handle instanceof AsyncCellHandle) return cc.get(handle);
+      if (handle instanceof AsyncSource) return cc.get(handle);
       if (handle instanceof AsyncSignalHandle) return await cc.getAsync(handle.slot);
       return await cc.getAsync(handle);
     };
 
     const readId = async (id) => {
       const handle = handles.get(id);
-      if (handle instanceof AsyncCellHandle) return ctx.get(handle);
+      if (handle instanceof AsyncSource) return ctx.get(handle);
       if (handle instanceof AsyncSignalHandle) return await ctx.getSignalAsync(handle);
       return await ctx.getAsync(handle);
     };
@@ -357,7 +357,7 @@ export const asyncModel = {
     return {
       runLog,
       cleanupLog,
-      async cell(id, value, scopeName) {
+      async source(id, value, scopeName) {
         const handle =
           scopeName == null ? ctx.source(value) : scopes.get(scopeName).source(value);
         handles.set(id, handle);
@@ -422,7 +422,7 @@ export const asyncModel = {
       async read(id) {
         return readId(id);
       },
-      async setCell(id, value) {
+      async set(id, value) {
         ctx.set(handles.get(id), value);
       },
       async dispose(id) {

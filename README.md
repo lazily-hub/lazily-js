@@ -184,8 +184,8 @@ parity.get(); // "odd", already materialized (eager)
 `memo` and the unguarded `computed` are removed (folded into the guarded
 `computed`); `SourceCell`/`FormulaCell`/`CellHandle`/`SlotHandle` handle names
 are retired. The `cell`/`slot`/`signal` constructors and the functional
-`ctx.get(handle)` / `getCell` / `setCell` surface remain (`cell`/`slot` as
-deprecated aliases), so existing code keeps working.
+`ctx.get(handle)` / `ctx.set(source, value)` are the canonical accessors;
+`getCell` / `setCell` and `cell` / `slot` remain deprecated compatibility aliases.
 
 ## Async reactive context
 
@@ -207,17 +207,17 @@ previous cleanup before the next body.
 import { AsyncContext } from "@lazily-hub/lazily-js/reactive-async";
 
 const ctx = new AsyncContext();
-const userId = ctx.cell(1);
+const userId = ctx.source(1);
 
 const profile = ctx.computedAsync(async (cctx) => {
-  const id = cctx.getCell(userId); // dependency registered before the await
+  const id = cctx.get(userId); // dependency registered before the await
   return await fetchProfile(id);
 });
 
 await ctx.getAsync(profile); // spawns the compute, awaits the value
 ctx.get(profile); // synchronous cached read once resolved (undefined while pending)
 
-ctx.setCell(userId, 2); // supersedes any in-flight compute; slot re-resolves
+ctx.set(userId, 2); // supersedes any in-flight compute; slot re-resolves
 await ctx.getAsync(profile); // the profile for user 2
 ```
 
@@ -618,7 +618,7 @@ names the Lean theorems it mirrors:
 | `Materialization` | `reactive-family.test.js` | `observe_canonical`, `eager_lazy_observationally_equivalent`, `eager_materializes_all`, `lazy_defers_slots`, `materialize_present_monotone`, `lazy_present_subset_eager`, `materialize_preserves_observe`, `cell_entries_materialized_in_every_mode`, `slot_entries_deferred_under_lazy` |
 | `Materialization` (thread-safe) | `thread-safe-reactive-family.test.js` | `materialize_present_comm`, `materialize_observe_comm` (materialization confluence) + the base materialization laws replayed through `ThreadSafeSlotMap` |
 | `AsyncMaterialization` | `async-reactive-family.test.js` | eventual transparency (a driven async slot resolves to the canonical value; eager ≡ lazy) + present-set monotonicity through `AsyncSlotMap` |
-| `ThreadSafe` | `thread-safe.test.js` | `flushBatch_empty`, `flushBatch_singleton_eq_setCell` (thread-safe batch refines `setCell`), `flushBatch_dependent_dirty`, `flushBatch_preserves_nondependent_dirty` |
+| `ThreadSafe` | `thread-safe.test.js` | `flushBatch_empty`, `flushBatch_singleton_eq_setSource` (thread-safe batch refines `set`), `flushBatch_dependent_dirty`, `flushBatch_preserves_nondependent_dirty` |
 | `Reconciliation` | `reconciliation-properties.test.js` | `lisBy_longest`, `reconcile_move_minimized`, `reconcile_stable_not_invalidated` |
 | `AsyncSlotState` | `reactive-async.test.js` | `stale_completeOk_discarded`, `current_completeOk_publishes`, `current_completeErr_to_error` |
 | `AsyncEffect` | `reactive-async.test.js` | `fire_blocked_during_cleanup`, `invalidate_from_idle_schedules`, `cleanupDone_resumes_deferred`, `dispose_absorbing`, `disposed_terminal` |
@@ -691,7 +691,7 @@ shipped bytes.
 
 <!-- size-limits:start -->
 
-Generated for package `@lazily-hub/lazily-js` version `0.25.0`. Every entry is **minified + brotlied, tree-shaken to the named import** (`size-limit` + esbuild, the same pipeline Webpack/Rollup/Vite apply via `"sideEffects": false`).
+Generated for package `@lazily-hub/lazily-js` version `0.27.0`. Every entry is **minified + brotlied, tree-shaken to the named import** (`size-limit` + esbuild, the same pipeline Webpack/Rollup/Vite apply via `"sideEffects": false`).
 
 Refresh command:
 

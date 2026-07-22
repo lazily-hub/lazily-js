@@ -13,11 +13,11 @@ import test from "node:test";
 import { Context } from "../src/reactive.js";
 
 // =================================================================================
-// setCell_equal_preserves_graph (Reactive.lean)
+// setSource_equal_preserves_graph (Reactive.lean)
 // "Writing an equal value into a cell leaves the entire reactive graph
 //  byte-identical — no value update, no downstream invalidation."
 // =================================================================================
-test("Lean setCell_equal_preserves_graph: equal setCell invalidates no dependent", () => {
+test("Lean setSource_equal_preserves_graph: equal set invalidates no dependent", () => {
   const ctx = new Context();
   const a = ctx.source(2);
   const seenSlot = [];
@@ -38,16 +38,16 @@ test("Lean setCell_equal_preserves_graph: equal setCell invalidates no dependent
   ctx.set(a, 2); // equal value — must be a no-op
 
   ctx.get(dependent); // pull again — should NOT recompute
-  assert.equal(seenSlot.length, slotFiresBefore, "slot must not recompute on equal setCell");
-  assert.equal(seenEffect.length, effectFiresBefore, "effect must not fire on equal setCell");
+  assert.equal(seenSlot.length, slotFiresBefore, "computed must not recompute on equal set");
+  assert.equal(seenEffect.length, effectFiresBefore, "effect must not fire on equal set");
   assert.equal(ctx.get(a), 2);
 });
 
 // =================================================================================
-// setCell_different_invalidates_dependents (Reactive.lean)
+// setSource_different_invalidates_dependents (Reactive.lean)
 // "A strictly-different cell write marks every direct dependent dirty."
 // =================================================================================
-test("Lean setCell_different_invalidates_dependents: different setCell invalidates every direct dependent", () => {
+test("Lean setSource_different_invalidates_dependents: different set invalidates every direct dependent", () => {
   const ctx = new Context();
   const a = ctx.source(1);
 
@@ -140,7 +140,7 @@ test("Lean recomputeSlot_different_invalidates_dependents: a strictly-different 
 //  concrete cached value and is not dirty — readers never observe an unset
 //  intermediate."
 // =================================================================================
-test("Lean signal_materialized_after_recompute: after setCell the signal is already materialized (not lazy)", () => {
+test("Lean signal_materialized_after_recompute: after set the signal is already materialized (not lazy)", () => {
   const ctx = new Context();
   const a = ctx.source(1);
   const sig = ctx.signal((cx) => cx.get(a) + 100);

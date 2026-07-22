@@ -74,19 +74,25 @@ function defaultEqual(a, b) {
 
 // -- Handles -----------------------------------------------------------------
 
-export class AsyncCellHandle {
+export class AsyncSource {
   /** @internal */ constructor(id) {
     this.id = id;
     Object.freeze(this);
   }
 }
 
-export class AsyncSlotHandle {
+export class AsyncComputed {
   /** @internal */ constructor(id) {
     this.id = id;
     Object.freeze(this);
   }
 }
+
+/** @deprecated use {@link AsyncSource}. */
+export const AsyncCellHandle = AsyncSource;
+
+/** @deprecated use {@link AsyncComputed}. */
+export const AsyncSlotHandle = AsyncComputed;
 
 export class AsyncEffectHandle {
   /** @internal */ constructor(id) {
@@ -214,7 +220,7 @@ export class AsyncContext {
   source(value) {
     const id = this.#allocId();
     this.#nodes[id] = new AsyncCellNode(value);
-    return new AsyncCellHandle(id);
+    return new AsyncSource(id);
   }
 
   /** @deprecated use {@link AsyncContext#source}. */
@@ -225,13 +231,13 @@ export class AsyncContext {
   computedAsync(compute) {
     const id = this.#allocId();
     this.#nodes[id] = new AsyncSlotNode(compute, false);
-    return new AsyncSlotHandle(id);
+    return new AsyncComputed(id);
   }
 
   memoAsync(compute) {
     const id = this.#allocId();
     this.#nodes[id] = new AsyncSlotNode(compute, true);
-    return new AsyncSlotHandle(id);
+    return new AsyncComputed(id);
   }
 
   effectAsync(run) {
@@ -244,7 +250,7 @@ export class AsyncContext {
   signalAsync(compute) {
     const slotId = this.#allocId();
     this.#nodes[slotId] = new AsyncSlotNode(compute, true);
-    const slot = new AsyncSlotHandle(slotId);
+    const slot = new AsyncComputed(slotId);
     const effectId = this.#allocId();
     this.#nodes[effectId] = new AsyncEffectNode(async (cctx) => {
       await cctx.getAsync(slot);
@@ -256,16 +262,27 @@ export class AsyncContext {
 
   // -- Cells (synchronous input layer) -----------------------------------
 
-  /** @deprecated use {@link AsyncContext#get} — the unified cell read (#lzcellkernel). */
-  getCell(handle) {
+  /**
+   * The unified cell read of the Cell kernel (#lzcellkernel). A source returns
+   * its stored value; a computed returns its resolved snapshot or `undefined`.
+   */
+  get(handle) {
     const node = this.#nodes[handle.id];
     if (node === undefined) {
       throw new DisposedNodeError(handle.id);
     }
-    if (!(node instanceof AsyncCellNode)) {
-      throw new Error(`get_cell on non-cell id ${handle.id}`);
+    if (node instanceof AsyncCellNode) {
+      return node.value;
     }
-    return node.value;
+    if (node instanceof AsyncSlotNode && node.state === "resolved") {
+      return node.value;
+    }
+    return undefined;
+  }
+
+  /** @deprecated use {@link AsyncContext#get} — the unified cell read (#lzcellkernel). */
+  getCell(handle) {
+    return this.get(handle);
   }
 
   /**
@@ -273,11 +290,6 @@ export class AsyncContext {
    * cell is writable (write protection); a computed/slot handle throws.
    */
   set(handle, value) {
-    return this.setCell(handle, value);
-  }
-
-  /** @deprecated use {@link AsyncContext#set} — the unified cell write (#lzcellkernel). */
-  setCell(handle, value) {
     const node = this.#nodes[handle.id];
     // A write that silently vanishes is the same failure mode as a read that
     // silently returns stale.
@@ -298,29 +310,12 @@ export class AsyncContext {
     this.#invalidateCellDependents(handle.id);
   }
 
-  // -- Slot reads --------------------------------------------------------
-
-  /**
-   * The unified cell read of the Cell kernel (#lzcellkernel). A source cell
-   * returns its stored value; a computed/slot returns its synchronous snapshot
-   * (the resolved value, or `undefined` if not resolved). Supersedes the
-   * deprecated {@link AsyncContext#getCell}.
-   */
-  get(handle) {
-    const node = this.#nodes[handle.id];
-    // A read of a disposed/absent node errors (mirrors the deprecated `getCell`
-    // and the synchronous unified `get`), so read-after-dispose is observable.
-    if (node === undefined) {
-      throw new DisposedNodeError(handle.id);
-    }
-    if (node instanceof AsyncCellNode) {
-      return node.value;
-    }
-    if (node instanceof AsyncSlotNode && node.state === "resolved") {
-      return node.value;
-    }
-    return undefined;
+  /** @deprecated use {@link AsyncContext#set} — the unified cell write (#lzcellkernel). */
+  setCell(handle, value) {
+    return this.set(handle, value);
   }
+
+  // -- Slot reads --------------------------------------------------------
 
   isResolved(handle) {
     const node = this.#nodes[handle.id];
@@ -500,9 +495,9 @@ export class AsyncContext {
    * its cleanup; slot and cell teardown are synchronous underneath.
    */
   async disposeNode(handle) {
-    if (handle instanceof AsyncCellHandle) {
+    if (handle instanceof AsyncSource) {
       this.disposeCell(handle);
-    } else if (handle instanceof AsyncSlotHandle) {
+    } else if (handle instanceof AsyncComputed) {
       this.disposeSlot(handle);
     } else if (handle instanceof AsyncEffectHandle) {
       await this.disposeAsyncEffect(handle);
@@ -640,7 +635,7 @@ export class AsyncContext {
 
   /** Await all scheduled effect reruns and in-flight computes until the graph
    * quiesces. Deterministic anchor for tests and for eager-signal materialization
-   * (async reruns settle on the executor, not synchronously in `setCell`). */
+   * (async reruns settle on the executor, not synchronously in `set`). */
   async settle() {
     while (this.#effectRuns.size > 0 || this.#inflight.size > 0) {
       await Promise.allSettled([...this.#effectRuns, ...this.#inflight.values()]);
@@ -705,8 +700,7 @@ export class AsyncContext {
       },
       /** @deprecated use `get` — the unified cell read (#lzcellkernel). */
       getCell(handle) {
-        self.#registerDependency(handle.id, ownerId);
-        return self.getCell(handle);
+        return this.get(handle);
       },
       getAsync(handle) {
         self.#registerDependency(handle.id, ownerId);
@@ -759,7 +753,7 @@ export class AsyncContext {
       notifier.settle({ kind: "superseded" });
       return;
     }
-    // Propagation is eager at the mutation boundary: `setCell` -> `#invalidateSlot`
+    // Propagation is eager at the mutation boundary: `set` -> `#invalidateSlot`
     // already cascaded to the whole transitive dependent subtree (slots -> empty,
     // effects -> rescheduled), so dependents re-pull the new value on their next
     // read. Publishing does not re-propagate. The `memo` equality guard keeps the

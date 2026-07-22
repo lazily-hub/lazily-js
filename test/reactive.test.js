@@ -49,7 +49,7 @@ test("computed: an equal recompute suppresses downstream invalidation (guarded)"
   assert.equal(ctx.get(downstream), 1); // downstream did NOT re-run
 });
 
-test("Signal is eager: materialized before setCell/batch returns", () => {
+test("Signal is eager: materialized before set/batch returns", () => {
   const ctx = new Context();
   const a = ctx.source(2);
   const parity = ctx.signal((cx) => (cx.get(a) % 2 === 0 ? "even" : "odd"));

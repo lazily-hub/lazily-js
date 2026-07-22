@@ -2,8 +2,8 @@
 // {@link AsyncContext} analog of {@link ReactiveMap}.
 //
 // Keys `K` map to per-entry async reactive nodes: input cells
-// ({@link AsyncCellHandle}, always resolved) or derived slots
-// ({@link AsyncSlotHandle}, resolved asynchronously). Like the thread-safe map
+// ({@link AsyncSource}, always resolved) or derived slots
+// ({@link AsyncComputed}, resolved asynchronously). Like the thread-safe map
 // it keeps its present-set state under its own {@link AtomicMutex}.
 //
 // The eager/lazy behavior and present-set monotonicity are identical to the
@@ -87,7 +87,7 @@ export class AsyncReactiveMap {
 
   /**
    * Get the entry handle for `key`, minting it via `factory(key)` on first
-   * access and caching it. For a slot map this is the {@link AsyncSlotHandle} to
+   * access and caching it. For a slot map this is the {@link AsyncComputed} to
    * drive with `ctx.getAsync` or {@link AsyncReactiveMap#resolve}.
    * @param {K} key
    * @param {(key: K) => V} factory

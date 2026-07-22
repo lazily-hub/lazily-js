@@ -228,7 +228,7 @@ async function replaySteps(model, steps, label, assertFn, divergences, tail) {
 
       switch (op.type) {
         case "cell":
-          await instance.cell(op.id, op.value, op.scope ?? null);
+          await instance.source(op.id, op.value, op.scope ?? null);
           break;
         case "computed":
           await instance.computed(op.id, op.reads ?? [], op.offset ?? 0, op.scope ?? null);
@@ -266,7 +266,7 @@ async function replaySteps(model, steps, label, assertFn, divergences, tail) {
           }
           break;
         case "set_cell":
-          await instance.setCell(op.id, op.value);
+          await instance.set(op.id, op.value);
           break;
         case "dispose":
           try {
@@ -483,7 +483,7 @@ async function replaySteps(model, steps, label, assertFn, divergences, tail) {
       const publish = tail.after_publish;
       if (publish?.op) {
         const before = instance.runLog.length;
-        await instance.setCell(publish.op.id, publish.op.value);
+        await instance.set(publish.op.id, publish.op.value);
         await instance.settle();
         observation.afterPublishObserved = instance.runLog.slice(before);
         check(where, "after_publish.observed_by", null, () =>

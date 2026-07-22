@@ -1,10 +1,10 @@
-import type { AsyncCellHandle, AsyncContext, AsyncSlotHandle } from "./reactive-async.js";
+import type { AsyncSource, AsyncContext, AsyncComputed } from "./reactive-async.js";
 import type { EntryKind } from "./reactive-family.js";
 
 export { EntryKind } from "./reactive-family.js";
 
 /** The entry handle an {@link AsyncReactiveMap} holds. */
-export type AsyncMapHandle = AsyncCellHandle | AsyncSlotHandle;
+export type AsyncMapHandle = AsyncSource | AsyncComputed;
 
 /**
  * The async keyed reactive collection (`#reactivemap`, async flavor): keys map to

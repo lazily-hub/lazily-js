@@ -4,11 +4,11 @@ export interface AsyncComputeContext {
   /** Aborts when this run is superseded by a newer revision or disposed. */
   readonly signal: AbortSignal;
   /** Unified cell read (#lzcellkernel), recording it as a dependency (synchronous). */
-  get<T>(handle: AsyncCellHandle<T>): T;
+  get<T>(handle: AsyncSource<T>): T;
   /** @deprecated use {@link get} — the unified cell read (#lzcellkernel). */
-  getCell<T>(handle: AsyncCellHandle<T>): T;
+  getCell<T>(handle: AsyncSource<T>): T;
   /** Await a slot value, recording it as a dependency before awaiting. */
-  getAsync<T>(handle: AsyncSlotHandle<T>): Promise<T>;
+  getAsync<T>(handle: AsyncComputed<T>): Promise<T>;
   /** Await a signal value, recording its slot as a dependency before awaiting. */
   getSignalAsync<T>(handle: AsyncSignalHandle<T>): Promise<T>;
 }
@@ -19,15 +19,25 @@ export type AsyncEffectRun = (
   ctx: AsyncComputeContext,
 ) => AsyncCleanup | null | undefined | Promise<AsyncCleanup | null | undefined>;
 
-export class AsyncCellHandle<T = unknown> {
+export class AsyncSource<T = unknown> {
   /** @internal */ constructor(id: number);
   readonly id: number;
 }
 
-export class AsyncSlotHandle<T = unknown> {
+export class AsyncComputed<T = unknown> {
   /** @internal */ constructor(id: number);
   readonly id: number;
 }
+
+/** @deprecated use {@link AsyncSource}. */
+export const AsyncCellHandle: typeof AsyncSource;
+/** @deprecated use {@link AsyncSource}. */
+export type AsyncCellHandle<T = unknown> = AsyncSource<T>;
+
+/** @deprecated use {@link AsyncComputed}. */
+export const AsyncSlotHandle: typeof AsyncComputed;
+/** @deprecated use {@link AsyncComputed}. */
+export type AsyncSlotHandle<T = unknown> = AsyncComputed<T>;
 
 export class AsyncEffectHandle {
   /** @internal */ constructor(id: number);
@@ -35,27 +45,27 @@ export class AsyncEffectHandle {
 }
 
 export class AsyncSignalHandle<T = unknown> {
-  /** @internal */ constructor(slot: AsyncSlotHandle<T>, effect: AsyncEffectHandle);
-  readonly slot: AsyncSlotHandle<T>;
+  /** @internal */ constructor(slot: AsyncComputed<T>, effect: AsyncEffectHandle);
+  readonly slot: AsyncComputed<T>;
   readonly effect: AsyncEffectHandle;
 }
 
 export class AsyncContext {
   /** Create a source cell (the synchronous input layer) (#lzcellkernel). */
-  source<T>(value: T): AsyncCellHandle<T>;
+  source<T>(value: T): AsyncSource<T>;
   /** @deprecated use {@link AsyncContext#source}. */
-  cell<T>(value: T): AsyncCellHandle<T>;
+  cell<T>(value: T): AsyncSource<T>;
   /** The unified cell write (#lzcellkernel): only a source cell is writable. */
-  set<T>(handle: AsyncCellHandle<T>, value: T): void;
+  set<T>(handle: AsyncSource<T>, value: T): void;
   /** @deprecated use {@link AsyncContext#get} — the unified cell read (#lzcellkernel). */
-  getCell<T>(handle: AsyncCellHandle<T>): T;
+  getCell<T>(handle: AsyncSource<T>): T;
   /** @deprecated use {@link AsyncContext#set} — the unified cell write (#lzcellkernel). */
-  setCell<T>(handle: AsyncCellHandle<T>, value: T): void;
+  setCell<T>(handle: AsyncSource<T>, value: T): void;
 
   /** Create an async computed slot (no memo guard). */
-  computedAsync<T>(compute: AsyncComputeFn<T>): AsyncSlotHandle<T>;
+  computedAsync<T>(compute: AsyncComputeFn<T>): AsyncComputed<T>;
   /** Create an async computed slot with an equality memo guard. */
-  memoAsync<T>(compute: AsyncComputeFn<T>): AsyncSlotHandle<T>;
+  memoAsync<T>(compute: AsyncComputeFn<T>): AsyncComputed<T>;
   /** Create an eager async signal (memo slot + puller effect). */
   signalAsync<T>(compute: AsyncComputeFn<T>): AsyncSignalHandle<T>;
   /** Create an async effect returning an optional (possibly async) cleanup. */
@@ -65,13 +75,13 @@ export class AsyncContext {
    * The unified cell read (#lzcellkernel). A source cell returns its value; a
    * slot returns its synchronous cached snapshot (resolved value or `undefined`).
    */
-  get<T>(handle: AsyncCellHandle<T>): T;
-  get<T>(handle: AsyncSlotHandle<T>): T | undefined;
-  isResolved<T>(handle: AsyncSlotHandle<T>): boolean;
+  get<T>(handle: AsyncSource<T>): T;
+  get<T>(handle: AsyncComputed<T>): T | undefined;
+  isResolved<T>(handle: AsyncComputed<T>): boolean;
   /** Public projection of the slot state machine. */
-  slotState<T>(handle: AsyncSlotHandle<T>): AsyncSlotStateView;
+  slotState<T>(handle: AsyncComputed<T>): AsyncSlotStateView;
   /** Await a slot value (fast path via `get()`, else spawn/attach). */
-  getAsync<T>(handle: AsyncSlotHandle<T>): Promise<T>;
+  getAsync<T>(handle: AsyncComputed<T>): Promise<T>;
   getSignal<T>(handle: AsyncSignalHandle<T>): T | undefined;
   getSignalAsync<T>(handle: AsyncSignalHandle<T>): Promise<T>;
 
@@ -90,9 +100,9 @@ export class AsyncContext {
 
   /** Tear down an async derived slot: mark the surviving cone stale, supersede
    * any in-flight compute, then detach both edge directions. Idempotent. */
-  disposeSlot<T>(handle: AsyncSlotHandle<T>): void;
+  disposeSlot<T>(handle: AsyncComputed<T>): void;
   /** Tear down a source cell. See {@link disposeSlot}. */
-  disposeCell<T>(handle: AsyncCellHandle<T>): void;
+  disposeCell<T>(handle: AsyncSource<T>): void;
   /** Tear down whatever kind of node `handle` names. Dispatch is on the
    * handle's CLASS, not on the node currently at its id — ids are recycled, and
    * a stale handle must be a no-op rather than tear down the new occupant. */
@@ -111,8 +121,8 @@ export class AsyncContext {
 
 /** Any node handle an {@link AsyncContext} can address by degree or tear down. */
 export type AsyncNodeHandle =
-  | AsyncCellHandle<never>
-  | AsyncSlotHandle<never>
+| AsyncSource<never>
+| AsyncComputed<never>
   | AsyncEffectHandle
   | AsyncSignalHandle<never>;
 
@@ -130,11 +140,11 @@ export class AsyncTeardownScope {
   readonly size: number;
   readonly ended: boolean;
   adopt<H extends AsyncNodeHandle>(handle: H): H;
-  source<T>(value: T): AsyncCellHandle<T>;
+  source<T>(value: T): AsyncSource<T>;
   /** @deprecated use {@link AsyncTeardownScope#source}. */
-  cell<T>(value: T): AsyncCellHandle<T>;
-  computedAsync<T>(compute: AsyncComputeFn<T>): AsyncSlotHandle<T>;
-  memoAsync<T>(compute: AsyncComputeFn<T>): AsyncSlotHandle<T>;
+  cell<T>(value: T): AsyncSource<T>;
+  computedAsync<T>(compute: AsyncComputeFn<T>): AsyncComputed<T>;
+  memoAsync<T>(compute: AsyncComputeFn<T>): AsyncComputed<T>;
   signalAsync<T>(compute: AsyncComputeFn<T>): AsyncSignalHandle<T>;
   effectAsync(run: AsyncEffectRun): AsyncEffectHandle;
   /** Cancel this scope's teardown; the nodes themselves are untouched. */

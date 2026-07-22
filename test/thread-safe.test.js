@@ -57,7 +57,7 @@ test("ThreadSafeContext mirrors single-threaded reactive semantics", () => {
   assert.equal(ctx.get(doubled), 26);
 });
 
-test("ThreadSafeContext.batch coalesces to one invalidation pass (flushBatch ≡ setCell)", () => {
+test("ThreadSafeContext.batch coalesces to one invalidation pass (flushBatch ≡ set)", () => {
   const ctx = new ThreadSafeContext();
   const c = ctx.source(0);
   let runs = 0;

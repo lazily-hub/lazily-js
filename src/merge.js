@@ -103,7 +103,7 @@ export class MergeCell {
     this.ctx.set(this.cell, value);
   }
 
-  /** Fold `op` into the current value under the policy. Routes through `setCell`
+  /** Fold `op` into the current value under the policy. Routes through `set`
    *  so the `==` store-guard (free dedup for idempotent ⊕) + store-without-cascade
    *  apply unchanged. */
   merge(op) {
