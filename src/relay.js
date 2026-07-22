@@ -93,11 +93,11 @@ export class RelayCell {
     this._head = ctx.source(null);
     // Ops merged into the current window since the last drain (the Count bound).
     this._pending = ctx.source(0);
-    this._depth = ctx.computed(() => ctx.get(this._pending));
+    this._depth = ctx.computed((c) => c.get(this._pending));
     this._isFull = ctx.computed(
-      () => ctx.get(this._pending) >= ctx.get(policy.highWater),
+      (c) => c.get(this._pending) >= c.get(policy.highWater),
     );
-    this._isEmpty = ctx.computed(() => ctx.get(this._head) === null);
+    this._isEmpty = ctx.computed((c) => c.get(this._head) === null);
   }
 
   /** Whether the current overflow choice is legal for the policy. */

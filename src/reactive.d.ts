@@ -1,5 +1,16 @@
 export type ComputeFn<T> = () => T;
 export type EffectRun = () => (() => void) | null | undefined;
+/**
+ * The compute-time READ surface (#lzcellkernel): the subset of {@link Context}
+ * that registers dependency tracking. Both the owning `Context` (an untracked
+ * read at top level) and the per-recompute fortified `Compute` view (a tracked
+ * read inside a compute/effect closure) satisfy it, so a reactive-read method
+ * takes a `ComputeOps` and callers thread the compute view they received to
+ * subscribe. This is the value-threaded replacement for ambient tracking.
+ */
+export interface ComputeOps {
+  get<T>(handle: Source<T> | Computed<T>): T;
+}
 export type EqualFn<T> = (a: T, b: T) => boolean;
 /**
  * Custom propagate predicate for {@link Context.computedRippleWhen}: return

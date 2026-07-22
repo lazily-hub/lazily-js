@@ -123,7 +123,7 @@ export function runBenchmarkSuite(iterations = 1000) {
   {
     const ctx = new Context();
     const c = ctx.source(1);
-    const doubled = ctx.computed(() => ctx.get(c) * 2);
+    const doubled = ctx.computed((cc) => cc.get(c) * 2);
     let v = 0;
     results.push(
       benchmark(
@@ -143,8 +143,8 @@ export function runBenchmarkSuite(iterations = 1000) {
     const ctx = new Context();
     const c = ctx.source(0);
     let sink = 0;
-    ctx.effect(() => {
-      sink += ctx.get(c);
+    ctx.effect((cc) => {
+      sink += cc.get(c);
     });
     let v = 0;
     results.push(
@@ -169,7 +169,7 @@ export function runBenchmarkSuite(iterations = 1000) {
         "family_materialize",
         () => {
           const map = new SlotMap(ctx);
-          map.getOrInsertWith((k = (k + 1) & 1023), (key) => key * 2);
+          map.getOrInsertWith(ctx, (k = (k + 1) & 1023), (key) => key * 2);
         },
         iterations,
       ),

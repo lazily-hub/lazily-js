@@ -15,7 +15,7 @@
     "name": "state-machine: StateMachine",
     "path": "src/state-machine.js",
     "import": "{ StateMachine }",
-    "limit": "267 B"
+    "limit": "280 B"
   },
   {
     "name": "sem-tree: SemTree",

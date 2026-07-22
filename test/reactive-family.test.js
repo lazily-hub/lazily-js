@@ -52,14 +52,14 @@ test("SlotMap materialization conformance: observational_transparency.json", () 
 
   // observe_canonical / eager_lazy_observationally_equivalent: identical values.
   for (const [key, value] of Object.entries(expected.observe)) {
-    assert.equal(eager.get(key), value, `eager observe[${key}]`);
-    assert.equal(lazy.getOrInsertWith(key, factory), value, `lazy observe[${key}]`);
+    assert.equal(eager.get(ctx, key), value, `eager observe[${key}]`);
+    assert.equal(lazy.getOrInsertWith(ctx, key, factory), value, `lazy observe[${key}]`);
   }
 
   // Rebuild a fresh lazy map to observe only the `reads` sequence.
   const ctx2 = new Context();
   const lazy2 = new SlotMap(ctx2);
-  for (const key of fixture.reads) lazy2.getOrInsertWith(key, factory);
+  for (const key of fixture.reads) lazy2.getOrInsertWith(ctx2, key, factory);
   assertSameSet(lazy2.presentKeys(), expected.lazy_present_after_reads, "lazy_present_after_reads");
 });
 
@@ -77,7 +77,7 @@ test("SlotMap materialization conformance: deferral_not_deallocation.json", () =
   const lazy = new SlotMap(ctx);
   const sizes = [];
   for (const key of fixture.reads) {
-    const before = lazy.getOrInsertWith(key, factory); // materialize_preserves_observe
+    const before = lazy.getOrInsertWith(ctx, key, factory); // materialize_preserves_observe
     assert.equal(before, spec.val[key], `observe[${key}]`);
     sizes.push(lazy.presentCount());
   }
@@ -124,7 +124,7 @@ test("materialization conformance: entry_kind_orthogonal_to_mode.json", () => {
     "eager_present",
   );
   for (const [key, value] of Object.entries(expected.observe)) {
-    const got = cellKeys.includes(key) ? eagerCells.get(key) : eagerSlots.get(key);
+    const got = cellKeys.includes(key) ? eagerCells.get(ctxE, key) : eagerSlots.get(ctxE, key);
     assert.equal(got, value, `eager observe[${key}]`);
   }
 
@@ -137,8 +137,8 @@ test("materialization conformance: entry_kind_orthogonal_to_mode.json", () => {
   assert.equal(lazySlots.presentCount(), 0, "slots deferred at build");
 
   for (const key of fixture.reads) {
-    if (slotKeys.includes(key)) lazySlots.getOrInsertWith(key, lookup);
-    else lazyCells.getOrInsertWith(key, lookup);
+    if (slotKeys.includes(key)) lazySlots.getOrInsertWith(ctxL, key, lookup);
+    else lazyCells.getOrInsertWith(ctxL, key, lookup);
   }
   assertSameSet(
     [...lazyCells.presentKeys(), ...lazySlots.presentKeys()],
@@ -147,8 +147,8 @@ test("materialization conformance: entry_kind_orthogonal_to_mode.json", () => {
   );
   for (const [key, value] of Object.entries(expected.observe)) {
     const got = cellKeys.includes(key)
-      ? lazyCells.get(key)
-      : lazySlots.getOrInsertWith(key, lookup);
+      ? lazyCells.get(ctxL, key)
+      : lazySlots.getOrInsertWith(ctxL, key, lookup);
     assert.equal(got, value, `lazy observe[${key}]`);
   }
 });
@@ -166,14 +166,14 @@ test("CellMap: entry caches one cell per key; get_or_insert mints once", () => {
   // getOrInsertWith mints once then returns existing (factory not re-run).
   let calls = 0;
   assert.equal(
-    map.getOrInsertWith("b", () => {
+    map.getOrInsertWith(ctx, "b", () => {
       calls++;
       return 7;
     }),
     7,
   );
   assert.equal(
-    map.getOrInsertWith("b", () => {
+    map.getOrInsertWith(ctx, "b", () => {
       calls++;
       return 999;
     }),
@@ -183,7 +183,7 @@ test("CellMap: entry caches one cell per key; get_or_insert mints once", () => {
 
   // An explicit set is observed by a subsequent getOrInsertWith.
   map.set("b", 42);
-  assert.equal(map.getOrInsertWith("b", () => 0), 42);
+  assert.equal(map.getOrInsertWith(ctx, "b", () => 0), 42);
 });
 
 test("CellMap: membership is reactive but value changes are not", () => {
@@ -192,7 +192,7 @@ test("CellMap: membership is reactive but value changes are not", () => {
   const a = map.entry("a", 1);
   map.entry("b", 2);
 
-  const count = ctx.computed(() => map.len());
+  const count = ctx.computed((c) => map.len(c));
   assert.equal(ctx.get(count), 2);
 
   // Mutating an existing entry must NOT invalidate the membership reader.
@@ -207,7 +207,7 @@ test("CellMap: membership is reactive but value changes are not", () => {
   // Removing a key invalidates it too.
   assert.ok(map.remove("b"));
   assert.equal(ctx.get(count), 2);
-  assert.deepEqual(map.keys(), ["a", "c"]);
+  assert.deepEqual(map.keys(ctx), ["a", "c"]);
 });
 
 test("ReactiveMap: per-entry reads are independent", () => {
@@ -216,7 +216,7 @@ test("ReactiveMap: per-entry reads are independent", () => {
   const a = map.entry("a", 1);
   const b = map.entry("b", 2);
 
-  const viewA = ctx.computed(() => (map.get("a") ?? 0) * 10);
+  const viewA = ctx.computed((c) => (map.get(c, "a") ?? 0) * 10);
   assert.equal(ctx.get(viewA), 10);
 
   // Changing b must not invalidate a's reader.
@@ -234,12 +234,12 @@ test("SlotMap: mints lazily on pull and caches (no re-mint)", () => {
   const map = new SlotMap(ctx);
   assert.equal(map.presentCount(), 0);
   assert.equal(map.isPresent(7), false);
-  assert.equal(map.getOrInsertWith(7, (k) => k * 2), 14);
+  assert.equal(map.getOrInsertWith(ctx, 7, (k) => k * 2), 14);
   assert.equal(map.presentCount(), 1);
   assert.ok(map.isPresent(7));
   const h = map.handle(7);
   assert.equal(ctx.get(h), 14);
-  assert.equal(map.getOrInsertWith(7, (k) => k * 999), 14, "factory not re-run");
+  assert.equal(map.getOrInsertWith(ctx, 7, (k) => k * 999), 14, "factory not re-run");
 });
 
 test("SlotMap: materializeAll is eager", () => {
@@ -248,7 +248,7 @@ test("SlotMap: materializeAll is eager", () => {
   map.materializeAll([0, 1, 2, 5, 9], (k) => k * 3);
   assert.equal(map.presentCount(), 5);
   for (const k of [0, 1, 2, 5, 9]) assert.ok(map.isPresent(k));
-  assert.equal(map.get(5), 15);
+  assert.equal(map.get(ctx, 5), 15);
   assert.equal(map.entryKind(), EntryKind.Slot);
 });
 
@@ -267,19 +267,19 @@ test("moveTo reorders keys and keeps cell identity", () => {
   const a = map.entry("a", 1);
   map.entry("b", 2);
   map.entry("c", 3);
-  assert.deepEqual(map.keys(), ["a", "b", "c"]);
+  assert.deepEqual(map.keys(ctx), ["a", "b", "c"]);
 
   assert.ok(map.moveTo("c", 0));
-  assert.deepEqual(map.keys(), ["c", "a", "b"]);
+  assert.deepEqual(map.keys(ctx), ["c", "a", "b"]);
 
   // The moved entries keep the SAME value cells (identity + value intact).
   assert.equal(map.handle("a").id, a.id);
-  assert.equal(map.get("a"), 1);
-  assert.equal(map.get("c"), 3);
+  assert.equal(map.get(ctx, "a"), 1);
+  assert.equal(map.get(ctx, "c"), 3);
 
   // Absent key -> false, no reorder.
   assert.ok(!map.moveTo("z", 0));
-  assert.deepEqual(map.keys(), ["c", "a", "b"]);
+  assert.deepEqual(map.keys(ctx), ["c", "a", "b"]);
 });
 
 test("pure move invalidates order but not membership readers", () => {
@@ -289,9 +289,9 @@ test("pure move invalidates order but not membership readers", () => {
   map.entry("b", 2);
   map.entry("c", 3);
 
-  const orderReader = ctx.computed(() => map.keys().join(","));
-  const count = ctx.computed(() => map.len());
-  const hasB = ctx.computed(() => map.containsKey("b"));
+  const orderReader = ctx.computed((c) => map.keys(c).join(","));
+  const count = ctx.computed((c) => map.len(c));
+  const hasB = ctx.computed((c) => map.containsKey(c, "b"));
   assert.equal(ctx.get(orderReader), "a,b,c");
   assert.equal(ctx.get(count), 3);
   assert.ok(ctx.get(hasB));
@@ -309,13 +309,13 @@ test("moveBefore / moveAfter place relative to anchor", () => {
   const ctx = new Context();
   const map = new CellMap(ctx);
   for (let k = 0; k < 4; k++) map.entry(k, k * 10);
-  assert.deepEqual(map.keys(), [0, 1, 2, 3]);
+  assert.deepEqual(map.keys(ctx), [0, 1, 2, 3]);
 
   assert.ok(map.moveBefore(3, 1));
-  assert.deepEqual(map.keys(), [0, 3, 1, 2]);
+  assert.deepEqual(map.keys(ctx), [0, 3, 1, 2]);
 
   assert.ok(map.moveAfter(0, 2));
-  assert.deepEqual(map.keys(), [3, 1, 2, 0]);
+  assert.deepEqual(map.keys(ctx), [3, 1, 2, 0]);
 
   assert.ok(!map.moveBefore(3, 99));
   assert.ok(!map.moveAfter(99, 2));
@@ -324,7 +324,7 @@ test("moveBefore / moveAfter place relative to anchor", () => {
 test("containsKey tracks membership", () => {
   const ctx = new Context();
   const map = new CellMap(ctx);
-  const has5 = ctx.computed(() => map.containsKey(5));
+  const has5 = ctx.computed((c) => map.containsKey(c, 5));
   assert.ok(!ctx.get(has5));
   map.entry(5, 50);
   assert.ok(ctx.get(has5));

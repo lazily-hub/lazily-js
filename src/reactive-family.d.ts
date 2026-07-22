@@ -1,4 +1,4 @@
-import type { CellHandle, Context, SlotHandle } from "./reactive.js";
+import type { CellHandle, ComputeOps, Context, SlotHandle } from "./reactive.js";
 
 /**
  * Which kind of reactive node a {@link ReactiveMap} entry is — the handle-kind
@@ -24,16 +24,20 @@ export type MapHandle<V> = CellHandle<V> | SlotHandle<V>;
 export class ReactiveMap<K = unknown, V = unknown> {
   constructor(ctx: Context, kind?: EntryKind);
 
-  /** Get the value at `key`, minting via `factory(key)` if absent (mint-on-access). */
-  getOrInsertWith(key: K, factory: (key: K) => V): V;
+  /**
+   * Get the value at `key`, minting via `factory(key)` if absent (mint-on-access).
+   * `ops` is the reactive read surface — the `Compute` view inside a compute/effect
+   * closure (subscribes the caller), else the owning `Context` (untracked).
+   */
+  getOrInsertWith(ops: ComputeOps, key: K, factory: (key: K) => V): V;
   /** The existing entry handle for `key`, or `undefined`. Non-reactive. */
   handle(key: K): MapHandle<V> | undefined;
   /** Read the value at `key` if present, else `undefined`. Reactive on that entry. */
-  get(key: K): V | undefined;
+  get(ops: ComputeOps, key: K): V | undefined;
   /** Remove `key`'s entry; bumps membership. Returns whether it was present. */
   remove(key: K): boolean;
-  /** Reactive snapshot of keys in order (subscribes to order changes). */
-  keys(): K[];
+  /** Reactive snapshot of keys in order (subscribes to order changes via `ops`). */
+  keys(ops: ComputeOps): K[];
   /** Currently-materialized keys, in first-materialization order. Non-reactive. */
   presentKeys(): K[];
   /** Number of currently-materialized entries. Non-reactive. */
@@ -48,12 +52,12 @@ export class ReactiveMap<K = unknown, V = unknown> {
   moveBefore(key: K, anchor: K): boolean;
   /** Atomically move `key` to just after `anchor`. */
   moveAfter(key: K, anchor: K): boolean;
-  /** Reactive entry count (subscribes to membership changes only). */
-  len(): number;
-  /** Reactive emptiness check (subscribes to membership changes). */
-  isEmpty(): boolean;
-  /** Reactive membership test for `key` (subscribes to membership changes). */
-  containsKey(key: K): boolean;
+  /** Reactive entry count (subscribes to membership changes only, via `ops`). */
+  len(ops: ComputeOps): number;
+  /** Reactive emptiness check (subscribes to membership changes, via `ops`). */
+  isEmpty(ops: ComputeOps): boolean;
+  /** Reactive membership test for `key` (subscribes to membership changes, via `ops`). */
+  containsKey(ops: ComputeOps, key: K): boolean;
   /** Non-reactive count. */
   lenUntracked(): number;
   /** This map's entry kind. */

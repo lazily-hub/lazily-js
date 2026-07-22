@@ -62,14 +62,14 @@ export class SemTree {
     const ctx = this.#ctx;
     const fold = this.#fold;
     const self = this;
-    node.slot = ctx.computed(() => {
-      const v = ctx.get(node.valueCell);
-      const kids = ctx.get(node.childKeysCell);
+    node.slot = ctx.computed((c) => {
+      const v = c.get(node.valueCell);
+      const kids = c.get(node.childKeysCell);
       const ds = [];
       for (const kid of kids) {
         const childSlot = node.childSlots.get(kid);
         if (childSlot) {
-          ds.push(ctx.get(childSlot));
+          ds.push(c.get(childSlot));
         }
       }
       return fold(v, ds);

@@ -123,9 +123,14 @@ export class ReactiveMap {
     return handle;
   }
 
-  /** Read a handle's value through the owning context (subscribes the caller). */
-  _observe(handle) {
-    return this._ctx.get(handle);
+  /**
+   * Read a handle's value through the given reactive surface `ops` (subscribes
+   * the caller when `ops` is the value-threaded `Compute` view; an untracked read
+   * when `ops` is the bare `Context`). #lzcellkernel: tracking is value-threaded,
+   * so the caller passes the compute view it received to subscribe.
+   */
+  _observe(ops, handle) {
+    return ops.get(handle);
   }
 
   /**
@@ -134,17 +139,19 @@ export class ReactiveMap {
    * LAZY materialization pull; for a {@link CellMap} it seeds an input cell.
    * Bumps reactive membership only on insert; an existing key returns its
    * current value without re-running the factory.
+   * @param {import("./reactive.js").ComputeOps} ops reactive surface (the
+   *   `Compute` view inside a compute/effect closure, else the owning `Context`)
    * @param {K} key
    * @param {(key: K) => V} factory
    * @returns {V}
    */
-  getOrInsertWith(key, factory) {
+  getOrInsertWith(ops, key, factory) {
     const existing = this._entries.get(key);
     if (existing !== undefined) {
-      return this._observe(existing);
+      return this._observe(ops, existing);
     }
     const handle = this._mint(key, () => factory(key));
-    return this._observe(handle);
+    return this._observe(ops, handle);
   }
 
   /**
@@ -159,12 +166,14 @@ export class ReactiveMap {
   /**
    * Read the value at `key` if present, else `undefined`. Reactive on that entry
    * only (a reader is invalidated when this entry changes, not when siblings do).
+   * @param {import("./reactive.js").ComputeOps} ops reactive surface (the
+   *   `Compute` view inside a closure, else the owning `Context`)
    * @param {K} key
    * @returns {V | undefined}
    */
-  get(key) {
+  get(ops, key) {
     const handle = this._entries.get(key);
-    return handle === undefined ? undefined : this._observe(handle);
+    return handle === undefined ? undefined : this._observe(ops, handle);
   }
 
   /**
@@ -191,10 +200,12 @@ export class ReactiveMap {
    * Reactive snapshot of the keys in their current order. Subscribes the caller
    * to ORDER changes (add/remove AND move/reorder), not to per-entry value
    * changes.
+   * @param {import("./reactive.js").ComputeOps} ops reactive surface (the
+   *   `Compute` view inside a closure, else the owning `Context`)
    * @returns {K[]}
    */
-  keys() {
-    this._ctx.get(this._orderSignal);
+  keys(ops) {
+    ops.get(this._orderSignal);
     return [...this._order];
   }
 
@@ -293,25 +304,34 @@ export class ReactiveMap {
     return this.moveTo(key, target);
   }
 
-  /** Reactive entry count. Subscribes the caller to membership changes only. */
-  len() {
-    this._ctx.get(this._membership);
+  /**
+   * Reactive entry count. Subscribes the caller to membership changes only.
+   * @param {import("./reactive.js").ComputeOps} ops reactive surface (the
+   *   `Compute` view inside a closure, else the owning `Context`)
+   */
+  len(ops) {
+    ops.get(this._membership);
     return this._order.length;
   }
 
-  /** Reactive emptiness check. Subscribes the caller to membership changes. */
-  isEmpty() {
-    return this.len() === 0;
+  /**
+   * Reactive emptiness check. Subscribes the caller to membership changes.
+   * @param {import("./reactive.js").ComputeOps} ops reactive surface
+   */
+  isEmpty(ops) {
+    return this.len(ops) === 0;
   }
 
   /**
    * Reactive membership test for `key`. Subscribes the caller to membership
    * changes (add/remove of any key), not to value changes.
+   * @param {import("./reactive.js").ComputeOps} ops reactive surface (the
+   *   `Compute` view inside a closure, else the owning `Context`)
    * @param {K} key
    * @returns {boolean}
    */
-  containsKey(key) {
-    this._ctx.get(this._membership);
+  containsKey(ops, key) {
+    ops.get(this._membership);
     return this._entries.has(key);
   }
 
@@ -411,8 +431,11 @@ export class SlotMap extends ReactiveMap {
    * @param {(key: K) => V} factory
    */
   materializeAll(keys, factory) {
+    // Eager pre-mint runs at top level (not inside a compute), so the owning
+    // context is the reactive surface — an untracked observe that only forces
+    // allocation. #lzcellkernel: reads are value-threaded via `ops`.
     for (const key of keys) {
-      this.getOrInsertWith(key, factory);
+      this.getOrInsertWith(this._ctx, key, factory);
     }
   }
 }

@@ -56,8 +56,11 @@ export class StateMachine {
   // whose disposal stops further callbacks.
   onTransition(handler) {
     let prev = this.state;
-    return this.#ctx.effect(() => {
-      const current = this.state;
+    // Reads the state cell through the value-threaded compute view `c`
+    // (#lzcellkernel) so the effect subscribes to state changes — the `this.state`
+    // getter reads through a captured `ctx` (untracked) and would not subscribe.
+    return this.#ctx.effect((c) => {
+      const current = c.get(this.#cell);
       if (prev !== current) {
         handler(prev, current);
       }
@@ -68,9 +71,11 @@ export class StateMachine {
 
   // An eager signal that is `true` while in `target`, else `false`.
   stateIs(target) {
-    const slot = this.#ctx.computed(() => this.state === target);
-    const effect = this.#ctx.effect(() => {
-      this.#ctx.get(slot);
+    // The computed reads the state cell through its view `c`; the puller effect
+    // reads the slot through its view (#lzcellkernel — sole tracking surface).
+    const slot = this.#ctx.computed((c) => c.get(this.#cell) === target);
+    const effect = this.#ctx.effect((c) => {
+      c.get(slot);
       return null;
     });
     return new SignalHandle(slot, effect);
