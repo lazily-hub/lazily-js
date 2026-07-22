@@ -3,6 +3,32 @@ import test from "node:test";
 
 import { Context } from "../src/reactive.js";
 
+test("#lzrsgetarc: shared-reference read parity covers Source and Computed", () => {
+  // JavaScript's ordinary get is naturally a shared-reference read. Pin the
+  // three lazily-formal parity properties with identity, refresh, and one
+  // exact tracked edge for each Cell kind.
+  const ctx = new Context();
+  const initial = { value: 1 };
+  const source = ctx.source(initial);
+  const computed = ctx.computed((cx) => cx.get(source));
+  const sourceReader = ctx.computed((cx) => cx.get(source).value);
+  const computedReader = ctx.computed((cx) => cx.get(computed).value);
+
+  assert.strictEqual(ctx.get(source), initial);
+  assert.strictEqual(ctx.get(computed), initial);
+  assert.equal(ctx.get(sourceReader), 1);
+  assert.equal(ctx.get(computedReader), 1);
+  assert.equal(ctx.dependencyCount(sourceReader), 1);
+  assert.equal(ctx.dependencyCount(computedReader), 1);
+
+  const replacement = { value: 2 };
+  ctx.set(source, replacement);
+  assert.strictEqual(ctx.get(source), replacement);
+  assert.strictEqual(ctx.get(computed), replacement);
+  assert.equal(ctx.get(sourceReader), 2);
+  assert.equal(ctx.get(computedReader), 2);
+});
+
 test("Cell + computed: lazy slot computes on first read and recomputes after a cell change", () => {
   const ctx = new Context();
   const a = ctx.source(2);

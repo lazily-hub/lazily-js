@@ -19,6 +19,14 @@ caller holds. `Effect` is a value-less sink outside the hierarchy.
   mode, and `memo` is removed (folded into guarded `computed`).
 - `Effect` (v1 `EffectHandle`) — a sink; reads nothing, depended on by nothing.
 
+**Unified shared reads (`#lzrsgetarc`).** JavaScript object values are references,
+so the single `Context.get` / tracked compute `get` surface is naturally the
+shared-reference read for both `Source` and `Computed`: it returns the same
+current object, refreshes computeds identically, and registers the same tracked
+edge, with no clone-bearing alternate API. This realizes the
+`Reactive.readShared_eq_readCell`, `Reactive.trackedSharedRead_eq_trackedRead`,
+and `Reactive.trackedSharedRead_registers_edge` formal pins.
+
 **Read/write split without a compile guarantee.** JavaScript has neither a
 compile-time nor (by design §4) a runtime kind gate, so the split is expressed by
 METHOD PRESENCE: a `Source` object has `set`/`merge`; a `Computed` object does not
