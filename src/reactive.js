@@ -721,6 +721,36 @@ function createContext(opts = {}) {
     return nodes[id].value;
   }
 
+  // Value-threaded tracked read (#lzcellkernel fortified compute view): register
+  // the dependency against an EXPLICIT recomputing-node id passed as a VALUE, not
+  // the ambient `trackingStack` top. `trackId === 0` (never a live id — `nextId`
+  // starts at 1) reads untracked. This is the read primitive the `Compute` view
+  // calls, so attribution survives suspension: the id is captured in the view,
+  // not looked up from ambient state at read time (the browser has no
+  // `AsyncLocalStorage`, so value-threading is the only correct async mechanism).
+  //
+  // Dispatches on kind like the unified {@link get}: a `Source` cell returns its
+  // stored value; a `Computed` slot refreshes and returns its snapshot. Disposed
+  // check comes BEFORE `registerDependency` (see getSlotAny) so a read that hits a
+  // torn-down node leaves no dangling half-edge.
+  function readTracked(handle, trackId) {
+    const id = handle.id;
+    if (kinds[id] === KIND_NONE) {
+      throw new DisposedNodeError(id);
+    }
+    if (trackId !== 0) {
+      registerDependency(id, trackId);
+    }
+    if (kinds[id] === KIND_CELL) {
+      return nodes[id].value;
+    }
+    refreshSlot(id);
+    if ((flags[id] & F_HAS_VALUE) === 0) {
+      throw new Error(`slot ${id} has no value`);
+    }
+    return nodes[id].value;
+  }
+
   // -- Write -------------------------------------------------------------
 
   /**
@@ -1272,11 +1302,17 @@ function createContext(opts = {}) {
         dependenciesIndex.delete(id);
       }
     }
+    // The fortified value-threaded compute view (#lzcellkernel): its `get` tracks
+    // against `id` by construction. Also push `id` on the ambient `trackingStack`
+    // — the narrow compatibility bridge that keeps compute closures reading through
+    // a captured `ctx` tracking (mirrors lazily-rs keeping its thread-local frame).
     trackingStack.push(id);
+    const view = makeCompute(id);
     let result;
     try {
-      result = node.compute();
+      result = node.compute(view);
     } finally {
+      view._live = false; // fortification: a read on the stale view now throws
       trackingStack.pop();
     }
     const isMemo = (f & F_MEMO) !== 0;
@@ -1496,11 +1532,16 @@ function createContext(opts = {}) {
     if (cleanup) {
       cleanup();
     }
+    // Effects track through the same fortified compute view as slots
+    // (#lzcellkernel); the ambient push is the compatibility bridge (see
+    // recomputeSlotNow).
     trackingStack.push(id);
+    const view = makeCompute(id);
     let nextCleanup;
     try {
-      nextCleanup = node.run();
+      nextCleanup = node.run(view);
     } finally {
+      view._live = false;
       trackingStack.pop();
     }
     if (kinds[id] === KIND_EFFECT) {
@@ -1569,6 +1610,59 @@ function createContext(opts = {}) {
     instrumentationSnapshot,
     resetInstrumentation,
   };
+
+  // -- Fortified compute view (#lzcellkernel) ----------------------------
+  //
+  // `api` doubles as the `ComputeOps` surface — the compute-time operations
+  // subset (get/set/source/computed/computedRippleWhen/slot/effect/batch/dispose…)
+  // implemented by the owning `Context`. The per-recompute `Compute` view below is
+  // the OTHER implementor: it inherits every op from `api` (via `__proto__`) but
+  // overrides `get` to be the sole *fortified* tracking surface. It carries the
+  // recomputing node id AS A VALUE (`_slotId`), so a tracked read attributes to
+  // that node by construction — never via an ambient carrier — which is the only
+  // mechanism that stays correct across suspension in a browser (no
+  // `AsyncLocalStorage`; the id is captured in the view, so a read after `await`
+  // still names the right node).
+  //
+  // Fortification:
+  //   - Sole tracking surface: `compute.get(h)` registers an edge; the explicit
+  //     escape `compute.untracked().get(h)` registers none.
+  //   - Non-escapable: the view is invalidated when its recompute returns
+  //     (`_live = false`), so it cannot be stored and later replayed to register
+  //     an edge against the wrong node — a read on a stale view throws.
+  //
+  // The ambient `trackingStack` is NOT removed: it survives as the narrow
+  // compatibility bridge for the large existing surface of compute/effect closures
+  // that read through a captured `ctx` (mirrors lazily-rs, which kept its
+  // thread-local frame as the same bridge). Closures migrated to read through the
+  // `Compute` view push no attribution onto ambient state.
+  const untrackedView = {
+    __proto__: api,
+    get(handle) {
+      return readTracked(handle, 0);
+    },
+    getCell(handle) {
+      return readTracked(handle, 0);
+    },
+  };
+  const computeProto = {
+    __proto__: api,
+    get(handle) {
+      if (this._live === false) {
+        throw new Error(
+          "lazily: Compute view read after its recompute (fortification #lzcellkernel)",
+        );
+      }
+      return readTracked(handle, this._slotId);
+    },
+    untracked() {
+      return untrackedView;
+    },
+  };
+  function makeCompute(slotId) {
+    return { __proto__: computeProto, _slotId: slotId, _live: true };
+  }
+
   return api;
 }
 

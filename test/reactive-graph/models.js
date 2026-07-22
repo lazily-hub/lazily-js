@@ -146,9 +146,11 @@ function makeComputeCounter() {
     /** Wrap a compute so every invocation the context makes is counted. */
     countingSync(id, compute) {
       counts.set(id, 0);
-      return () => {
+      // Forward the fortified `Compute` view (#lzcellkernel) to the wrapped
+      // compute so it can read through the value-threaded tracking surface.
+      return (c) => {
         counts.set(id, counts.get(id) + 1);
-        return compute();
+        return compute(c);
       };
     },
     countingAsync(id, compute) {
@@ -200,6 +202,16 @@ function makeSyncLikeModel(name, makeContext) {
         return ctx.get(handle);
       };
 
+      // Read through the fortified value-threaded `Compute` view `c` handed to a
+      // compute/effect closure (#lzcellkernel), so the conformance corpus
+      // exercises the fortified tracking path directly rather than the ambient
+      // bridge (mirrors lazily-rs migrating its `BasicModel` to `Fn(&Compute)`).
+      const readVia = (c, id) => {
+        const handle = handles.get(id);
+        if (handle instanceof SignalHandle) return c.get(handle.slot);
+        return c.get(handle);
+      };
+
       return {
         runLog,
         cleanupLog,
@@ -209,7 +221,9 @@ function makeSyncLikeModel(name, makeContext) {
           handles.set(id, handle);
         },
         async computed(id, reads, offset, scopeName) {
-          const compute = computes.countingSync(id, () => sumOffset(reads.map(readId), offset));
+          const compute = computes.countingSync(id, (c) =>
+            sumOffset(reads.map((r) => readVia(c, r)), offset),
+          );
           const handle =
             scopeName == null
               ? ctx.computed(compute)
@@ -219,7 +233,9 @@ function makeSyncLikeModel(name, makeContext) {
         // Same `sum(reads) + offset` convention as `computed`, so the only
         // difference the fixtures see is eagerness.
         async signal(id, reads, offset, scopeName) {
-          const compute = computes.countingSync(id, () => sumOffset(reads.map(readId), offset));
+          const compute = computes.countingSync(id, (c) =>
+            sumOffset(reads.map((r) => readVia(c, r)), offset),
+          );
           const handle =
             scopeName == null ? ctx.signal(compute) : scopes.get(scopeName).signal(compute);
           handles.set(id, handle);
@@ -236,15 +252,16 @@ function makeSyncLikeModel(name, makeContext) {
         },
         computesOf: (id) => computes.of(id),
         async effect(id, reads, scopeName) {
-          const body = () => {
+          const body = (c) => {
             runLog.push(id);
             // Swallowed, never propagated: an effect that reads through a
             // disposed node must not turn the publish that scheduled it into a
             // throw. The corpus asserts read-after-dispose at top-level reads,
             // which is where a caller can act on it. Narrow on purpose -- any
-            // OTHER error still escapes and fails the run.
+            // OTHER error still escapes and fails the run. Reads go through the
+            // fortified `Compute` view `c` (#lzcellkernel).
             try {
-              for (const r of reads) readId(r);
+              for (const r of reads) readVia(c, r);
             } catch (err) {
               if (!(err instanceof DisposedNodeError)) throw err;
             }
