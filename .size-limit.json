@@ -30,9 +30,9 @@
     "limit": "152 B"
   },
   {
-    "name": "collections: SourceMap + CellTree + reconcileCollections",
+    "name": "collections: SourceMap + SourceTree + reconcileCollections",
     "path": "src/collections.js",
-    "import": "{ SourceMap, CellTree, reconcileCollections }",
+    "import": "{ SourceMap, SourceTree, reconcileCollections }",
     "limit": "1647 B"
   },
   {

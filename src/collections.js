@@ -282,7 +282,7 @@ export function reconcileCollections(prior, target) {
   };
 }
 
-// Ordered keyed tree (cell-model.md § Ordered keyed tree). A `CellTree` is a
+// Ordered keyed tree (cell-model.md § Ordered keyed tree). A `SourceTree` is a
 // further **composition**: each node is `(stable id, value, ordered keyed child
 // collection)` — the child collection is a `SourceMap` whose values are child
 // tree nodes. Per-node value reactivity, per-level membership/order
@@ -323,14 +323,14 @@ export class TreeNode {
   }
 }
 
-export class CellTree {
+export class SourceTree {
   constructor(rootSpec) {
     this.root = rootSpec instanceof TreeNode ? rootSpec : buildNode(rootSpec);
     Object.freeze(this);
   }
 
   static from(rootSpec) {
-    return new CellTree(rootSpec);
+    return new SourceTree(rootSpec);
   }
 
   // Resolve a path (array of child keys from the root) to a node, or undefined.
@@ -350,7 +350,7 @@ export class CellTree {
   #nodeAtOrThrow(path) {
     const node = this.nodeAt(path);
     if (node === undefined) {
-      throw new RangeError(`CellTree path not present: ${JSON.stringify(path)}`);
+      throw new RangeError(`SourceTree path not present: ${JSON.stringify(path)}`);
     }
     return node;
   }
@@ -358,7 +358,7 @@ export class CellTree {
   #parentAndKey(path) {
     const keys = Array.isArray(path) ? path : [path];
     if (keys.length === 0) {
-      throw new RangeError("CellTree path must have at least one key");
+      throw new RangeError("SourceTree path must have at least one key");
     }
     const parentPath = keys.slice(0, -1);
     const key = keys[keys.length - 1];
@@ -374,7 +374,7 @@ export class CellTree {
     const { parent, key } = this.#parentAndKey(path);
     const node = parent.children.get(key);
     if (node === undefined) {
-      throw new RangeError(`CellTree key not present: ${String(key)}`);
+      throw new RangeError(`SourceTree key not present: ${String(key)}`);
     }
     const changed = !deepEqual(node.value, value);
     if (changed) {
@@ -435,3 +435,7 @@ export class CellTree {
  * @deprecated Renamed to {@link SourceMap}. Kept as an alias for compatibility.
  */
 export const CellMap = SourceMap;
+/**
+ * @deprecated Renamed to {@link SourceTree}. Kept as an alias for compatibility.
+ */
+export const CellTree = SourceTree;

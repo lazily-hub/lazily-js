@@ -5,7 +5,7 @@
 // reactivity, and atomic-move identity preservation.
 //
 // Each test names the Lean theorem it mirrors and exercises the JS
-// implementation (`CellTree`) against the theorem's statement. Mutation
+// implementation (`SourceTree`) against the theorem's statement. Mutation
 // methods return a path-scoped invalidation report
 // `{ path, value: key[], membership: bool, order: bool }` — these reports ARE
 // the per-level independence invariant made inspectable.
@@ -13,10 +13,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { CellTree } from "../src/collections.js";
+import { SourceTree } from "../src/collections.js";
 
 function buildTree() {
-  return CellTree.from({
+  return SourceTree.from({
     id: "root",
     value: "R",
     children: {

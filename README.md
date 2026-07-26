@@ -48,7 +48,7 @@ notes and platform carve-outs lives in
 | Async reactive context | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Flat state machine | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Harel state charts | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Keyed reactive maps (`ReactiveMap`: `SourceMap` / `ComputedMap`) + `CellTree` + reconcile | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Keyed reactive maps (`ReactiveMap`: `SourceMap` / `ComputedMap`) + `SourceTree` + reconcile | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Memoized semantic tree (`SemTree`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Stable-id alignment (manufactured identity) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Reactive queue (`QueueCell` SPSC/MPSC + `QueueStorage` adapter) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
@@ -112,8 +112,8 @@ and JSON Schemas in `lazily-spec` and the Lean models in `lazily-formal`.
 | `@lazily-hub/lazily-js/instrumentation` | In-library instrumentation/benchmark API: `benchmark`, `runBenchmarkSuite`, `BenchmarkResult`, `withInstrumentation` — plus opt-in reactive-core counters via `new Context({ instrument: true })` / `instrumentationSnapshot()` |
 | `@lazily-hub/lazily-js/state-machine` | Flat finite-state-machine kernel backed by a reactive `Cell` |
 | `@lazily-hub/lazily-js/statechart` | Harel/SCXML chart interpreter plus `ChartBuilder`, `StateBuilder`, `TransitionBuilder` |
-| `@lazily-hub/lazily-js/collections` | `SourceMap`, `CellTree`, keyed reconciliation, and LIS move minimization |
-| `@lazily-hub/lazily-js/sem-tree` | Memoized semantic tree over `CellTree`-shaped data |
+| `@lazily-hub/lazily-js/collections` | `SourceMap`, `SourceTree`, keyed reconciliation, and LIS move minimization |
+| `@lazily-hub/lazily-js/sem-tree` | Memoized semantic tree over `SourceTree`-shaped data |
 | `@lazily-hub/lazily-js/seq-crdt` | Move-aware sequence CRDT using independent LWW value / position / deletion registers |
 | `@lazily-hub/lazily-js/text-crdt` | Fugue/RGA character CRDT |
 | `@lazily-hub/lazily-js/stable-id` | Manufactured text identity: anchors, content hashes, similarity alignment |
@@ -351,7 +351,7 @@ chart.send("go", { ready: false }); // false, guards fail closed
 
 ## Keyed collections and semantic tree
 
-`SourceMap` and `CellTree` implement the lazily-spec keyed collections layer:
+`SourceMap` and `SourceTree` implement the lazily-spec keyed collections layer:
 value, membership, and order readers invalidate independently; stable handles
 survive moves; and an atomic move bumps order without touching values.
 `reconcileCollections` emits the LIS-minimized `{ insert, remove, move, update }`
@@ -592,7 +592,7 @@ bob.ingest(alice.syncFrame(), Date.now() * 1000); // 1 op applied; re-ingest app
 ## Conformance
 
 lazily-js replays the shared `lazily-spec` fixtures for IPC, agent-doc state,
-keyed collections (`SourceMap`, `CellTree`, LIS reconciliation), semantic tree,
+keyed collections (`SourceMap`, `SourceTree`, LIS reconciliation), semantic tree,
 sequence and text CRDTs (incl. `TextCrdt` delta sync, `#lztextsync`:
 `textcrdt_convergence.json` + `textcrdt_delta_sync.json`), manufactured text
 identity, the keyed reactive maps / materialization (`#reactivemap`:
@@ -698,7 +698,7 @@ shipped bytes.
 
 <!-- size-limits:start -->
 
-Generated for package `@lazily-hub/lazily-js` version `0.27.0`. Every entry is **minified + brotlied, tree-shaken to the named import** (`size-limit` + esbuild, the same pipeline Webpack/Rollup/Vite apply via `"sideEffects": false`).
+Generated for package `@lazily-hub/lazily-js` version `0.28.0`. Every entry is **minified + brotlied, tree-shaken to the named import** (`size-limit` + esbuild, the same pipeline Webpack/Rollup/Vite apply via `"sideEffects": false`).
 
 Refresh command:
 
@@ -714,7 +714,7 @@ npm run test:size        # gate: fails CI if any entry exceeds its budget
 | state-machine: StateMachine | 274 B ✓ | 280 B |
 | sem-tree: SemTree | 503 B ✓ | 512 B |
 | stable-id: contentHash | 152 B ✓ | 152 B |
-| collections: SourceMap + CellTree + reconcileCollections | 1.65 KB ✓ | 1.65 KB |
+| collections: SourceMap + SourceTree + reconcileCollections | 1.64 KB ✓ | 1.65 KB |
 | index: PROTOCOL_ID + Snapshot (tree-shaken kitchen sink) | 2.41 KB ✓ | 2.41 KB |
 
 <!-- size-limits:end -->

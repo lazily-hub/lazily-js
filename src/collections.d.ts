@@ -86,10 +86,10 @@ export class TreeNode {
   snapshot(): TreeNodeSnapshot;
 }
 
-export class CellTree {
+export class SourceTree {
   constructor(rootSpec: TreeNodeSpec | TreeNode);
   root: TreeNode;
-  static from(rootSpec: TreeNodeSpec | TreeNode): CellTree;
+  static from(rootSpec: TreeNodeSpec | TreeNode): SourceTree;
   nodeAt(path: CollectionKey[] | CollectionKey): TreeNode | undefined;
   getValue(path: CollectionKey[] | CollectionKey): unknown;
   setValue(path: CollectionKey[] | CollectionKey, value: unknown): TreeInvalidationReport;
@@ -121,3 +121,11 @@ export type CellMap = SourceMap;
 export type CellMapOp = SourceMapOp;
 /** @deprecated Renamed to {@link SourceMapSnapshot}. */
 export type CellMapSnapshot = SourceMapSnapshot;
+/**
+ * @deprecated Renamed to {@link SourceTree}. Kept as an alias for compatibility.
+ */
+export const CellTree: typeof SourceTree;
+/**
+ * @deprecated Renamed to {@link SourceTree}. Kept as an alias for compatibility.
+ */
+export type CellTree = SourceTree;
