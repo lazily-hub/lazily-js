@@ -38,6 +38,15 @@ function assertObject(value, name) {
   return value;
 }
 
+function assertKeys(object, allowed, name) {
+  const allowedKeys = new Set(allowed);
+  for (const key of Object.keys(object)) {
+    if (!allowedKeys.has(key)) {
+      throw new TypeError(`${name} contains unexpected field ${key}`);
+    }
+  }
+}
+
 /** Frozen set of signaling error codes (schemas/signaling.json § ErrorCode). */
 export const SignalingErrorCode = Object.freeze({
   BadMessage: "bad_message",
@@ -179,16 +188,22 @@ export const ClientMessage = Object.freeze({
     const object = assertObject(value, "ClientMessage");
     switch (object.type) {
       case "join":
+        assertKeys(object, ["type", "peer", "capabilities"], "ClientJoin");
         return new ClientJoin(object.peer, object.capabilities ?? null);
       case "offer":
+        assertKeys(object, ["type", "to", "sdp"], "ClientOffer");
         return new ClientOffer(object.to, object.sdp);
       case "answer":
+        assertKeys(object, ["type", "to", "sdp"], "ClientAnswer");
         return new ClientAnswer(object.to, object.sdp);
       case "ice":
+        assertKeys(object, ["type", "to", "candidate"], "ClientIce");
         return new ClientIce(object.to, object.candidate);
       case "relay":
+        assertKeys(object, ["type", "to", "payload"], "ClientRelay");
         return new ClientRelay(object.to, object.payload);
       case "leave":
+        assertKeys(object, ["type"], "ClientLeave");
         return new ClientLeave();
       default:
         throw new TypeError(`unknown ClientMessage type: ${object.type}`);
@@ -205,6 +220,9 @@ export class ServerWelcome {
     this.type = "welcome";
     this.peer = assertPeer(peer);
     this.peers = Object.freeze([...peers].map((p) => assertPeer(p, "roster peer")));
+    if (this.peers.includes(this.peer)) {
+      throw new TypeError("welcome roster must exclude the joining peer");
+    }
     Object.freeze(this);
   }
 
@@ -331,20 +349,28 @@ export const ServerMessage = Object.freeze({
     const object = assertObject(value, "ServerMessage");
     switch (object.type) {
       case "welcome":
+        assertKeys(object, ["type", "peer", "peers"], "ServerWelcome");
         return new ServerWelcome(object.peer, object.peers ?? []);
       case "peer-joined":
+        assertKeys(object, ["type", "peer"], "ServerPeerJoined");
         return new ServerPeerJoined(object.peer);
       case "peer-left":
+        assertKeys(object, ["type", "peer"], "ServerPeerLeft");
         return new ServerPeerLeft(object.peer);
       case "offer":
+        assertKeys(object, ["type", "from", "sdp"], "ServerOffer");
         return new ServerOffer(object.from, object.sdp);
       case "answer":
+        assertKeys(object, ["type", "from", "sdp"], "ServerAnswer");
         return new ServerAnswer(object.from, object.sdp);
       case "ice":
+        assertKeys(object, ["type", "from", "candidate"], "ServerIce");
         return new ServerIce(object.from, object.candidate);
       case "relay":
+        assertKeys(object, ["type", "from", "payload"], "ServerRelay");
         return new ServerRelay(object.from, object.payload);
       case "error":
+        assertKeys(object, ["type", "code", "message"], "ServerError");
         return new ServerErrorMessage(object.code, object.message);
       default:
         throw new TypeError(`unknown ServerMessage type: ${object.type}`);

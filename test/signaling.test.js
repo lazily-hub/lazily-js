@@ -49,6 +49,26 @@ test("signaling frames.json round-trips every variant byte-for-byte", () => {
   }
 });
 
+test("signaling negative fixtures are rejected", () => {
+  const frames = loadFixture("signaling/frames.json");
+  for (const reject of frames.rejects) {
+    assert.throws(
+      () => decodeFrame(reject.direction, reject.wire),
+      TypeError,
+      reject.label,
+    );
+  }
+
+  const session = loadFixture("signaling/anti_spoof_session.json");
+  for (const reject of session.rejects) {
+    assert.throws(
+      () => ClientMessage.fromWire(reject.input.recv),
+      TypeError,
+      reject.label,
+    );
+  }
+});
+
 test("kebab-case tags are used for hyphenated server variants", () => {
   assert.equal(ServerMessage.peerJoined(5).type, "peer-joined");
   assert.equal(ServerMessage.peerLeft(5).type, "peer-left");
