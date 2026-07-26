@@ -3,6 +3,7 @@
 check:
 	npm run build
 	npm test
+	npm run test:interop-peer
 	./scripts/check-conformance-coverage.sh
 
 bench:
