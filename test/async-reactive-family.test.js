@@ -27,6 +27,19 @@ function assertSameSet(actual, expected, label) {
   assert.deepEqual(a, e, `${label}: set differs`);
 }
 
+// The fixture's `kind` field is the spec's wire spelling for the entry handle
+// kind. The v2 kernel renamed the node kinds to `Source` / `Computed`, so the
+// canonical fixture will migrate from `"cell"` / `"slot"` to `"source"` /
+// `"computed"`. Accept BOTH spellings; anything else is a hard error, never a
+// silent default (an unknown kind must not quietly land in the slot bucket).
+function fixtureEntryKind(key, kind) {
+  if (kind === "cell" || kind === "source") return EntryKind.Source;
+  if (kind === "slot" || kind === "computed") return EntryKind.Computed;
+  throw new TypeError(
+    `entry_kind_orthogonal_to_mode.json: entry ${key} has unknown kind ${JSON.stringify(kind)}`,
+  );
+}
+
 function eagerSlotMap(ctx, keys, factory) {
   const map = new AsyncComputedMap(ctx);
   map.materializeAll(keys, factory);
@@ -94,7 +107,7 @@ test("async conformance: entry_kind_orthogonal_to_mode.json (SourceMap + Compute
   const slotKeys = [];
   const lookup = (k) => spec.entries[k].val;
   for (const [key, entry] of Object.entries(spec.entries)) {
-    (entry.kind === "cell" ? cellKeys : slotKeys).push(key);
+    (fixtureEntryKind(key, entry.kind) === EntryKind.Source ? cellKeys : slotKeys).push(key);
   }
 
   const ctxE = new AsyncContext();
@@ -146,7 +159,7 @@ test("async: SourceMap resolves immediately and reacts to set; ComputedMap has n
   const cells = new AsyncSourceMap(ctx);
   cells.set(10, true);
   cells.set(20, true);
-  assert.equal(cells.entryKind(), EntryKind.Cell);
+  assert.equal(cells.entryKind(), EntryKind.Source);
   assert.equal(cells.presentCount(), 2);
   assert.equal(cells.observe(20), true, "cells are always resolved");
   cells.set(20, false);
@@ -165,5 +178,5 @@ test("async: present set grows monotonically, first-writer-wins handle", async (
   map.getOrInsertHandle(9, (k) => k);
   assert.equal(map.presentCount(), 2);
   assert.deepEqual(map.presentKeys(), [5, 9]);
-  assert.equal(new AsyncReactiveMap(ctx).entryKind(), EntryKind.Slot);
+  assert.equal(new AsyncReactiveMap(ctx).entryKind(), EntryKind.Computed);
 });

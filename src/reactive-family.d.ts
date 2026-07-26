@@ -3,11 +3,23 @@ import type { CellHandle, ComputeOps, Context, SlotHandle } from "./reactive.js"
 /**
  * Which kind of reactive node a {@link ReactiveMap} entry is — the handle-kind
  * axis the map abstracts over.
+ *
+ * The member NAMES track the v2 kernel (`Source` / `Computed`); the VALUE strings
+ * stay `"cell"` / `"slot"` because they are wire data shared with the
+ * `lazily-spec` conformance fixtures and every other binding runner.
  */
 export const EntryKind: {
-  /** An input cell — always materialized on `get`. */
+  /** An input source — always materialized on `get`. */
+  readonly Source: "cell";
+  /** A derived computed — materialized eagerly (pre-mint) or lazily on first read. */
+  readonly Computed: "slot";
+  /**
+   * @deprecated Renamed to {@link EntryKind.Source}. Kept as an alias for compatibility.
+   */
   readonly Cell: "cell";
-  /** A derived slot — materialized eagerly (pre-mint) or lazily on first read. */
+  /**
+   * @deprecated Renamed to {@link EntryKind.Computed}. Kept as an alias for compatibility.
+   */
   readonly Slot: "slot";
 };
 export type EntryKind = (typeof EntryKind)[keyof typeof EntryKind];

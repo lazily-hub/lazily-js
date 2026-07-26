@@ -52,11 +52,11 @@ export class ThreadSafeReactiveMap {
 
   /**
    * @param {import("./thread-safe.js").ThreadSafeContext} ctx owning thread-safe context
-   * @param {EntryKind} [kind] entry handle kind; defaults to {@link EntryKind.Slot}
+   * @param {EntryKind} [kind] entry handle kind; defaults to {@link EntryKind.Computed}
    */
-  constructor(ctx, kind = EntryKind.Slot) {
-    if (kind !== EntryKind.Cell && kind !== EntryKind.Slot) {
-      throw new TypeError("kind must be EntryKind.Cell or EntryKind.Slot");
+  constructor(ctx, kind = EntryKind.Computed) {
+    if (kind !== EntryKind.Source && kind !== EntryKind.Computed) {
+      throw new TypeError("kind must be EntryKind.Source or EntryKind.Computed");
     }
     this._ctx = ctx;
     this._kind = kind;
@@ -78,7 +78,7 @@ export class ThreadSafeReactiveMap {
       return warm;
     }
     const handle =
-      this._kind === EntryKind.Cell ? this._ctx.source(compute()) : this._ctx.computed(() => compute());
+      this._kind === EntryKind.Source ? this._ctx.source(compute()) : this._ctx.computed(() => compute());
     return this._mutex.runExclusive(() => {
       const existing = this._materialized.get(key);
       if (existing !== undefined) {
@@ -167,7 +167,7 @@ export class ThreadSafeReactiveMap {
 export class ThreadSafeSourceMap extends ThreadSafeReactiveMap {
   /** @param {import("./thread-safe.js").ThreadSafeContext} ctx */
   constructor(ctx) {
-    super(ctx, EntryKind.Cell);
+    super(ctx, EntryKind.Source);
   }
 
   /**
@@ -196,7 +196,7 @@ export class ThreadSafeSourceMap extends ThreadSafeReactiveMap {
 export class ThreadSafeComputedMap extends ThreadSafeReactiveMap {
   /** @param {import("./thread-safe.js").ThreadSafeContext} ctx */
   constructor(ctx) {
-    super(ctx, EntryKind.Slot);
+    super(ctx, EntryKind.Computed);
   }
 
   /**

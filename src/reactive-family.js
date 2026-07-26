@@ -34,12 +34,25 @@
 /**
  * Which kind of reactive node a {@link ReactiveMap} entry is — the handle-kind
  * axis the map abstracts over. Mirrors `EntryKind` in `lazily-formal`.
+ *
+ * The v2 kernel renamed the node kinds to `Source` / `Computed`, so the members
+ * follow. The VALUE strings stay `"cell"` / `"slot"`: they are wire data shared
+ * with the `lazily-spec` conformance fixtures and every other binding runner, so
+ * renaming them would be a cross-binding break.
  * @enum {string}
  */
 export const EntryKind = Object.freeze({
-  /** An input cell — always materialized on `get`. */
+  /** An input source — always materialized on `get`. */
+  Source: "cell",
+  /** A derived computed — materialized eagerly (pre-mint) or lazily on first read. */
+  Computed: "slot",
+  /**
+   * @deprecated Renamed to {@link EntryKind.Source}. Kept as an alias for compatibility.
+   */
   Cell: "cell",
-  /** A derived slot — materialized eagerly (pre-mint) or lazily on first read. */
+  /**
+   * @deprecated Renamed to {@link EntryKind.Computed}. Kept as an alias for compatibility.
+   */
   Slot: "slot",
 });
 
@@ -74,11 +87,11 @@ export class ReactiveMap {
 
   /**
    * @param {import("./reactive.js").Context} ctx owning context
-   * @param {EntryKind} [kind] entry handle kind; defaults to {@link EntryKind.Slot}
+   * @param {EntryKind} [kind] entry handle kind; defaults to {@link EntryKind.Computed}
    */
-  constructor(ctx, kind = EntryKind.Slot) {
-    if (kind !== EntryKind.Cell && kind !== EntryKind.Slot) {
-      throw new TypeError("kind must be EntryKind.Cell or EntryKind.Slot");
+  constructor(ctx, kind = EntryKind.Computed) {
+    if (kind !== EntryKind.Source && kind !== EntryKind.Computed) {
+      throw new TypeError("kind must be EntryKind.Source or EntryKind.Computed");
     }
     this._ctx = ctx;
     this._kind = kind;
@@ -116,7 +129,7 @@ export class ReactiveMap {
     // An input cell sets its value directly; a derived slot wraps `compute` as
     // its recomputation — the same node an eager pre-mint would allocate.
     const handle =
-      this._kind === EntryKind.Cell ? this._ctx.source(compute()) : this._ctx.computed(() => compute());
+      this._kind === EntryKind.Source ? this._ctx.source(compute()) : this._ctx.computed(() => compute());
     this._entries.set(key, handle);
     this._order.push(key);
     this._bumpMembership();
@@ -340,7 +353,7 @@ export class ReactiveMap {
     return this._order.length;
   }
 
-  /** This map's entry kind ({@link EntryKind.Cell} or {@link EntryKind.Slot}). */
+  /** This map's entry kind ({@link EntryKind.Source} or {@link EntryKind.Computed}). */
   entryKind() {
     return this._kind;
   }
@@ -358,7 +371,7 @@ export class ReactiveMap {
 export class SourceMap extends ReactiveMap {
   /** @param {import("./reactive.js").Context} ctx */
   constructor(ctx) {
-    super(ctx, EntryKind.Cell);
+    super(ctx, EntryKind.Source);
   }
 
   /**
@@ -420,7 +433,7 @@ export class SourceMap extends ReactiveMap {
 export class ComputedMap extends ReactiveMap {
   /** @param {import("./reactive.js").Context} ctx */
   constructor(ctx) {
-    super(ctx, EntryKind.Slot);
+    super(ctx, EntryKind.Computed);
   }
 
   /**

@@ -22,6 +22,19 @@ function assertSameSet(actual, expected, label) {
   assert.deepEqual(a, e, `${label}: set differs`);
 }
 
+// The fixture's `kind` field is the spec's wire spelling for the entry handle
+// kind. The v2 kernel renamed the node kinds to `Source` / `Computed`, so the
+// canonical fixture will migrate from `"cell"` / `"slot"` to `"source"` /
+// `"computed"`. Accept BOTH spellings; anything else is a hard error, never a
+// silent default (an unknown kind must not quietly land in the slot bucket).
+function fixtureEntryKind(key, kind) {
+  if (kind === "cell" || kind === "source") return EntryKind.Source;
+  if (kind === "slot" || kind === "computed") return EntryKind.Computed;
+  throw new TypeError(
+    `entry_kind_orthogonal_to_mode.json: entry ${key} has unknown kind ${JSON.stringify(kind)}`,
+  );
+}
+
 // An eager ComputedMap: pre-mint the whole keyset. A lazy ComputedMap: empty, minted on
 // access via getOrInsertWith. There is no eager/lazy mode flag — eager is the
 // pre-mint loop, lazy is mint-on-access (#reactivemap).
@@ -107,8 +120,12 @@ test("materialization conformance: entry_kind_orthogonal_to_mode.json", () => {
   const slotKeys = [];
   const lookup = (k) => spec.entries[k].val;
   for (const [key, entry] of Object.entries(spec.entries)) {
-    (entry.kind === "cell" ? cellKeys : slotKeys).push(key);
+    (fixtureEntryKind(key, entry.kind) === EntryKind.Source ? cellKeys : slotKeys).push(key);
   }
+  // The fixture is the mixed-kind one: prove the dispatch actually classified
+  // entries into both buckets rather than dumping everything into one.
+  assert.ok(cellKeys.length > 0, "fixture has source entries");
+  assert.ok(slotKeys.length > 0, "fixture has computed entries");
 
   // Eager build: every entry present (cells + slots).
   const ctxE = new Context();
@@ -116,8 +133,8 @@ test("materialization conformance: entry_kind_orthogonal_to_mode.json", () => {
   for (const k of cellKeys) eagerCells.entry(k, lookup(k));
   const eagerSlots = new ComputedMap(ctxE);
   eagerSlots.materializeAll(slotKeys, lookup);
-  assert.equal(eagerCells.entryKind(), EntryKind.Cell);
-  assert.equal(eagerSlots.entryKind(), EntryKind.Slot);
+  assert.equal(eagerCells.entryKind(), EntryKind.Source);
+  assert.equal(eagerSlots.entryKind(), EntryKind.Computed);
   assertSameSet(
     [...eagerCells.presentKeys(), ...eagerSlots.presentKeys()],
     expected.eager_present,
@@ -151,6 +168,28 @@ test("materialization conformance: entry_kind_orthogonal_to_mode.json", () => {
       : lazySlots.getOrInsertWith(ctxL, key, lookup);
     assert.equal(got, value, `lazy observe[${key}]`);
   }
+});
+
+// The fixture `kind` reader is forward-compatible: it accepts the current wire
+// spelling and the renamed one the spec will migrate to, and hard-errors on
+// anything else instead of silently defaulting.
+test("materialization conformance: fixture kind accepts both spellings, rejects unknown", () => {
+  assert.equal(fixtureEntryKind("a", "cell"), EntryKind.Source);
+  assert.equal(fixtureEntryKind("a", "source"), EntryKind.Source);
+  assert.equal(fixtureEntryKind("b", "slot"), EntryKind.Computed);
+  assert.equal(fixtureEntryKind("b", "computed"), EntryKind.Computed);
+  for (const bad of ["Cell", "signal", "", undefined, null, 0]) {
+    assert.throws(() => fixtureEntryKind("x", bad), TypeError, `unknown kind ${String(bad)}`);
+  }
+});
+
+// The member names track the v2 kernel; the VALUE strings are wire data shared
+// with the spec fixtures and every other binding runner, so they must not move.
+test("EntryKind: renamed members keep the wire values and the old names alias", () => {
+  assert.equal(EntryKind.Source, "cell");
+  assert.equal(EntryKind.Computed, "slot");
+  assert.equal(EntryKind.Cell, EntryKind.Source, "EntryKind.Cell is a deprecated alias");
+  assert.equal(EntryKind.Slot, EntryKind.Computed, "EntryKind.Slot is a deprecated alias");
 });
 
 // --- unit: SourceMap eager value-minting + membership reactivity --------------
@@ -249,7 +288,7 @@ test("ComputedMap: materializeAll is eager", () => {
   assert.equal(map.presentCount(), 5);
   for (const k of [0, 1, 2, 5, 9]) assert.ok(map.isPresent(k));
   assert.equal(map.get(ctx, 5), 15);
-  assert.equal(map.entryKind(), EntryKind.Slot);
+  assert.equal(map.entryKind(), EntryKind.Computed);
 });
 
 test("ComputedMap has no set; ReactiveMap default kind is Slot", () => {
@@ -257,7 +296,7 @@ test("ComputedMap has no set; ReactiveMap default kind is Slot", () => {
   const map = new ComputedMap(ctx);
   assert.equal(typeof map.set, "undefined", "ComputedMap has no set");
   const plain = new ReactiveMap(ctx);
-  assert.equal(plain.entryKind(), EntryKind.Slot, "default kind is Slot");
+  assert.equal(plain.entryKind(), EntryKind.Computed, "default kind is Slot");
 });
 
 // --- unit: atomic move (#lzcellmove) ---------------------------------------

@@ -47,11 +47,11 @@ export class AsyncReactiveMap {
 
   /**
    * @param {import("./reactive-async.js").AsyncContext} ctx owning async context
-   * @param {EntryKind} [kind] entry handle kind; defaults to {@link EntryKind.Slot}
+   * @param {EntryKind} [kind] entry handle kind; defaults to {@link EntryKind.Computed}
    */
-  constructor(ctx, kind = EntryKind.Slot) {
-    if (kind !== EntryKind.Cell && kind !== EntryKind.Slot) {
-      throw new TypeError("kind must be EntryKind.Cell or EntryKind.Slot");
+  constructor(ctx, kind = EntryKind.Computed) {
+    if (kind !== EntryKind.Source && kind !== EntryKind.Computed) {
+      throw new TypeError("kind must be EntryKind.Source or EntryKind.Computed");
     }
     this._ctx = ctx;
     this._kind = kind;
@@ -71,7 +71,7 @@ export class AsyncReactiveMap {
       return warm;
     }
     const handle =
-      this._kind === EntryKind.Cell
+      this._kind === EntryKind.Source
         ? this._ctx.source(compute())
         : this._ctx.computedAsync(async () => compute());
     return this._mutex.runExclusive(() => {
@@ -124,7 +124,7 @@ export class AsyncReactiveMap {
     if (handle === undefined) {
       throw new Error(`resolve: key ${String(key)} is absent and no factory was given`);
     }
-    return this._kind === EntryKind.Cell ? this._ctx.get(handle) : this._ctx.getAsync(handle);
+    return this._kind === EntryKind.Source ? this._ctx.get(handle) : this._ctx.getAsync(handle);
   }
 
   /**
@@ -167,7 +167,7 @@ export class AsyncReactiveMap {
 export class AsyncSourceMap extends AsyncReactiveMap {
   /** @param {import("./reactive-async.js").AsyncContext} ctx */
   constructor(ctx) {
-    super(ctx, EntryKind.Cell);
+    super(ctx, EntryKind.Source);
   }
 
   /**
@@ -196,7 +196,7 @@ export class AsyncSourceMap extends AsyncReactiveMap {
 export class AsyncComputedMap extends AsyncReactiveMap {
   /** @param {import("./reactive-async.js").AsyncContext} ctx */
   constructor(ctx) {
-    super(ctx, EntryKind.Slot);
+    super(ctx, EntryKind.Computed);
   }
 
   /**

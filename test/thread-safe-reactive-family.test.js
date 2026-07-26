@@ -27,6 +27,19 @@ function assertSameSet(actual, expected, label) {
   assert.deepEqual(a, e, `${label}: set differs`);
 }
 
+// The fixture's `kind` field is the spec's wire spelling for the entry handle
+// kind. The v2 kernel renamed the node kinds to `Source` / `Computed`, so the
+// canonical fixture will migrate from `"cell"` / `"slot"` to `"source"` /
+// `"computed"`. Accept BOTH spellings; anything else is a hard error, never a
+// silent default (an unknown kind must not quietly land in the slot bucket).
+function fixtureEntryKind(key, kind) {
+  if (kind === "cell" || kind === "source") return EntryKind.Source;
+  if (kind === "slot" || kind === "computed") return EntryKind.Computed;
+  throw new TypeError(
+    `entry_kind_orthogonal_to_mode.json: entry ${key} has unknown kind ${JSON.stringify(kind)}`,
+  );
+}
+
 function eagerSlotMap(ctx, keys, factory) {
   const map = new ThreadSafeComputedMap(ctx);
   map.materializeAll(keys, factory);
@@ -87,7 +100,7 @@ test("thread-safe conformance: entry_kind_orthogonal_to_mode.json (SourceMap + C
   const slotKeys = [];
   const lookup = (k) => spec.entries[k].val;
   for (const [key, entry] of Object.entries(spec.entries)) {
-    (entry.kind === "cell" ? cellKeys : slotKeys).push(key);
+    (fixtureEntryKind(key, entry.kind) === EntryKind.Source ? cellKeys : slotKeys).push(key);
   }
 
   const ctxE = new ThreadSafeContext();
@@ -149,7 +162,7 @@ test("thread-safe: SourceMap is writable + always materialized; ComputedMap has 
   const cells = new ThreadSafeSourceMap(ctx);
   cells.set("a", 0);
   cells.set("b", 0);
-  assert.equal(cells.entryKind(), EntryKind.Cell);
+  assert.equal(cells.entryKind(), EntryKind.Source);
   assert.equal(cells.presentCount(), 2);
   cells.set("a", 99);
   assert.equal(cells.observe("a"), 99);
@@ -167,6 +180,6 @@ test("thread-safe: lazy getOrInsertHandle materializes with a stable handle", ()
   assert.equal(h1.id, h2.id, "stable handle on re-get");
   assert.equal(map.observe(5), 15);
   assert.deepEqual(map.presentKeys(), [5]);
-  assert.equal(map.entryKind(), EntryKind.Slot);
-  assert.ok(new ThreadSafeReactiveMap(ctx).entryKind() === EntryKind.Slot);
+  assert.equal(map.entryKind(), EntryKind.Computed);
+  assert.ok(new ThreadSafeReactiveMap(ctx).entryKind() === EntryKind.Computed);
 });
