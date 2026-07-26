@@ -156,7 +156,7 @@ value-node *concept* over two value kinds, and the bare kind name is the
   `get` and **not** `set`/`merge`. `computed` is **always guarded**
   (an equal recompute suppresses downstream — matches TC39 `Signal.Computed`).
   (v1 `FormulaCell`.)
-- **Effect** — side-effecting observer with cleanup; a value-less sink. (v1
+- **Effect** — side-effecting sink with cleanup; a value-less node. (v1
   `EffectHandle`.)
 
 **The read/write split is by method presence.** JavaScript has no compile-time
