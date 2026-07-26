@@ -29,6 +29,31 @@ export class ThreadSafeReactiveMap<K = unknown, V = unknown> {
   isPresent(key: K): boolean;
   /** Currently-materialized keys, in first-materialization order. */
   presentKeys(): K[];
+  /**
+   * Reactive snapshot of the keys in their current order. Subscribes the caller
+   * to order changes (add/remove and move/reorder), not to per-entry values.
+   * Pass a compute surface to register the edge; omit for an untracked read.
+   */
+  keys(ops?: { get(handle: unknown): unknown }): K[];
+  /** Reactive entry count. Subscribes to membership changes only. */
+  len(ops?: { get(handle: unknown): unknown }): number;
+  /** Reactive emptiness check. */
+  isEmpty(ops?: { get(handle: unknown): unknown }): boolean;
+  /** Reactive membership test for `key`. */
+  containsKey(key: K, ops?: { get(handle: unknown): unknown }): boolean;
+  /** Non-reactive count. */
+  lenUntracked(): number;
+  /** Current 0-based position of `key`, or `undefined`. Non-reactive. */
+  position(key: K): number | undefined;
+  /** Atomically move `key` to `index`; only the order signal is bumped. */
+  moveTo(key: K, index: number): boolean;
+  /** Atomically move `key` to just before `anchor`. */
+  moveBefore(key: K, anchor: K): boolean;
+  /** Atomically move `key` to just after `anchor`. */
+  moveAfter(key: K, anchor: K): boolean;
+  /** Remove `key`'s entry and bump reactive membership. */
+  remove(key: K): boolean;
+
   /** Number of currently-materialized entries. */
   presentCount(): number;
   /** This map's entry kind. */

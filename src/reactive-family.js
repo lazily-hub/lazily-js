@@ -31,6 +31,8 @@
 //
 // Rust reference: `lazily-rs/src/cell_family.rs`.
 
+import { KeyedOrder, moveApplied, moveChanged, mutationChanged } from "./keyed-order.js";
+
 /**
  * Which kind of reactive node a {@link ReactiveMap} entry is — the handle-kind
  * axis the map abstracts over. Mirrors `EntryKind` in `lazily-formal`.
@@ -72,10 +74,12 @@ export class ReactiveMap {
   _ctx;
   /** @type {EntryKind} */
   _kind;
-  /** Per-key reactive node handles: key -> handle. @type {Map<K, any>} */
-  _entries = new Map();
-  /** Insertion-ordered authoritative key list. @type {K[]} */
-  _order = [];
+  /**
+   * Present set + key order + the move algebra. Graph-agnostic and shared with
+   * the thread-safe and async flavors; see `keyed-order.js`.
+   * @type {KeyedOrder<K, any>}
+   */
+  _keyed = new KeyedOrder();
   /** Reactive set-membership signal; bumped only when the key set changes. */
   _membership;
   /** Untracked mirror of the membership version. @type {number} */
@@ -122,17 +126,18 @@ export class ReactiveMap {
    * @returns {any} the entry handle
    */
   _mint(key, compute) {
-    const existing = this._entries.get(key);
+    const existing = this._keyed.get(key);
     if (existing !== undefined) {
       return existing; // warm: already allocated.
     }
     // An input cell sets its value directly; a derived slot wraps `compute` as
     // its recomputation — the same node an eager pre-mint would allocate.
-    const handle =
+    const minted =
       this._kind === EntryKind.Source ? this._ctx.source(compute()) : this._ctx.computed(() => compute());
-    this._entries.set(key, handle);
-    this._order.push(key);
-    this._bumpMembership();
+    const { handle, mutation } = this._keyed.insert(key, minted);
+    if (mutationChanged(mutation)) {
+      this._bumpMembership();
+    }
     return handle;
   }
 
@@ -159,7 +164,7 @@ export class ReactiveMap {
    * @returns {V}
    */
   getOrInsertWith(ops, key, factory) {
-    const existing = this._entries.get(key);
+    const existing = this._keyed.get(key);
     if (existing !== undefined) {
       return this._observe(ops, existing);
     }
@@ -173,7 +178,7 @@ export class ReactiveMap {
    * @returns {any}
    */
   handle(key) {
-    return this._entries.get(key);
+    return this._keyed.get(key);
   }
 
   /**
@@ -185,7 +190,7 @@ export class ReactiveMap {
    * @returns {V | undefined}
    */
   get(ops, key) {
-    const handle = this._entries.get(key);
+    const handle = this._keyed.get(key);
     return handle === undefined ? undefined : this._observe(ops, handle);
   }
 
@@ -197,13 +202,9 @@ export class ReactiveMap {
    * @returns {boolean}
    */
   remove(key) {
-    if (!this._entries.has(key)) {
+    const { mutation } = this._keyed.remove(key);
+    if (!mutationChanged(mutation)) {
       return false;
-    }
-    this._entries.delete(key);
-    const idx = this._order.indexOf(key);
-    if (idx !== -1) {
-      this._order.splice(idx, 1);
     }
     this._bumpMembership();
     return true;
@@ -219,7 +220,7 @@ export class ReactiveMap {
    */
   keys(ops) {
     ops.get(this._orderSignal);
-    return [...this._order];
+    return this._keyed.keys();
   }
 
   /**
@@ -228,17 +229,17 @@ export class ReactiveMap {
    * @returns {K[]}
    */
   presentKeys() {
-    return [...this._order];
+    return this._keyed.keys();
   }
 
   /** Number of currently-materialized (present) entries. Non-reactive. */
   presentCount() {
-    return this._order.length;
+    return this._keyed.length();
   }
 
   /** Whether `key` is currently materialized (present). Non-reactive. */
   isPresent(key) {
-    return this._entries.has(key);
+    return this._keyed.contains(key);
   }
 
   /**
@@ -248,8 +249,7 @@ export class ReactiveMap {
    * @returns {number | undefined}
    */
   position(key) {
-    const i = this._order.indexOf(key);
-    return i === -1 ? undefined : i;
+    return this._keyed.position(key);
   }
 
   /**
@@ -263,18 +263,7 @@ export class ReactiveMap {
    * @returns {boolean}
    */
   moveTo(key, index) {
-    const from = this._order.indexOf(key);
-    if (from === -1) {
-      return false;
-    }
-    const to = Math.min(index, Math.max(this._order.length - 1, 0));
-    if (from === to) {
-      return true; // no-op: do not invalidate readers needlessly.
-    }
-    this._order.splice(from, 1);
-    this._order.splice(to, 0, key);
-    this._bumpOrder();
-    return true;
+    return this._applyMove(this._keyed.moveTo(key, index));
   }
 
   /**
@@ -285,17 +274,7 @@ export class ReactiveMap {
    * @returns {boolean}
    */
   moveBefore(key, anchor) {
-    const anchorIdx = this.position(anchor);
-    if (anchorIdx === undefined) {
-      return false;
-    }
-    const from = this.position(key);
-    if (from === undefined) {
-      return false;
-    }
-    // Removing `key` first shifts `anchor` left by one when key precedes it.
-    const target = from < anchorIdx ? anchorIdx - 1 : anchorIdx;
-    return this.moveTo(key, target);
+    return this._applyMove(this._keyed.moveBefore(key, anchor));
   }
 
   /**
@@ -305,16 +284,23 @@ export class ReactiveMap {
    * @returns {boolean}
    */
   moveAfter(key, anchor) {
-    const anchorIdx = this.position(anchor);
-    if (anchorIdx === undefined) {
+    return this._applyMove(this._keyed.moveAfter(key, anchor));
+  }
+
+  /**
+   * Bump the order signal only when the order actually changed. A no-op move
+   * still reports success to the caller but must invalidate no reader.
+   * @param {string} outcome a {@link MapMove}
+   * @returns {boolean}
+   */
+  _applyMove(outcome) {
+    if (!moveApplied(outcome)) {
       return false;
     }
-    const from = this.position(key);
-    if (from === undefined) {
-      return false;
+    if (moveChanged(outcome)) {
+      this._bumpOrder();
     }
-    const target = from <= anchorIdx ? anchorIdx : anchorIdx + 1;
-    return this.moveTo(key, target);
+    return true;
   }
 
   /**
@@ -324,7 +310,7 @@ export class ReactiveMap {
    */
   len(ops) {
     ops.get(this._membership);
-    return this._order.length;
+    return this._keyed.length();
   }
 
   /**
@@ -345,12 +331,12 @@ export class ReactiveMap {
    */
   containsKey(ops, key) {
     ops.get(this._membership);
-    return this._entries.has(key);
+    return this._keyed.contains(key);
   }
 
   /** Non-reactive count. Does not subscribe the caller to anything. */
   lenUntracked() {
-    return this._order.length;
+    return this._keyed.length();
   }
 
   /** This map's entry kind ({@link EntryKind.Source} or {@link EntryKind.Computed}). */
@@ -384,7 +370,7 @@ export class SourceMap extends ReactiveMap {
    * @returns {import("./reactive.js").CellHandle<V>}
    */
   entryWith(key, defaultFn) {
-    const existing = this._entries.get(key);
+    const existing = this._keyed.get(key);
     if (existing !== undefined) {
       return existing;
     }
@@ -412,7 +398,7 @@ export class SourceMap extends ReactiveMap {
    * @param {V} value
    */
   set(key, value) {
-    const existing = this._entries.get(key);
+    const existing = this._keyed.get(key);
     if (existing !== undefined) {
       this._ctx.set(existing, value);
       return;
