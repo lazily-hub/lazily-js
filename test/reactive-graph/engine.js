@@ -45,7 +45,7 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { DisposedNodeError } from "./models.js";
+import { ComputeFailedError, DisposedNodeError } from "./models.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -67,6 +67,7 @@ export const FIXTURES = [
   "disposal_does_not_run_surviving_effects.json",
   "dispose_detaches_edges_both_directions.json",
   "dispose_signal_reverts_to_lazy.json",
+  "failed_compute_is_never_cached.json",
   // #lzmergefeed: the mergefeed/feedback fixtures landed on spec main (Step 3).
   // Five use the `merge_cell` op this runner does not model, and
   // `feedback_drain_bound_reports_exhaustion` asserts the parked
@@ -261,9 +262,21 @@ async function replaySteps(model, steps, label, assertFn, divergences, tail) {
           try {
             opValue = await instance.read(op.id);
           } catch (err) {
-            if (!(err instanceof DisposedNodeError)) throw err;
+            // Two different failures the corpus must tell apart: a
+            // `DisposedNodeError` is permanent by contract, a
+            // `ComputeFailedError` (from `fail_next`) is recoverable by
+            // contract -- the next read re-runs the body. Both are "this op
+            // failed"; neither latches the id.
+            if (!(err instanceof DisposedNodeError) && !(err instanceof ComputeFailedError)) {
+              throw err;
+            }
             opError = err;
           }
+          break;
+        case "fail_next":
+          // Arms the next `count` computes of an existing node to raise. It
+          // creates nothing and touches no dependency set.
+          instance.failNext(op.id, op.count ?? 1);
           break;
         case "set_cell":
           await instance.set(op.id, op.value);
@@ -373,13 +386,15 @@ async function replaySteps(model, steps, label, assertFn, divergences, tail) {
                   null,
                   `${where}: expected no error, got ${opError?.message}`,
                 );
-              } else if (want === DISPOSED) {
+              } else {
+                // Any non-null error code means "this op must fail". The runner
+                // does not model error identity -- the fixtures carry the code
+                // so the contract is legible, and each binding's own tests pin
+                // which error type it raises.
                 assertFn.ok(
                   opError !== null,
-                  `${where}: expected a read_after_dispose error, op returned ${opValue}`,
+                  `${where}: expected a ${want} error, op returned ${opValue}`,
                 );
-              } else {
-                throw new Error(`${where}: unknown expected error ${want}`);
               }
             });
             break;

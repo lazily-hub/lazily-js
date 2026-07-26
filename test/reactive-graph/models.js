@@ -66,6 +66,19 @@ import { ThreadSafeContext } from "../../src/thread-safe.js";
 
 export { DisposedNodeError };
 
+/**
+ * The failure a `fail_next`-armed compute body raises. A runner-owned sentinel,
+ * not a library error: the contract under test is that the library does not
+ * CACHE it, so what it is matters less than that the same body raises it once
+ * per armed run and the node still re-runs afterwards.
+ */
+export class ComputeFailedError extends Error {
+  constructor(id) {
+    super(`reactive-graph: compute_failed (fail_next) for ${id}`);
+    this.name = "ComputeFailedError";
+  }
+}
+
 /** Ops every model can now execute -- the whole corpus. */
 const ALL_OPS = [
   "batch",
@@ -80,6 +93,9 @@ const ALL_OPS = [
   "dispose_stale_handle",
   "effect",
   "end_scope",
+  // Arms the next N computes of an existing node to raise, so a fixture can
+  // assert on `computes_of` that a failed compute is never cached.
+  "fail_next",
   "fanout",
   "read",
   "set_cell",
@@ -142,7 +158,22 @@ function kindOfHandle(handle) {
 function makeComputeCounter() {
   /** @type {Map<string, number>} */
   const counts = new Map();
+  // How many upcoming compute bodies must fail, per node id (`fail_next`). The
+  // check lives here, next to the counter, so an armed run is counted exactly
+  // like a successful one -- which is what lets a fixture assert the retry on
+  // `computes_of` instead of on the error.
+  const armed = new Map();
+  const takeArmed = (id) => {
+    const n = armed.get(id) ?? 0;
+    if (n <= 0) return false;
+    armed.set(id, n - 1);
+    return true;
+  };
+
   return {
+    arm(id, count) {
+      armed.set(id, (armed.get(id) ?? 0) + (count > 0 ? count : 1));
+    },
     /** Wrap a compute so every invocation the context makes is counted. */
     countingSync(id, compute) {
       counts.set(id, 0);
@@ -150,6 +181,7 @@ function makeComputeCounter() {
       // compute so it can read through the value-threaded tracking surface.
       return (c) => {
         counts.set(id, counts.get(id) + 1);
+        if (takeArmed(id)) throw new ComputeFailedError(id);
         return compute(c);
       };
     },
@@ -157,6 +189,7 @@ function makeComputeCounter() {
       counts.set(id, 0);
       return async (cc) => {
         counts.set(id, counts.get(id) + 1);
+        if (takeArmed(id)) throw new ComputeFailedError(id);
         return compute(cc);
       };
     },
@@ -219,6 +252,9 @@ function makeSyncLikeModel(name, makeContext) {
           const handle =
             scopeName == null ? ctx.source(value) : scopes.get(scopeName).source(value);
           handles.set(id, handle);
+        },
+        failNext(id, count) {
+          computes.arm(id, count);
         },
         async computed(id, reads, offset, scopeName) {
           const compute = computes.countingSync(id, (c) =>
@@ -361,6 +397,9 @@ export const asyncModel = {
         const handle =
           scopeName == null ? ctx.source(value) : scopes.get(scopeName).source(value);
         handles.set(id, handle);
+      },
+      failNext(id, count) {
+        computes.arm(id, count);
       },
       async computed(id, reads, offset, scopeName) {
         const compute = computes.countingAsync(id, async (cc) => {
