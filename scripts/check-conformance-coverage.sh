@@ -6,20 +6,16 @@
 # exists for: a fixture lands upstream, every binding stays green, and nobody
 # learns that one of them is not replaying it.
 #
-# WHAT THIS CATCHES AND WHAT IT DOES NOT — read before trusting it.
+# This binding uses the RUNTIME manifest, not the static grep it started with
+# (#lazilyupgradeconformance). `test/support/conformance-manifest.cjs` is preloaded
+# into the test run and records every file the suite actually reads from the
+# conformance corpus. So a fixture named in a comment but hand-transcribed — the
+# drift found in lazily-cpp's queue tests — is caught here, which a source grep
+# cannot do.
 #
-# This is a STATIC guard. It greps the test sources for each canonical fixture's
-# filename. So:
-#   * absent   -> caught. A fixture no test names cannot be being replayed.
-#   * present  -> NOT proof of replay. A test may name a fixture in a comment and
-#                 hand-transcribe its contents, which is exactly the drift found in
-#                 lazily-cpp's queue tests. Only a RUNTIME manifest proves the
-#                 bytes were opened, which is what lazily-kt and lazily-cpp do via
-#                 LAZILY_CONFORMANCE_MANIFEST.
-#
-# So a green run here means "no canonical fixture is unmentioned", not "every
-# canonical fixture is replayed". Upgrading this binding to the runtime manifest is
-# strictly better; this is the portable floor, not the ceiling.
+# A missing manifest is missing EVIDENCE and fails. It is not "no fixtures were
+# read"; it means the suite was not run with the recorder attached, and passing in
+# that state is exactly the vacuous green this guard exists to prevent.
 set -euo pipefail
 
 SPEC_DIR="${LAZILY_SPEC_CONFORMANCE_DIR:-../lazily-spec/conformance}"
@@ -37,6 +33,7 @@ KNOWN_UNCOVERED=(
   "reliable-sync/liveness_lease_eviction.json"
 )
 
+MANIFEST="${LAZILY_CONFORMANCE_MANIFEST:-build/conformance-fixtures-loaded.txt}"
 TEST_DIRS=("test")
 EXTS=(".js")
 
@@ -49,11 +46,14 @@ collect_sources() {
   done
 }
 
-SOURCES="$(collect_sources | xargs -0 cat 2>/dev/null || true)"
-if [ -z "$SOURCES" ]; then
-  echo "FAIL: read no test sources from ${TEST_DIRS[*]}; this check would be vacuous" >&2
+if [ ! -s "$MANIFEST" ]; then
+  echo "FAIL: no conformance manifest at $MANIFEST." >&2
+  echo "      Run the suite with LAZILY_CONFORMANCE_MANIFEST set and the recorder" >&2
+  echo "      preloaded (see the \`test\` script in package.json). An absent manifest" >&2
+  echo "      is missing evidence, not evidence of absence." >&2
   exit 1
 fi
+OPENED="$(sort -u "$MANIFEST")"
 
 missing=0
 total=0
@@ -66,7 +66,7 @@ while IFS= read -r fixture; do
   # takes SIGPIPE writing the rest, and pipefail surfaces printf's death as the
   # pipeline's status. The check then inverts — every covered fixture is reported
   # missing. That is exactly how it behaved before this line changed.
-  if grep -qF "$name" <<< "$SOURCES"; then
+  if grep -qxF "$fixture" <<< "$OPENED"; then
     covered=$((covered + 1))
     continue
   fi
@@ -75,8 +75,10 @@ while IFS= read -r fixture; do
     if [ "$known" = "$fixture" ]; then excused=1; break; fi
   done
   if [ "$excused" -eq 0 ]; then
-    echo "ERROR: canonical fixture '$fixture' exists but no test in this repo names it." >&2
-    echo "       Write a runner that replays it, or add it to KNOWN_UNCOVERED with a reason." >&2
+    echo "ERROR: canonical fixture '$fixture' was NOT opened by the suite." >&2
+    echo "       A runner may still name it in source while no longer reading it —" >&2
+    echo "       that is the drift this manifest exists to catch. Replay it, or add it" >&2
+    echo "       to KNOWN_UNCOVERED with a reason." >&2
     missing=$((missing + 1))
   fi
 done < <(cd "$SPEC_DIR" && find . -name '*.json' | sed 's|^\./||' | sort)
@@ -95,5 +97,5 @@ if [ "$missing" -gt 0 ]; then
   exit 1
 fi
 
-echo "conformance coverage OK: $covered/$total canonical fixtures named by tests" \
-     "(${#KNOWN_UNCOVERED[@]} listed as known-uncovered; static check — naming is not replaying)"
+echo "conformance coverage OK: $covered/$total canonical fixtures OPENED by the suite" \
+     "(${#KNOWN_UNCOVERED[@]} listed as known-uncovered; runtime manifest — these bytes were really read)"
