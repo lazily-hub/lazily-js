@@ -3,6 +3,7 @@
 check:
 	npm run build
 	npm test
+	./scripts/check-conformance-coverage.sh
 
 bench:
 	node bench/context.bench.mjs
