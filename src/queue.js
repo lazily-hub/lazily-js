@@ -1,12 +1,8 @@
 // Reactive queue: QueueCell + pluggable QueueStorage backend (#lzqueue).
 //
-// Pure logic — no reactive graph. Like the keyed collections
-// (`./collections.js`), this is compute that every binding MUST implement; the
-// conformance/collections/queuecell_*.json fixtures pin behavior. To make a
-// queue live-reactive, wrap its ops in a `Context` (cells/slots/effects) and
-// use the returned `invalidates` matrix to drive reader-kind invalidation —
-// see `lazily-spec/cell-model.md` § "Reactive queues" and the distributed-queue
-// PRD for the shell / storage split.
+// Storage and transition algebra stay graph-agnostic, while each family object
+// is bound to a Context and mints dependency-free Computed reader kinds. A
+// successful op clears exactly the changed readers in one frontier walk.
 //
 // QueueCell is specified as a single-producer / single-consumer (SPSC)
 // primitive; MPSC (multi-producer) is a *usage rule* on the same type —
@@ -180,22 +176,37 @@ export class VecDequeStorage {
  */
 export class QueueCell {
   /**
+   * @param {import("./reactive.js").Context} ctx
    * @param {{ elements?: unknown[], capacity?: number | null, closed?: boolean }} [initial]
    *   Passed to the default `VecDequeStorage` when no `storage` is given.
    * @param {object} [storage] A duck-typed `QueueStorage` backend. Defaults to
    *   a `VecDequeStorage` built from `initial`.
    */
-  constructor(initial = {}, storage) {
+  constructor(ctx, initial = {}, storage) {
+    requireContext(ctx);
+    this.#ctx = ctx;
     this.#storage = storage ?? new VecDequeStorage(initial);
     this.#prev = this.#snapshot();
+    this.#readers = {
+      head: ctx.computed(() => this.#storage.peek?.() ?? null),
+      len: ctx.computed(() => this.#storage.len()),
+      is_empty: ctx.computed(() => this.#storage.len() === 0),
+      is_full: ctx.computed(() => {
+        const cap = this.#storage.capacity?.() ?? null;
+        return cap !== null && this.#storage.len() >= cap;
+      }),
+      closed: ctx.computed(() => this.#storage.isClosed()),
+    };
     Object.freeze(this);
   }
 
+  #ctx;
   #storage;
   #prev;
+  #readers;
 
-  static from(initial, storage) {
-    return new QueueCell(initial, storage);
+  static from(ctx, initial, storage) {
+    return new QueueCell(ctx, initial, storage);
   }
 
   // -- internal: reader-kind state + invalidation diff ----------------------
@@ -232,6 +243,7 @@ export class QueueCell {
       closed: prev.closed !== next.closed,
     };
     this.#prev = next;
+    clearChanged(this.#ctx, this.#readers, invalidates);
     return invalidates;
   }
 
@@ -294,32 +306,31 @@ export class QueueCell {
    * this returns `null` — exactly as an unbounded backend's `isFull` is always
    * `false`.
    */
-  head() {
-    return this.#storage.peek?.() ?? null;
+  head(cx) {
+    return readComputed(this.#ctx, this.#readers.head, cx);
   }
 
   /** Number of buffered elements. */
-  len() {
-    return this.#storage.len();
+  len(cx) {
+    return readComputed(this.#ctx, this.#readers.len, cx);
   }
 
   /** Whether the queue is empty. */
-  isEmpty() {
-    return this.#storage.len() === 0;
+  isEmpty(cx) {
+    return readComputed(this.#ctx, this.#readers.is_empty, cx);
   }
 
   /**
    * Whether the queue is at capacity (the backpressure signal). Always `false`
    * for an unbounded backend.
    */
-  isFull() {
-    const cap = this.#storage.capacity?.() ?? null;
-    return cap !== null && this.#storage.len() >= cap;
+  isFull(cx) {
+    return readComputed(this.#ctx, this.#readers.is_full, cx);
   }
 
   /** Whether the queue has been closed. */
-  isClosed() {
-    return this.#storage.isClosed();
+  isClosed(cx) {
+    return readComputed(this.#ctx, this.#readers.closed, cx);
   }
 
   /** The backend's capacity, or `null` if unbounded. */
@@ -369,7 +380,9 @@ export class TopicCell {
    *   subscriptions?: Record<string, {cursor: number, durability: "durable" | "ephemeral", connected: boolean}>
    * }} [initial]
    */
-  constructor(initial = {}) {
+  constructor(ctx, initial = {}) {
+    requireContext(ctx);
+    this.#ctx = ctx;
     this.#baseOffset = initial.base_offset ?? 0;
     this.#elements = Array.from(initial.elements ?? []);
     this.#subscriptions = new Map();
@@ -401,9 +414,38 @@ export class TopicCell {
   #baseOffset;
   #elements;
   #subscriptions;
+  #ctx;
+  #readers = new Map();
 
-  static from(initial = {}) {
-    return new TopicCell(initial);
+  static from(ctx, initial = {}) {
+    return new TopicCell(ctx, initial);
+  }
+
+  #reader(id) {
+    let reader = this.#readers.get(id);
+    if (reader === undefined) {
+      // Connection/cursor identity is observable even when the unread value is
+      // the same empty array before and after a transition, so a cleared topic
+      // reader must propagate rather than equality-suppress.
+      reader = this.#ctx.computedRippleWhen(() => this.#rawReadStream(id), () => true);
+      this.#readers.set(id, reader);
+    }
+    return reader;
+  }
+
+  #rawReadStream(id) {
+    const sub = this.#subscriptions.get(id);
+    if (!sub || !sub.connected) return [];
+    return this.#elements.slice(Math.max(0, sub.cursor - this.#baseOffset));
+  }
+
+  #publishInvalidations(invalidates) {
+    const readers = [];
+    for (const [id, changed] of Object.entries(invalidates)) {
+      if (changed) readers.push(this.#reader(id));
+    }
+    this.#ctx.clearComputeds(readers);
+    return invalidates;
   }
 
   #allFalse() {
@@ -413,7 +455,7 @@ export class TopicCell {
   #only(id, changed) {
     const invalidates = this.#allFalse();
     invalidates[id] = changed;
-    return invalidates;
+    return this.#publishInvalidations(invalidates);
   }
 
   /** Create at tail, or reconnect an existing durable identity in place. */
@@ -473,19 +515,18 @@ export class TopicCell {
         sub.connected && sub.cursor <= offset,
       ]),
     );
+    this.#publishInvalidations(invalidates);
     return { returns: null, offset, invalidates };
   }
 
   /** Unread suffix for a connected subscriber. */
-  readStream(id) {
-    const sub = this.#subscriptions.get(id);
-    if (!sub || !sub.connected) return [];
-    return this.#elements.slice(Math.max(0, sub.cursor - this.#baseOffset));
+  readStream(id, cx) {
+    return readComputed(this.#ctx, this.#reader(id), cx);
   }
 
   /** Element at a subscriber cursor, or null at the tail/offline. */
-  read(id) {
-    return this.readStream(id)[0] ?? null;
+  read(id, cx) {
+    return this.readStream(id, cx)[0] ?? null;
   }
 
   /** Advance only the named connected cursor by one. */
@@ -563,18 +604,31 @@ export const WorkQueueDeadLetterReason = Object.freeze({
  * leader or consensus log while preserving the same operation outcomes.
  */
 export class WorkQueueCell {
-  /** @param {{visibility_timeout: number, max_deliveries: number}} config */
-  constructor(config) {
+  /**
+   * @param {import("./reactive.js").Context} ctx
+   * @param {{visibility_timeout: number, max_deliveries: number}} config
+   */
+  constructor(ctx, config) {
+    requireContext(ctx);
     if (!config || !Number.isSafeInteger(config.visibility_timeout) || config.visibility_timeout <= 0) {
       throw new RangeError("visibility_timeout must be a positive safe integer");
     }
     if (!Number.isSafeInteger(config.max_deliveries) || config.max_deliveries < 1) {
       throw new RangeError("max_deliveries must be at least one");
     }
+    this.#ctx = ctx;
     this.#visibilityTimeout = config.visibility_timeout;
     this.#maxDeliveries = config.max_deliveries;
+    this.#readers = {
+      pending_len: ctx.computed(() => this.#pending.length),
+      is_empty: ctx.computed(() => this.#pending.length === 0),
+      in_flight_len: ctx.computed(() => this.#inFlight.size),
+      dead_letter_len: ctx.computed(() => this.#deadLetters.length),
+    };
   }
 
+  #ctx;
+  #readers;
   #visibilityTimeout;
   #maxDeliveries;
   #pending = [];
@@ -593,12 +647,14 @@ export class WorkQueueCell {
 
   #invalidates(before) {
     const after = this.#counts();
-    return {
+    const invalidates = {
       pending_len: before.pending !== after.pending,
       is_empty: (before.pending === 0) !== (after.pending === 0),
       in_flight_len: before.in_flight !== after.in_flight,
       dead_letter_len: before.dead_letters !== after.dead_letters,
     };
+    clearChanged(this.#ctx, this.#readers, invalidates);
+    return invalidates;
   }
 
   #unchanged() {
@@ -706,20 +762,20 @@ export class WorkQueueCell {
     return { returns: expired.length, invalidates: this.#invalidates(before) };
   }
 
-  pendingLen() {
-    return this.#pending.length;
+  pendingLen(cx) {
+    return readComputed(this.#ctx, this.#readers.pending_len, cx);
   }
 
-  isEmpty() {
-    return this.#pending.length === 0;
+  isEmpty(cx) {
+    return readComputed(this.#ctx, this.#readers.is_empty, cx);
   }
 
-  inFlightLen() {
-    return this.#inFlight.size;
+  inFlightLen(cx) {
+    return readComputed(this.#ctx, this.#readers.in_flight_len, cx);
   }
 
-  deadLetterLen() {
-    return this.#deadLetters.length;
+  deadLetterLen(cx) {
+    return readComputed(this.#ctx, this.#readers.dead_letter_len, cx);
   }
 
   pendingItems() {
@@ -744,4 +800,27 @@ export class WorkQueueCell {
 /** @returns {QueueInvalidates} */
 function emptyInvalidates() {
   return { head: false, len: false, is_empty: false, is_full: false, closed: false };
+}
+
+function requireContext(ctx) {
+  if (
+    !ctx ||
+    typeof ctx.computed !== "function" ||
+    typeof ctx.get !== "function" ||
+    typeof ctx.clearComputeds !== "function"
+  ) {
+    throw new TypeError("queue-family construction requires a lazily Context");
+  }
+}
+
+function readComputed(ctx, reader, cx) {
+  return cx === undefined ? ctx.get(reader) : cx.get(reader);
+}
+
+function clearChanged(ctx, readers, invalidates) {
+  const changed = [];
+  for (const [kind, didChange] of Object.entries(invalidates)) {
+    if (didChange) changed.push(readers[kind]);
+  }
+  ctx.clearComputeds(changed);
 }

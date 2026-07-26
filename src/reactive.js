@@ -836,6 +836,31 @@ function createContext(opts = {}) {
     }
   }
 
+  /**
+   * Force a set of dependency-free derived nodes stale in one frontier walk.
+   * Queue-family reader kinds use this internal graph primitive after their
+   * graph-agnostic storage transition has proved exactly which values changed.
+   */
+  function clearComputeds(handles) {
+    const roots = [];
+    for (const handle of handles) {
+      if (handle?._ctx !== api || kinds[handle.id] !== KIND_SLOT) {
+        throw new Error("clearComputeds requires live Computed handles from this context");
+      }
+      roots.push(handle.id);
+    }
+    if (roots.length === 0) {
+      return;
+    }
+    const effects = markFrontier(roots);
+    for (let i = 0; i < effects.length; i++) {
+      scheduleEffect(effects[i][0], effects[i][1]);
+    }
+    if (batchDepth === 0 && effects.length > 0) {
+      flushEffects();
+    }
+  }
+
   // -- Batch -------------------------------------------------------------
 
   function batch(run) {
@@ -1618,6 +1643,7 @@ function createContext(opts = {}) {
     // #lzcellkernel unified read/write (v2): read both handle kinds; write source-only
     get,
     set,
+    clearComputeds,
     // deprecated split read/write (kept for the internal/test surface)
     getCell,
     getSignal,

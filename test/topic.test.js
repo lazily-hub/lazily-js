@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 import { TopicCell, TopicDurability } from "../src/queue.js";
+import { Context } from "../src/reactive.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const specCollections = join(here, "..", "..", "lazily-spec", "conformance", "collections");
@@ -16,10 +17,27 @@ function loadFixture(name) {
 }
 
 function runFixture(fixture) {
-  const topic = new TopicCell(fixture.initial);
+  const ctx = new Context();
+  const topic = new TopicCell(ctx, fixture.initial);
+  const probes = new Map();
+  function probeFor(id) {
+    let probe = probes.get(id);
+    if (probe === undefined) {
+      probe = { count: 0 };
+      probe.node = ctx.computed((cx) => {
+        probe.count += 1;
+        return topic.readStream(id, cx);
+      });
+      ctx.get(probe.node);
+      probes.set(id, probe);
+    }
+    return probe;
+  }
   for (let i = 0; i < fixture.steps.length; i++) {
     const step = fixture.steps[i];
     const op = step.op;
+    for (const id of Object.keys(step.expected.invalidates ?? {})) probeFor(id);
+    const countsBefore = new Map(Array.from(probes, ([id, probe]) => [id, probe.count]));
     let result;
     switch (op.type) {
       case "publish":
@@ -55,6 +73,14 @@ function runFixture(fixture) {
       assert.deepEqual(topic.readStream(id), stream, `step ${i}: reads.${id}`);
     }
     assert.deepEqual(result.invalidates, expected.invalidates, `step ${i}: invalidates`);
+    for (const probe of probes.values()) ctx.get(probe.node);
+    for (const [id, invalidated] of Object.entries(expected.invalidates ?? {})) {
+      assert.equal(
+        probeFor(id).count > countsBefore.get(id),
+        invalidated,
+        `step ${i}: reactive subscriber reader ${id} recomputation`,
+      );
+    }
     if ("returns" in step) assert.equal(result.returns, step.returns, `step ${i}: returns`);
   }
 }
@@ -76,11 +102,12 @@ test("TopicCell conformance: offline and tail bounds", () => {
 });
 
 test("TopicCell snapshot round-trip preserves durable cursors", () => {
-  const topic = new TopicCell();
+  const ctx = new Context();
+  const topic = new TopicCell(ctx);
   topic.subscribe("durable", TopicDurability.Durable);
   topic.publish("a");
   topic.disconnect("durable");
-  const restored = TopicCell.from(topic.snapshot());
+  const restored = TopicCell.from(new Context(), topic.snapshot());
   assert.equal(restored.subscription("durable").cursor, 0);
   restored.reconnect("durable");
   assert.deepEqual(restored.readStream("durable"), ["a"]);

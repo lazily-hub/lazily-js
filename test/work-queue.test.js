@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 import { WorkQueueCell } from "../src/queue.js";
+import { Context } from "../src/reactive.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const specCollections = join(here, "..", "..", "lazily-spec", "conformance", "collections");
@@ -16,10 +17,29 @@ function loadFixture(name) {
 }
 
 function runFixture(fixture) {
-  const queue = new WorkQueueCell(fixture.config);
+  const ctx = new Context();
+  const queue = new WorkQueueCell(ctx, fixture.config);
+  const probes = {};
+  for (const [kind, read] of Object.entries({
+    pending_len: (cx) => queue.pendingLen(cx),
+    is_empty: (cx) => queue.isEmpty(cx),
+    in_flight_len: (cx) => queue.inFlightLen(cx),
+    dead_letter_len: (cx) => queue.deadLetterLen(cx),
+  })) {
+    const probe = { count: 0 };
+    probe.node = ctx.computed((cx) => {
+      probe.count += 1;
+      return read(cx);
+    });
+    ctx.get(probe.node);
+    probes[kind] = probe;
+  }
   for (let i = 0; i < fixture.steps.length; i++) {
     const step = fixture.steps[i];
     const op = step.op;
+    const countsBefore = Object.fromEntries(
+      Object.entries(probes).map(([kind, probe]) => [kind, probe.count]),
+    );
     let result;
     switch (op.type) {
       case "push":
@@ -43,6 +63,14 @@ function runFixture(fixture) {
 
     assert.deepEqual(result.returns, step.returns, `step ${i}: returns`);
     assert.deepEqual(result.invalidates, step.expected.invalidates, `step ${i}: invalidates`);
+    for (const probe of Object.values(probes)) ctx.get(probe.node);
+    for (const [kind, invalidated] of Object.entries(step.expected.invalidates)) {
+      assert.equal(
+        probes[kind].count > countsBefore[kind],
+        invalidated,
+        `step ${i}: reactive reader ${kind} recomputation`,
+      );
+    }
     assert.deepEqual(queue.pendingItems(), step.expected.pending, `step ${i}: pending`);
     assert.deepEqual(queue.inFlightDeliveries(), step.expected.in_flight, `step ${i}: in_flight`);
     assert.deepEqual(queue.deadLetterItems(), step.expected.dead_letters, `step ${i}: dead_letters`);
@@ -68,6 +96,12 @@ test("WorkQueueCell conformance: lease expiry and DLQ", () => {
 });
 
 test("WorkQueueCell validates lifecycle configuration", () => {
-  assert.throws(() => new WorkQueueCell({ visibility_timeout: 0, max_deliveries: 1 }), RangeError);
-  assert.throws(() => new WorkQueueCell({ visibility_timeout: 1, max_deliveries: 0 }), RangeError);
+  assert.throws(
+    () => new WorkQueueCell(new Context(), { visibility_timeout: 0, max_deliveries: 1 }),
+    RangeError,
+  );
+  assert.throws(
+    () => new WorkQueueCell(new Context(), { visibility_timeout: 1, max_deliveries: 0 }),
+    RangeError,
+  );
 });

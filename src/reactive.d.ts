@@ -202,6 +202,8 @@ export interface Context {
   get<T>(handle: Source<T> | Computed<T>): T;
   /** The unified cell write: only a `Source` is writable (write protection). */
   set<T>(handle: Source<T>, value: T): void;
+  /** Force dependency-free derived nodes stale in one atomic frontier walk. */
+  clearComputeds(handles: readonly Computed<unknown>[]): void;
   // -- Deprecated split read/write --
   /** @deprecated use {@link get} — the unified cell read (#lzcellkernel). */
   getCell<T>(handle: Source<T>): T;

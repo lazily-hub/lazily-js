@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 import { QueueCell, QueuePopError, QueuePushError, VecDequeStorage } from "../src/queue.js";
+import { Context } from "../src/reactive.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const specCollections = join(here, "..", "..", "lazily-spec", "conformance", "collections");
@@ -20,8 +21,8 @@ function loadFixture(name) {
 // observable state + the per-reader-kind invalidation matrix.
 // ---------------------------------------------------------------------------
 
-function buildInitial(initial) {
-  return new QueueCell({
+function buildInitial(ctx, initial) {
+  return new QueueCell(ctx, {
     elements: initial.elements ?? [],
     capacity: initial.capacity ?? null,
     closed: Boolean(initial.closed),
@@ -50,10 +51,30 @@ function assertState(q, expected) {
 }
 
 function runFixture(fixture) {
-  const q = buildInitial(fixture.initial);
+  const ctx = new Context();
+  const q = buildInitial(ctx, fixture.initial);
+  const probes = {};
+  for (const [kind, read] of Object.entries({
+    head: (cx) => q.head(cx),
+    len: (cx) => q.len(cx),
+    is_empty: (cx) => q.isEmpty(cx),
+    is_full: (cx) => q.isFull(cx),
+    closed: (cx) => q.isClosed(cx),
+  })) {
+    const probe = { count: 0 };
+    probe.node = ctx.computed((cx) => {
+      probe.count += 1;
+      return read(cx);
+    });
+    ctx.get(probe.node);
+    probes[kind] = probe;
+  }
   for (let i = 0; i < fixture.steps.length; i++) {
     const step = fixture.steps[i];
     const op = step.op;
+    const countsBefore = Object.fromEntries(
+      Object.entries(probes).map(([kind, probe]) => [kind, probe.count]),
+    );
     let result;
 
     switch (op.type) {
@@ -72,13 +93,13 @@ function runFixture(fixture) {
         result = q.close();
         break;
       case "batch": {
-        // MPSC: multiple producers push inside one logical batch. The pure-logic
-        // shell reports each push's own invalidation; in a live reactive graph
-        // the caller groups them inside a Context.batch. Here we collapse the
-        // batch into the union of per-push invalidations and assert the
+      // MPSC: multiple producers push inside one logical Context batch. The
+      // queue reports each push's own invalidation while the graph defers its
+      // effect flush; collapse the reports into their union and assert the
         // end-state (the fixture's expected invalidates reflects the net change
         // across the whole batch).
         const acc = { head: false, len: false, is_empty: false, is_full: false, closed: false };
+      ctx.batch(() => {
         for (const inner of op.ops) {
           assert.equal(inner.type, "push", "batch currently only wraps pushes");
           const r = q.tryPush(inner.value);
@@ -88,6 +109,7 @@ function runFixture(fixture) {
             }
           }
         }
+      });
         result = { returns: null, invalidates: acc };
         break;
       }
@@ -107,11 +129,17 @@ function runFixture(fixture) {
     // present in the fixture's `invalidates` is asserted; absent kinds are not
     // asserted (fixtures that focus on one reader kind only declare that one).
     const invalidates = step.expected.invalidates ?? {};
+    for (const probe of Object.values(probes)) ctx.get(probe.node);
     for (const kind of Object.keys(invalidates)) {
       assert.equal(
         result.invalidates[kind],
         invalidates[kind],
         `step ${i}: invalidates.${kind}`,
+      );
+      assert.equal(
+        probes[kind].count > countsBefore[kind],
+        invalidates[kind],
+        `step ${i}: reactive reader ${kind} recomputation`,
       );
     }
   }
@@ -170,7 +198,7 @@ test("VecDequeStorage: zero capacity is rejected", () => {
 });
 
 test("QueueCell: closure drains then Closed-distinct-from-Empty", () => {
-  const q = new QueueCell();
+  const q = new QueueCell(new Context());
   assert.deepEqual(q.tryPush("a"), {
     returns: null,
     invalidates: { head: true, len: true, is_empty: true, is_full: false, closed: false },
@@ -221,7 +249,7 @@ test("QueueCell: closure drains then Closed-distinct-from-Empty", () => {
 });
 
 test("QueueCell: bounded backpressure flips is_full both ways", () => {
-  const q = new QueueCell({ capacity: 1 });
+  const q = new QueueCell(new Context(), { capacity: 1 });
   assert.equal(q.isFull(), false);
 
   const r1 = q.tryPush(1);
@@ -280,7 +308,7 @@ test("QueueCell: pluggable storage via duck-typed backend", () => {
     }
   }
 
-  const q = new QueueCell({}, new BoundedRing(2));
+  const q = new QueueCell(new Context(), {}, new BoundedRing(2));
   assert.equal(q.capacity(), 2);
   q.tryPush(1);
   q.tryPush(2);
@@ -294,17 +322,17 @@ test("QueueCell: pluggable storage via duck-typed backend", () => {
 });
 
 test("QueueCell: snapshot round-trip via VecDequeStorage.from", () => {
-  const q1 = new QueueCell({ elements: ["a", "b", "c"], capacity: null });
+  const q1 = new QueueCell(new Context(), { elements: ["a", "b", "c"], capacity: null });
   const snap = q1.elements();
   assert.deepEqual(snap, ["a", "b", "c"]);
   const s2 = VecDequeStorage.from({ elements: snap, capacity: null });
-  const q2 = new QueueCell({}, s2);
+  const q2 = new QueueCell(new Context(), {}, s2);
   assert.deepEqual(q2.elements(), ["a", "b", "c"]);
   assert.equal(q2.tryPop().returns, "a");
 });
 
 test("QueueCell: reader-kind independence — push to non-empty spares head", () => {
-  const q = new QueueCell();
+  const q = new QueueCell(new Context());
   q.tryPush("a");
   // head is now "a"; pushing more must not invalidate head.
   const r2 = q.tryPush("b");
@@ -351,7 +379,7 @@ class MinimalFifoStorage {
 }
 
 test("QueueCell: raw-channel backend conforms to the minimal contract", () => {
-  const q = new QueueCell({}, new MinimalFifoStorage());
+  const q = new QueueCell(new Context(), {}, new MinimalFifoStorage());
 
   assert.equal(q.isEmpty(), true);
   const p1 = q.tryPush(1);

@@ -1,6 +1,6 @@
-// Reactive queue: QueueCell + pluggable QueueStorage backend (#lzqueue).
-// Pure logic — no reactive graph. See queue.js for the reader-kind invalidation
-// contract and the shell / storage split.
+import type { Compute, Context } from "./reactive.js";
+
+// Reactive queue family bound to the single-threaded Context.
 
 export type QueuePushErrorLabel = "Full" | "Closed";
 export type QueuePopErrorLabel = "Empty" | "Closed";
@@ -76,16 +76,16 @@ export class VecDequeStorage {
 
 /** A reactive FIFO queue — SPSC primitive with an MPSC usage rule. */
 export class QueueCell {
-  constructor(initial?: QueueInitial, storage?: QueueStorage);
-  static from(initial?: QueueInitial, storage?: QueueStorage): QueueCell;
+  constructor(ctx: Context, initial?: QueueInitial, storage?: QueueStorage);
+  static from(ctx: Context, initial?: QueueInitial, storage?: QueueStorage): QueueCell;
   tryPush(value: unknown): QueuePushResult;
   tryPop(): QueuePopResult;
   close(): QueueCloseResult;
-  head(): unknown;
-  len(): number;
-  isEmpty(): boolean;
-  isFull(): boolean;
-  isClosed(): boolean;
+  head(cx?: Compute): unknown;
+  len(cx?: Compute): number;
+  isEmpty(cx?: Compute): boolean;
+  isFull(cx?: Compute): boolean;
+  isClosed(cx?: Compute): boolean;
   capacity(): number | null;
 elements(): unknown[];
 }
@@ -120,14 +120,14 @@ offset?: number;
 
 /** Broadcast log with independent, non-destructive subscriber cursors. */
 export class TopicCell {
-constructor(initial?: TopicInitial);
-static from(initial?: TopicInitial): TopicCell;
+  constructor(ctx: Context, initial?: TopicInitial);
+  static from(ctx: Context, initial?: TopicInitial): TopicCell;
 subscribe(id: string, durability: TopicDurabilityLabel): TopicMutationResult;
 reconnect(id: string): TopicMutationResult;
 disconnect(id: string): TopicMutationResult;
 publish(value: unknown): TopicMutationResult;
-readStream(id: string): unknown[];
-read(id: string): unknown;
+  readStream(id: string, cx?: Compute): unknown[];
+  read(id: string, cx?: Compute): unknown;
 advance(id: string): TopicMutationResult;
 restart(id: string): TopicMutationResult;
 gc(): TopicMutationResult;
@@ -168,7 +168,7 @@ export const WorkQueueDeadLetterReason: Readonly<{Nack: "nack"; Expired: "expire
 
 /** Pull-based competing-consumer work queue with exclusive delivery leases. */
 export class WorkQueueCell<T = unknown> {
-  constructor(config: {visibility_timeout: number; max_deliveries: number});
+  constructor(ctx: Context, config: {visibility_timeout: number; max_deliveries: number});
   push(value: T): {returns: number; invalidates: WorkQueueInvalidates};
   claim(worker: string, now: number): {
     returns: WorkQueueDelivery<T> | null;
@@ -177,10 +177,10 @@ export class WorkQueueCell<T = unknown> {
   ack(worker: string, deliveryId: number): {returns: boolean; invalidates: WorkQueueInvalidates};
   nack(worker: string, deliveryId: number): {returns: boolean; invalidates: WorkQueueInvalidates};
   reapExpired(now: number): {returns: number; invalidates: WorkQueueInvalidates};
-  pendingLen(): number;
-  isEmpty(): boolean;
-  inFlightLen(): number;
-  deadLetterLen(): number;
+  pendingLen(cx?: Compute): number;
+  isEmpty(cx?: Compute): boolean;
+  inFlightLen(cx?: Compute): number;
+  deadLetterLen(cx?: Compute): number;
   pendingItems(): WorkQueueItem<T>[];
   inFlightDeliveries(): WorkQueueDelivery<T>[];
   deadLetterItems(): WorkQueueDeadLetter<T>[];
