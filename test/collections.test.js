@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
-import { CellMap, CellTree, reconcileCollections } from "../src/collections.js";
+import { SourceMap, CellTree, reconcileCollections } from "../src/collections.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const specCollections = join(here, "..", "..", "lazily-spec", "conformance", "collections");
@@ -25,7 +25,7 @@ function assertSameSet(actual, expected, label) {
 
 test("collection conformance: cellmap_atomic_move.json", () => {
   const fixture = loadFixture("cellmap_atomic_move.json");
-  const map = new CellMap(fixture.initial);
+  const map = new SourceMap(fixture.initial);
 
   for (const step of fixture.steps) {
     const handlesBefore = {};
@@ -62,7 +62,7 @@ test("collection conformance: cellmap_atomic_move.json", () => {
 
 test("collection conformance: cellmap_independence.json", () => {
   const fixture = loadFixture("cellmap_independence.json");
-  const map = new CellMap(fixture.initial);
+  const map = new SourceMap(fixture.initial);
 
   for (const step of fixture.steps) {
     const report = map.apply(step.op);
@@ -94,8 +94,8 @@ test("collection conformance: keyed_reconciliation_lis.json", () => {
   );
 });
 
-test("CellMap move keeps the handle; remove then re-add mints a new one", () => {
-  const map = new CellMap({ order: ["x", "y"], values: { x: 1, y: 2 } });
+test("SourceMap move keeps the handle; remove then re-add mints a new one", () => {
+  const map = new SourceMap({ order: ["x", "y"], values: { x: 1, y: 2 } });
   const handleX = map.handle("x");
 
   // A pure reorder never re-mints the handle.
@@ -110,8 +110,8 @@ test("CellMap move keeps the handle; remove then re-add mints a new one", () => 
   assert.notEqual(map.handle("x"), handleX);
 });
 
-test("CellMap set_value is PartialEq-guarded (equal value invalidates nothing)", () => {
-  const map = new CellMap({ order: ["a"], values: { a: 1 } });
+test("SourceMap set_value is PartialEq-guarded (equal value invalidates nothing)", () => {
+  const map = new SourceMap({ order: ["a"], values: { a: 1 } });
   assert.deepEqual(map.setValue("a", 1), { value: [], membership: false, order: false });
   assert.deepEqual(map.setValue("a", 2), { value: ["a"], membership: false, order: false });
   assert.equal(map.get("a"), 2);

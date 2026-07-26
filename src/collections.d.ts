@@ -6,7 +6,7 @@ export type InvalidationReport = {
   order: boolean;
 };
 
-export type CellMapOp =
+export type SourceMapOp =
   | { type: "set_value"; key: CollectionKey; value: unknown }
   | { type: "insert"; key: CollectionKey; value: unknown; at?: "end" | "start" | number | CollectionKey }
   | { type: "remove"; key: CollectionKey }
@@ -14,12 +14,12 @@ export type CellMapOp =
   | { type: "move_before"; key: CollectionKey; before: CollectionKey }
   | { type: "move_after"; key: CollectionKey; after: CollectionKey };
 
-export type CellMapSnapshot = {
+export type SourceMapSnapshot = {
   order: CollectionKey[];
   values: Record<string, unknown>;
 };
 
-export class CellMap {
+export class SourceMap {
   constructor(initial?: { order?: CollectionKey[]; values?: Record<string, unknown> });
   order: CollectionKey[];
   values: Map<CollectionKey, unknown>;
@@ -27,8 +27,8 @@ export class CellMap {
   has(key: CollectionKey): boolean;
   get(key: CollectionKey): unknown;
   handle(key: CollectionKey): number | undefined;
-  snapshot(): CellMapSnapshot;
-  apply(op: CellMapOp): InvalidationReport;
+  snapshot(): SourceMapSnapshot;
+  apply(op: SourceMapOp): InvalidationReport;
   setValue(key: CollectionKey, value: unknown): InvalidationReport;
   insert(
     key: CollectionKey,
@@ -39,7 +39,7 @@ export class CellMap {
   moveTo(key: CollectionKey, index: number): InvalidationReport;
   moveBefore(key: CollectionKey, beforeKey: CollectionKey): InvalidationReport;
   moveAfter(key: CollectionKey, afterKey: CollectionKey): InvalidationReport;
-  static from(initial: { order?: CollectionKey[]; values?: Record<string, unknown> }): CellMap;
+  static from(initial: { order?: CollectionKey[]; values?: Record<string, unknown> }): SourceMap;
 }
 
 export type ReconcileOp =
@@ -79,10 +79,10 @@ export type TreeInvalidationReport = {
 };
 
 export class TreeNode {
-  constructor(id: unknown, value: unknown, children: CellMap);
+  constructor(id: unknown, value: unknown, children: SourceMap);
   id: unknown;
   value: unknown;
-  children: CellMap;
+  children: SourceMap;
   snapshot(): TreeNodeSnapshot;
 }
 
@@ -108,3 +108,16 @@ export class CellTree {
   moveChildAfter(path: CollectionKey[] | CollectionKey, key: CollectionKey, afterKey: CollectionKey): TreeInvalidationReport;
   snapshot(): TreeNodeSnapshot;
 }
+
+/**
+ * @deprecated Renamed to {@link SourceMap}. Kept as an alias for compatibility.
+ */
+export const CellMap: typeof SourceMap;
+/**
+ * @deprecated Renamed to {@link SourceMap}. Kept as an alias for compatibility.
+ */
+export type CellMap = SourceMap;
+/** @deprecated Renamed to {@link SourceMapOp}. */
+export type CellMapOp = SourceMapOp;
+/** @deprecated Renamed to {@link SourceMapSnapshot}. */
+export type CellMapSnapshot = SourceMapSnapshot;

@@ -330,7 +330,7 @@ export class QueueCell {
   /**
    * Snapshot the buffered elements in FIFO order. There is no reactive
    * random-access `queue[N]` reader; per-position reactivity is the domain of
-   * `CellMap`, not `QueueCell`.
+   * `SourceMap`, not `QueueCell`.
    * @returns {unknown[]}
    */
   elements() {

@@ -11,7 +11,7 @@ export type AsyncMapHandle = AsyncSource | AsyncComputed;
  * per-entry async reactive nodes (input cells resolved synchronously, or derived
  * slots resolved asynchronously). The transparency law is EVENTUAL — a pending
  * slot observes as `undefined` and resolves to the canonical value. Its two
- * specializations are {@link AsyncCellMap} and {@link AsyncSlotMap}.
+ * specializations are {@link AsyncSourceMap} and {@link AsyncComputedMap}.
  */
 export class AsyncReactiveMap<K = unknown, V = unknown> {
   constructor(ctx: AsyncContext, kind?: EntryKind);
@@ -38,7 +38,7 @@ export class AsyncReactiveMap<K = unknown, V = unknown> {
  * The async input-cell map: every entry is an always-resolved input cell. Adds
  * cell-only `set`.
  */
-export class AsyncCellMap<K = unknown, V = unknown> extends AsyncReactiveMap<K, V> {
+export class AsyncSourceMap<K = unknown, V = unknown> extends AsyncReactiveMap<K, V> {
   constructor(ctx: AsyncContext);
   /** Set the value at `key`, inserting a new input cell if absent. Cell-only. */
   set(key: K, value: V): void;
@@ -48,8 +48,26 @@ export class AsyncCellMap<K = unknown, V = unknown> extends AsyncReactiveMap<K, 
  * The async derived-slot map: entries are derived slots minted lazily on access
  * or eagerly via `materializeAll`, resolved via `ctx.getAsync`. NO `set`.
  */
-export class AsyncSlotMap<K = unknown, V = unknown> extends AsyncReactiveMap<K, V> {
+export class AsyncComputedMap<K = unknown, V = unknown> extends AsyncReactiveMap<K, V> {
   constructor(ctx: AsyncContext);
   /** Eager materialization: pre-mint a derived slot for every key in `keys`. */
   materializeAll(keys: Iterable<K>, factory: (key: K) => V): void;
 }
+
+/**
+ * @deprecated Renamed to {@link AsyncSourceMap}. Kept as an alias for compatibility.
+ */
+export const AsyncCellMap: typeof AsyncSourceMap;
+/**
+ * @deprecated Renamed to {@link AsyncSourceMap}. Kept as an alias for compatibility.
+ */
+export type AsyncCellMap<K = unknown, V = unknown> = AsyncSourceMap<K, V>;
+
+/**
+ * @deprecated Renamed to {@link AsyncComputedMap}. Kept as an alias for compatibility.
+ */
+export const AsyncSlotMap: typeof AsyncComputedMap;
+/**
+ * @deprecated Renamed to {@link AsyncComputedMap}. Kept as an alias for compatibility.
+ */
+export type AsyncSlotMap<K = unknown, V = unknown> = AsyncComputedMap<K, V>;

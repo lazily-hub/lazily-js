@@ -21,8 +21,8 @@
 // value are identical. `#mintWith` computes the node OUTSIDE the map lock, then
 // commits under it with FIRST-WRITER-WINS so a raced key keeps one stable handle.
 //
-// Its two specializations are {@link ThreadSafeCellMap} (input cells) and
-// {@link ThreadSafeSlotMap} (derived slots).
+// Its two specializations are {@link ThreadSafeSourceMap} (input cells) and
+// {@link ThreadSafeComputedMap} (derived slots).
 //
 // Rust reference: `lazily-rs/src/thread_safe_reactive_family.rs`.
 
@@ -108,7 +108,7 @@ export class ThreadSafeReactiveMap {
 
   /**
    * Get the value at `key`, minting the entry via `factory(key)` first if
-   * absent. For a {@link ThreadSafeSlotMap} this is the lazy materialization pull.
+   * absent. For a {@link ThreadSafeComputedMap} this is the lazy materialization pull.
    * @param {K} key
    * @param {(key: K) => V} factory
    * @returns {V}
@@ -159,12 +159,12 @@ export class ThreadSafeReactiveMap {
 
 /**
  * A thread-safe INPUT-CELL map: every entry is an always-materialized input
- * cell. The thread-safe analog of {@link CellMap}. Adds cell-only `set`.
+ * cell. The thread-safe analog of {@link SourceMap}. Adds cell-only `set`.
  *
  * @template K, V
  * @extends {ThreadSafeReactiveMap<K, V>}
  */
-export class ThreadSafeCellMap extends ThreadSafeReactiveMap {
+export class ThreadSafeSourceMap extends ThreadSafeReactiveMap {
   /** @param {import("./thread-safe.js").ThreadSafeContext} ctx */
   constructor(ctx) {
     super(ctx, EntryKind.Cell);
@@ -187,13 +187,13 @@ export class ThreadSafeCellMap extends ThreadSafeReactiveMap {
 
 /**
  * A thread-safe DERIVED-SLOT map: entries are derived slots minted lazily on
- * access or eagerly via {@link ThreadSafeSlotMap#materializeAll}. The
- * thread-safe analog of {@link SlotMap}.
+ * access or eagerly via {@link ThreadSafeComputedMap#materializeAll}. The
+ * thread-safe analog of {@link ComputedMap}.
  *
  * @template K, V
  * @extends {ThreadSafeReactiveMap<K, V>}
  */
-export class ThreadSafeSlotMap extends ThreadSafeReactiveMap {
+export class ThreadSafeComputedMap extends ThreadSafeReactiveMap {
   /** @param {import("./thread-safe.js").ThreadSafeContext} ctx */
   constructor(ctx) {
     super(ctx, EntryKind.Slot);
@@ -211,3 +211,15 @@ export class ThreadSafeSlotMap extends ThreadSafeReactiveMap {
     }
   }
 }
+
+// Deprecated aliases (`#lzcellkernel`) — see `./reactive-family.js`.
+
+/**
+ * @deprecated Renamed to {@link ThreadSafeSourceMap}. Kept as an alias for compatibility.
+ */
+export const ThreadSafeCellMap = ThreadSafeSourceMap;
+
+/**
+ * @deprecated Renamed to {@link ThreadSafeComputedMap}. Kept as an alias for compatibility.
+ */
+export const ThreadSafeSlotMap = ThreadSafeComputedMap;

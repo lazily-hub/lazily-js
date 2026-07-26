@@ -40,15 +40,15 @@ notes and platform carve-outs lives in
 | Feature | Rust | Python | Kotlin | JS | Dart | Zig | Go | C++ | C# |
 | --------- | :----: | :------: | :------: | :--: | :----: | :---: | :--: | :---: | :--: |
 | Reactive graph — two cell kinds (nodes `SourceCell` / `ComputedCell`; handles `Source<T, M>` / `Computed<T>`) + `Effect` sink + eager `Computed` (`computed().eager()`) / all cells guarded / batch | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Keyed-map materialization (`SlotMap`) — mint-on-access derived slots: transparency + deferral (`#lzmatmode`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Thread-safe keyed map (`ThreadSafeSlotMap`) — `Send + Sync` + materialization confluence (`#lzmatmode`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Async keyed map (`AsyncSlotMap`) — eventual transparency (`#lzmatmode`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Keyed-map materialization (`ComputedMap`) — mint-on-access derived slots: transparency + deferral (`#lzmatmode`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Thread-safe keyed map (`ThreadSafeComputedMap`) — `Send + Sync` + materialization confluence (`#lzmatmode`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Async keyed map (`AsyncComputedMap`) — eventual transparency (`#lzmatmode`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Keyed-map sync — membership propagation + materialize-on-ingest + derived-aggregate transparency (`#lzfamilysync`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Thread-safe context (lock-backed) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Async reactive context | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Flat state machine | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Harel state charts | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Keyed reactive maps (`ReactiveMap`: `CellMap` / `SlotMap`) + `CellTree` + reconcile | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Keyed reactive maps (`ReactiveMap`: `SourceMap` / `ComputedMap`) + `CellTree` + reconcile | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Memoized semantic tree (`SemTree`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Stable-id alignment (manufactured identity) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Reactive queue (`QueueCell` SPSC/MPSC + `QueueStorage` adapter) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
@@ -104,15 +104,15 @@ and JSON Schemas in `lazily-spec` and the Lean models in `lazily-formal`.
 | `@lazily-hub/lazily-js/transport` | Cross-process zero-copy transport (`#lzzcpy`): `ShmBlobArena`, `InProcessBackend` / `ArrowBackend`, `BlobRouter`, `spillMessage` / `resolveValue`, and the FFI-gated `createShmBackend` (Node/Bun/Deno). Isomorphic — no FFI import; browser-safe |
 | `@lazily-hub/lazily-js/reactive` | Reactive dependency graph — the Cell kernel: `createContext` (alias `Context`), `Source`, `Computed`, `Effect` (eager = an eager `Computed`, `computed().eager()`). Closure-based core (#lzjsclosure) — 2-8x faster reads than the prior class implementation |
 | `@lazily-hub/lazily-js/reactive-async` | Async reactive graph: `AsyncContext` — Promise-driven slots/effects with revision-guarded stale-completion discard, in-flight dedup, and cancellation |
-| `@lazily-hub/lazily-js/reactive-family` | Unified keyed reactive map: `ReactiveMap<K,V,H>` (reactive membership/order, `getOrInsertWith` mint-on-access, `remove`, `move`) + `CellMap` (adds cell-only `set` + eager `entry`/`entryWith`) and `SlotMap` (lazy `getOrInsertWith` + eager `materializeAll`; no `set`) specializations. No eager/lazy mode flag (`#reactivemap`) |
-| `@lazily-hub/lazily-js/async-reactive-family` | Async keyed reactive map: `AsyncReactiveMap` + `AsyncCellMap` / `AsyncSlotMap` over `AsyncContext` — eventual transparency (a pending slot observes `undefined` and resolves to the canonical value; eager ≡ lazy once resolved) (`#reactivemap`) |
+| `@lazily-hub/lazily-js/reactive-family` | Unified keyed reactive map: `ReactiveMap<K,V,H>` (reactive membership/order, `getOrInsertWith` mint-on-access, `remove`, `move`) + `SourceMap` (adds cell-only `set` + eager `entry`/`entryWith`) and `ComputedMap` (lazy `getOrInsertWith` + eager `materializeAll`; no `set`) specializations. No eager/lazy mode flag (`#reactivemap`) |
+| `@lazily-hub/lazily-js/async-reactive-family` | Async keyed reactive map: `AsyncReactiveMap` + `AsyncSourceMap` / `AsyncComputedMap` over `AsyncContext` — eventual transparency (a pending slot observes `undefined` and resolves to the canonical value; eager ≡ lazy once resolved) (`#reactivemap`) |
 | `@lazily-hub/lazily-js/thread-safe` | Lock-backed reactive context: `ThreadSafeContext` (`Send + Sync` flavor of `Context`) + `AtomicMutex` — a real `SharedArrayBuffer` + `Atomics` reentrant mutex giving cross-worker mutual exclusion; degrades to a single-realm guard where shared memory is unavailable |
-| `@lazily-hub/lazily-js/thread-safe-reactive-family` | Thread-safe keyed reactive map: `ThreadSafeReactiveMap` + `ThreadSafeCellMap` / `ThreadSafeSlotMap` — mutex-guarded present set with first-writer-wins materialization confluence (`#reactivemap`) |
+| `@lazily-hub/lazily-js/thread-safe-reactive-family` | Thread-safe keyed reactive map: `ThreadSafeReactiveMap` + `ThreadSafeSourceMap` / `ThreadSafeComputedMap` — mutex-guarded present set with first-writer-wins materialization confluence (`#reactivemap`) |
 | `@lazily-hub/lazily-js/ffi` | C-ABI FFI boundary (`schemas/ffi.json`): message codec (`encodeMessage` / `decodeMessage` / `validateMessage` / `kindOf`, `LazilyFfiStatus` / `LazilyFfiMessageKind`) + `FfiChannel` FIFO. Isomorphic core (browser shim); the Node build additionally exposes `NativeFfiChannel` / `loadNativeChannel` over the real `lazily_ffi_channel_*` C ABI via koffi |
 | `@lazily-hub/lazily-js/instrumentation` | In-library instrumentation/benchmark API: `benchmark`, `runBenchmarkSuite`, `BenchmarkResult`, `withInstrumentation` — plus opt-in reactive-core counters via `new Context({ instrument: true })` / `instrumentationSnapshot()` |
 | `@lazily-hub/lazily-js/state-machine` | Flat finite-state-machine kernel backed by a reactive `Cell` |
 | `@lazily-hub/lazily-js/statechart` | Harel/SCXML chart interpreter plus `ChartBuilder`, `StateBuilder`, `TransitionBuilder` |
-| `@lazily-hub/lazily-js/collections` | `CellMap`, `CellTree`, keyed reconciliation, and LIS move minimization |
+| `@lazily-hub/lazily-js/collections` | `SourceMap`, `CellTree`, keyed reconciliation, and LIS move minimization |
 | `@lazily-hub/lazily-js/sem-tree` | Memoized semantic tree over `CellTree`-shaped data |
 | `@lazily-hub/lazily-js/seq-crdt` | Move-aware sequence CRDT using independent LWW value / position / deletion registers |
 | `@lazily-hub/lazily-js/text-crdt` | Fugue/RGA character CRDT |
@@ -221,7 +221,7 @@ ctx.set(userId, 2); // supersedes any in-flight compute; slot re-resolves
 await ctx.getAsync(profile); // the profile for user 2
 ```
 
-## Keyed reactive maps (`ReactiveMap` / `CellMap` / `SlotMap`)
+## Keyed reactive maps (`ReactiveMap` / `SourceMap` / `ComputedMap`)
 
 `ReactiveMap<K, V, H>` (from `@lazily-hub/lazily-js/reactive-family`) is the ONE
 unified **keyed reactive collection** (`#reactivemap`): reactive membership +
@@ -229,12 +229,19 @@ order, `getOrInsertWith` mint-on-access, `remove`, and atomic `move`, generic
 over the entry's handle kind. Its two specializations are the concrete types you
 use:
 
-- **`CellMap<K, V>`** — input-cell entries. Adds cell-only `set(key, value)` (an
+- **`SourceMap<K, V>`** — input-cell entries. Adds cell-only `set(key, value)` (an
   input is settable) and eager value-minting (`entry` / `entryWith`).
-- **`SlotMap<K, V>`** — derived-slot entries. `getOrInsertWith(key, factory)`
+- **`ComputedMap<K, V>`** — derived-slot entries. `getOrInsertWith(key, factory)`
   mints a slot on **first access** ("materialize on pull", **lazy**);
   `materializeAll(keys, factory)` pre-mints the keyset up front (**eager**). A
-  slot's value is derived, so `SlotMap` has **no `set`**.
+  slot's value is derived, so `ComputedMap` has **no `set`**.
+
+These were called `CellMap` / `SlotMap` before the v2 kernel renamed the node
+kinds to `Source` and `Computed`. The old names are still exported as
+**deprecated aliases** — `CellMap`, `SlotMap`, `AsyncCellMap`, `AsyncSlotMap`,
+`ThreadSafeCellMap`, `ThreadSafeSlotMap`, and `CellMap` from
+`@lazily-hub/lazily-js/collections` — so existing imports keep working. Prefer
+the new names.
 
 There is **no eager/lazy mode flag** — eager is the pre-mint loop, lazy is
 mint-on-access, and they are **observationally transparent**: a read returns the
@@ -243,13 +250,13 @@ only for sparsely-touched large keyed address spaces.
 
 ```js
 import { Context } from "@lazily-hub/lazily-js/reactive";
-import { SlotMap } from "@lazily-hub/lazily-js/reactive-family";
+import { ComputedMap } from "@lazily-hub/lazily-js/reactive-family";
 
 const ctx = new Context();
 
 // A derived (slot) map of key*3 over a large address space, built lazily:
 // nothing is allocated until a key is read.
-const map = new SlotMap(ctx);
+const map = new ComputedMap(ctx);
 map.presentCount(); // 0
 
 map.getOrInsertWith(5, (k) => k * 3); // 15 — first read materializes just this entry
@@ -258,7 +265,7 @@ map.isPresent(5); // true
 map.isPresent(6); // false
 
 // Eager pre-mints the same values up front — observationally identical.
-const eager = new SlotMap(ctx);
+const eager = new ComputedMap(ctx);
 eager.materializeAll([0, 1, 2, 3], (k) => k * 3);
 eager.get(2) === map.getOrInsertWith(2, (k) => k * 3); // true
 ```
@@ -344,7 +351,7 @@ chart.send("go", { ready: false }); // false, guards fail closed
 
 ## Keyed collections and semantic tree
 
-`CellMap` and `CellTree` implement the lazily-spec keyed collections layer:
+`SourceMap` and `CellTree` implement the lazily-spec keyed collections layer:
 value, membership, and order readers invalidate independently; stable handles
 survive moves; and an atomic move bumps order without touching values.
 `reconcileCollections` emits the LIS-minimized `{ insert, remove, move, update }`
@@ -353,11 +360,11 @@ recomputes only that leaf's ancestor path, and equal folded results are
 suppressed by the computed equality guard.
 
 ```js
-import { CellMap, reconcileCollections } from "@lazily-hub/lazily-js/collections";
+import { SourceMap, reconcileCollections } from "@lazily-hub/lazily-js/collections";
 import { Context } from "@lazily-hub/lazily-js/reactive";
 import { SemTree } from "@lazily-hub/lazily-js/sem-tree";
 
-const map = CellMap.from({ order: ["a", "b"], values: { a: 1, b: 2 } });
+const map = SourceMap.from({ order: ["a", "b"], values: { a: 1, b: 2 } });
 map.moveBefore("b", "a"); // order reader invalidates; value readers do not
 
 reconcileCollections(
@@ -585,7 +592,7 @@ bob.ingest(alice.syncFrame(), Date.now() * 1000); // 1 op applied; re-ingest app
 ## Conformance
 
 lazily-js replays the shared `lazily-spec` fixtures for IPC, agent-doc state,
-keyed collections (`CellMap`, `CellTree`, LIS reconciliation), semantic tree,
+keyed collections (`SourceMap`, `CellTree`, LIS reconciliation), semantic tree,
 sequence and text CRDTs (incl. `TextCrdt` delta sync, `#lztextsync`:
 `textcrdt_convergence.json` + `textcrdt_delta_sync.json`), manufactured text
 identity, the keyed reactive maps / materialization (`#reactivemap`:
@@ -616,8 +623,8 @@ names the Lean theorems it mirrors:
 | `Collection` | `collection-properties.test.js` | `setEntryValue_preserves_{membership,order,siblings}`, `moveKey_preserves_{membership,values}`, `moveKey_advances_order`, `addKey_advances_membership_and_order`, `Family.get_idempotent_after_first` |
 | `Tree` | `tree-properties.test.js` | `setNodeValue_preserves_{other_nodes,node_signals}`, `moveChild_preserves_{non_parent,parent_value}`, `moveChild_advances_order_signal_only` |
 | `Materialization` | `reactive-family.test.js` | `observe_canonical`, `eager_lazy_observationally_equivalent`, `eager_materializes_all`, `lazy_defers_slots`, `materialize_present_monotone`, `lazy_present_subset_eager`, `materialize_preserves_observe`, `cell_entries_materialized_in_every_mode`, `slot_entries_deferred_under_lazy` |
-| `Materialization` (thread-safe) | `thread-safe-reactive-family.test.js` | `materialize_present_comm`, `materialize_observe_comm` (materialization confluence) + the base materialization laws replayed through `ThreadSafeSlotMap` |
-| `AsyncMaterialization` | `async-reactive-family.test.js` | eventual transparency (a driven async slot resolves to the canonical value; eager ≡ lazy) + present-set monotonicity through `AsyncSlotMap` |
+| `Materialization` (thread-safe) | `thread-safe-reactive-family.test.js` | `materialize_present_comm`, `materialize_observe_comm` (materialization confluence) + the base materialization laws replayed through `ThreadSafeComputedMap` |
+| `AsyncMaterialization` | `async-reactive-family.test.js` | eventual transparency (a driven async slot resolves to the canonical value; eager ≡ lazy) + present-set monotonicity through `AsyncComputedMap` |
 | `ThreadSafe` | `thread-safe.test.js` | `flushBatch_empty`, `flushBatch_singleton_eq_setSource` (thread-safe batch refines `set`), `flushBatch_dependent_dirty`, `flushBatch_preserves_nondependent_dirty` |
 | `Reconciliation` | `reconciliation-properties.test.js` | `lisBy_longest`, `reconcile_move_minimized`, `reconcile_stable_not_invalidated` |
 | `AsyncSlotState` | `reactive-async.test.js` | `stale_completeOk_discarded`, `current_completeOk_publishes`, `current_completeErr_to_error` |
@@ -707,7 +714,7 @@ npm run test:size        # gate: fails CI if any entry exceeds its budget
 | state-machine: StateMachine | 274 B ✓ | 280 B |
 | sem-tree: SemTree | 503 B ✓ | 512 B |
 | stable-id: contentHash | 152 B ✓ | 152 B |
-| collections: CellMap + CellTree + reconcileCollections | 1.65 KB ✓ | 1.65 KB |
+| collections: SourceMap + CellTree + reconcileCollections | 1.65 KB ✓ | 1.65 KB |
 | index: PROTOCOL_ID + Snapshot (tree-shaken kitchen sink) | 2.41 KB ✓ | 2.41 KB |
 
 <!-- size-limits:end -->

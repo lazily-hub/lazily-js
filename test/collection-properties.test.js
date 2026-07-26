@@ -5,18 +5,18 @@
 // atomic move preserving identity, and CellFamily per-key stability.
 //
 // Each test names the Lean theorem it mirrors and exercises the JS
-// implementation (`CellMap`) against the theorem's statement. The mutation
-// methods on `CellMap` return an invalidation report
+// implementation (`SourceMap`) against the theorem's statement. The mutation
+// methods on `SourceMap` return an invalidation report
 // `{ value: key[], membership: bool, order: bool }` — these reports ARE the
 // reactivity contract made inspectable, and the assertions check them.
 
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { CellMap } from "../src/collections.js";
+import { SourceMap } from "../src/collections.js";
 
 function buildAbc() {
-  return new CellMap({ order: ["a", "b", "c"], values: { a: 1, b: 2, c: 3 } });
+  return new SourceMap({ order: ["a", "b", "c"], values: { a: 1, b: 2, c: 3 } });
 }
 
 // =================================================================================

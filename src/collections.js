@@ -1,4 +1,4 @@
-// Keyed cell collections: CellMap + LIS keyed reconciliation (cell-model.md
+// Keyed cell collections: SourceMap + LIS keyed reconciliation (cell-model.md
 // § Keyed cell collections). Pure logic — no reactive graph. Like the state
 // chart, this is compute that every binding (including this state-projection
 // consumer) MUST implement; the conformance/collections/ fixtures pin behavior.
@@ -46,7 +46,7 @@ function deepEqual(a, b) {
 function indexOfKey(order, key) {
   const index = order.indexOf(key);
   if (index === -1) {
-    throw new RangeError(`CellMap key not present: ${String(key)}`);
+    throw new RangeError(`SourceMap key not present: ${String(key)}`);
   }
   return index;
 }
@@ -85,7 +85,7 @@ function longestIncreasingSubsequence(seq) {
   return lis.reverse();
 }
 
-export class CellMap {
+export class SourceMap {
   constructor(initial = {}) {
     const order = Array.isArray(initial.order) ? [...initial.order] : [];
     const values = initial.values ?? {};
@@ -103,7 +103,7 @@ export class CellMap {
   #nextHandle;
 
   static from(initial) {
-    return new CellMap(initial);
+    return new SourceMap(initial);
   }
 
   keys() {
@@ -147,7 +147,7 @@ export class CellMap {
       case "move_after":
         return this.moveAfter(op.key, op.after);
       default:
-        throw new TypeError(`unknown CellMap op type: ${op.type}`);
+        throw new TypeError(`unknown SourceMap op type: ${op.type}`);
     }
   }
 
@@ -165,7 +165,7 @@ export class CellMap {
 
   insert(key, value, at = "end") {
     if (this.handles.has(key)) {
-      throw new RangeError(`CellMap key already present: ${String(key)}`);
+      throw new RangeError(`SourceMap key already present: ${String(key)}`);
     }
     let index;
     if (at === "end") {
@@ -284,14 +284,14 @@ export function reconcileCollections(prior, target) {
 
 // Ordered keyed tree (cell-model.md § Ordered keyed tree). A `CellTree` is a
 // further **composition**: each node is `(stable id, value, ordered keyed child
-// collection)` — the child collection is a `CellMap` whose values are child
+// collection)` — the child collection is a `SourceMap` whose values are child
 // tree nodes. Per-node value reactivity, per-level membership/order
 // reactivity, and the atomic-move guarantee are all inherited from the per-cell
 // model: editing a node touches only that node's value; adding/removing/reordering
 // siblings touches only that parent's child level; a child reorder keeps the
 // entry's stable handle and bumps order once (never remove + re-mint).
 //
-// Like `CellMap`, this is pure logic with no reactive graph. Each mutating op
+// Like `SourceMap`, this is pure logic with no reactive graph. Each mutating op
 // returns an invalidation report scoped to the **affected path only** — a
 // reader at any other path observes no change, which is what makes the
 // per-level independence invariant observable.
@@ -303,7 +303,7 @@ function buildNode(spec) {
   for (const key of order) {
     childNodes[key] = buildNode(childSpecs[key]);
   }
-  return new TreeNode(spec && spec.id, spec && spec.value, new CellMap({ order, values: childNodes }));
+  return new TreeNode(spec && spec.id, spec && spec.value, new SourceMap({ order, values: childNodes }));
 }
 
 export class TreeNode {
@@ -430,3 +430,8 @@ export class CellTree {
     return this.root.snapshot();
   }
 }
+
+/**
+ * @deprecated Renamed to {@link SourceMap}. Kept as an alias for compatibility.
+ */
+export const CellMap = SourceMap;

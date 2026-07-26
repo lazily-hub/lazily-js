@@ -30,10 +30,10 @@
     "limit": "152 B"
   },
   {
-    "name": "collections: CellMap + CellTree + reconcileCollections",
+    "name": "collections: SourceMap + CellTree + reconcileCollections",
     "path": "src/collections.js",
-    "import": "{ CellMap, CellTree, reconcileCollections }",
-    "limit": "1645 B"
+    "import": "{ SourceMap, CellTree, reconcileCollections }",
+    "limit": "1647 B"
   },
   {
     "name": "index: PROTOCOL_ID + Snapshot (tree-shaken kitchen sink)",

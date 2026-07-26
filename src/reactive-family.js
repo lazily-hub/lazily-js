@@ -1,5 +1,5 @@
-// Keyed reactive collections: the generic `ReactiveMap` and its `CellMap` /
-// `SlotMap` specializations (`#reactivemap`).
+// Keyed reactive collections: the generic `ReactiveMap` and its `SourceMap` /
+// `ComputedMap` specializations (`#reactivemap`).
 //
 // `lazily-spec/cell-model.md` § "Keyed cell collections" fixes ONE keyed
 // primitive, generic over the entry's handle kind (`ReactiveMap<K, V, H>`):
@@ -7,20 +7,20 @@
 // and atomic `move`. Its two specializations are the concrete types a binding
 // exposes:
 //
-//   - `CellMap<K, V>` = `ReactiveMap` over the input-cell handle. Adds cell-only
+//   - `SourceMap<K, V>` = `ReactiveMap` over the input-cell handle. Adds cell-only
 //     `set(key, value)` (an input is settable) and eager value-minting
 //     (`entry` / `entryWith`). Minting is eager-by-value.
-//   - `SlotMap<K, V>` = `ReactiveMap` over the derived-slot handle.
+//   - `ComputedMap<K, V>` = `ReactiveMap` over the derived-slot handle.
 //     `getOrInsertWith(key, factory)` mints a slot on first access (LAZY
-//     materialization); a slot's value is derived, so `SlotMap` has NO `set`.
+//     materialization); a slot's value is derived, so `ComputedMap` has NO `set`.
 //     Eager materialization is `materializeAll` — a pre-mint loop over the
 //     keyset. There is NO eager/lazy mode flag.
 //
 // The shared surface — `getOrInsertWith` / `remove` / `move*` / membership /
 // order / `keys` / `len` / `containsKey` — lives on the generic `ReactiveMap`.
-// `set` and eager value-minting are the `CellMap`-only specialization; the
-// pre-mint eager helper is the `SlotMap`-only specialization. There are NO
-// family types: the "keyed materialized family" is `SlotMap` + the mint recipe,
+// `set` and eager value-minting are the `SourceMap`-only specialization; the
+// pre-mint eager helper is the `ComputedMap`-only specialization. There are NO
+// family types: the "keyed materialized family" is `ComputedMap` + the mint recipe,
 // and the "auto-mint keyed default" is `getOrInsertWith`.
 //
 // Fine-grained, not coarse: each entry is its own reactive node, so a reader of
@@ -49,8 +49,8 @@ export const EntryKind = Object.freeze({
  * nodes.
  *
  * Operations run against the owning `Context` (from `./reactive.js`), like the
- * rest of `lazily`. The two specializations a binding exposes are {@link CellMap}
- * (input cells) and {@link SlotMap} (derived slots).
+ * rest of `lazily`. The two specializations a binding exposes are {@link SourceMap}
+ * (input cells) and {@link ComputedMap} (derived slots).
  *
  * @template K, V
  */
@@ -135,8 +135,8 @@ export class ReactiveMap {
 
   /**
    * Get the value at `key`, minting the entry via `factory(key)` first if the
-   * key is absent — the mint-on-access recipe. For a {@link SlotMap} this is the
-   * LAZY materialization pull; for a {@link CellMap} it seeds an input cell.
+   * key is absent — the mint-on-access recipe. For a {@link ComputedMap} this is the
+   * LAZY materialization pull; for a {@link SourceMap} it seeds an input cell.
    * Bumps reactive membership only on insert; an existing key returns its
    * current value without re-running the factory.
    * @param {import("./reactive.js").ComputeOps} ops reactive surface (the
@@ -348,14 +348,14 @@ export class ReactiveMap {
 
 /**
  * A keyed INPUT-CELL collection: every entry is a settable input cell. The
- * `CellMap` specialization of {@link ReactiveMap} adds cell-only `set` and eager
+ * `SourceMap` specialization of {@link ReactiveMap} adds cell-only `set` and eager
  * value-minting (`entry` / `entryWith`) on top of the shared reactive keyed
  * surface.
  *
  * @template K, V
  * @extends {ReactiveMap<K, V>}
  */
-export class CellMap extends ReactiveMap {
+export class SourceMap extends ReactiveMap {
   /** @param {import("./reactive.js").Context} ctx */
   constructor(ctx) {
     super(ctx, EntryKind.Cell);
@@ -381,7 +381,7 @@ export class CellMap extends ReactiveMap {
 
   /**
    * Return the value cell for `key`, minting it with `default` on first access.
-   * Convenience wrapper over {@link CellMap#entryWith}.
+   * Convenience wrapper over {@link SourceMap#entryWith}.
    * @param {K} key
    * @param {V} defaultValue
    * @returns {import("./reactive.js").CellHandle<V>}
@@ -394,7 +394,7 @@ export class CellMap extends ReactiveMap {
    * Set the value at `key`, inserting a new entry (and bumping membership) if it
    * does not exist yet. Updating an existing entry leaves membership untouched
    * and invalidates only that entry's dependents. Cell-only: an input is
-   * settable; a derived {@link SlotMap} slot is not.
+   * settable; a derived {@link ComputedMap} slot is not.
    * @param {K} key
    * @param {V} value
    */
@@ -411,13 +411,13 @@ export class CellMap extends ReactiveMap {
 /**
  * A keyed DERIVED-SLOT collection: every entry is a derived slot whose value is
  * derived. `getOrInsertWith` mints a slot on first access (lazy
- * materialization); {@link SlotMap#materializeAll} pre-mints the keyset (eager).
- * A slot's value is derived, so `SlotMap` has NO `set`.
+ * materialization); {@link ComputedMap#materializeAll} pre-mints the keyset (eager).
+ * A slot's value is derived, so `ComputedMap` has NO `set`.
  *
  * @template K, V
  * @extends {ReactiveMap<K, V>}
  */
-export class SlotMap extends ReactiveMap {
+export class ComputedMap extends ReactiveMap {
   /** @param {import("./reactive.js").Context} ctx */
   constructor(ctx) {
     super(ctx, EntryKind.Slot);
@@ -439,3 +439,17 @@ export class SlotMap extends ReactiveMap {
     }
   }
 }
+
+// Deprecated aliases (`#lzcellkernel`). The v2 kernel renamed the node kinds to
+// `Source` and `Computed`; these maps were named for the old `Cell` / `Slot`
+// vocabulary. The old names stay exported so existing imports keep working.
+
+/**
+ * @deprecated Renamed to {@link SourceMap}. Kept as an alias for compatibility.
+ */
+export const CellMap = SourceMap;
+
+/**
+ * @deprecated Renamed to {@link ComputedMap}. Kept as an alias for compatibility.
+ */
+export const SlotMap = ComputedMap;

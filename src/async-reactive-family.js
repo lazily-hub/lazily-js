@@ -14,8 +14,8 @@
 // `V | undefined`. Input cells are always resolved. Drive a slot to resolution
 // with `ctx.getAsync(map.get(key))` or {@link AsyncReactiveMap#resolve}.
 //
-// Its two specializations are {@link AsyncCellMap} (input cells) and
-// {@link AsyncSlotMap} (derived slots).
+// Its two specializations are {@link AsyncSourceMap} (input cells) and
+// {@link AsyncComputedMap} (derived slots).
 //
 // Rust reference: `lazily-rs/src/async_reactive_family.rs`.
 
@@ -159,12 +159,12 @@ export class AsyncReactiveMap {
 
 /**
  * An async INPUT-CELL map: every entry is an always-resolved input cell. The
- * async analog of {@link CellMap}. Adds cell-only `set`.
+ * async analog of {@link SourceMap}. Adds cell-only `set`.
  *
  * @template K, V
  * @extends {AsyncReactiveMap<K, V>}
  */
-export class AsyncCellMap extends AsyncReactiveMap {
+export class AsyncSourceMap extends AsyncReactiveMap {
   /** @param {import("./reactive-async.js").AsyncContext} ctx */
   constructor(ctx) {
     super(ctx, EntryKind.Cell);
@@ -187,13 +187,13 @@ export class AsyncCellMap extends AsyncReactiveMap {
 
 /**
  * An async DERIVED-SLOT map: entries are derived slots minted lazily on access
- * or eagerly via {@link AsyncSlotMap#materializeAll}, resolved via
- * `ctx.getAsync`. The async analog of {@link SlotMap}.
+ * or eagerly via {@link AsyncComputedMap#materializeAll}, resolved via
+ * `ctx.getAsync`. The async analog of {@link ComputedMap}.
  *
  * @template K, V
  * @extends {AsyncReactiveMap<K, V>}
  */
-export class AsyncSlotMap extends AsyncReactiveMap {
+export class AsyncComputedMap extends AsyncReactiveMap {
   /** @param {import("./reactive-async.js").AsyncContext} ctx */
   constructor(ctx) {
     super(ctx, EntryKind.Slot);
@@ -211,3 +211,15 @@ export class AsyncSlotMap extends AsyncReactiveMap {
     }
   }
 }
+
+// Deprecated aliases (`#lzcellkernel`) — see `./reactive-family.js`.
+
+/**
+ * @deprecated Renamed to {@link AsyncSourceMap}. Kept as an alias for compatibility.
+ */
+export const AsyncCellMap = AsyncSourceMap;
+
+/**
+ * @deprecated Renamed to {@link AsyncComputedMap}. Kept as an alias for compatibility.
+ */
+export const AsyncSlotMap = AsyncComputedMap;

@@ -6,9 +6,9 @@ import test from "node:test";
 
 import { AsyncContext } from "../src/reactive-async.js";
 import {
-  AsyncCellMap,
+  AsyncSourceMap,
   AsyncReactiveMap,
-  AsyncSlotMap,
+  AsyncComputedMap,
   EntryKind,
 } from "../src/async-reactive-family.js";
 
@@ -28,15 +28,15 @@ function assertSameSet(actual, expected, label) {
 }
 
 function eagerSlotMap(ctx, keys, factory) {
-  const map = new AsyncSlotMap(ctx);
+  const map = new AsyncComputedMap(ctx);
   map.materializeAll(keys, factory);
   return map;
 }
 
-// --- conformance replayed through the ASYNC SlotMap (eventual transparency) --
+// --- conformance replayed through the ASYNC ComputedMap (eventual transparency) --
 // A derived slot observes as `undefined` until driven; `resolve` awaits the
 // canonical value. Once resolved, eager ≡ lazy — the AsyncMaterialization proof.
-test("async SlotMap conformance: observational_transparency.json", async () => {
+test("async ComputedMap conformance: observational_transparency.json", async () => {
   const fixture = loadFixture("observational_transparency.json");
   const { spec, expected } = fixture;
   const keys = Object.keys(spec.val);
@@ -47,7 +47,7 @@ test("async SlotMap conformance: observational_transparency.json", async () => {
   const ctxE = new AsyncContext();
   const eager = eagerSlotMap(ctxE, keys, factory);
   const ctxL = new AsyncContext();
-  const lazy = new AsyncSlotMap(ctxL);
+  const lazy = new AsyncComputedMap(ctxL);
 
   // Present-set laws (allocation axis, unchanged by async resolution).
   assertSameSet(eager.presentKeys(), expected.eager_present, "eager_present");
@@ -60,12 +60,12 @@ test("async SlotMap conformance: observational_transparency.json", async () => {
   }
 
   const ctx2 = new AsyncContext();
-  const lazy2 = new AsyncSlotMap(ctx2);
+  const lazy2 = new AsyncComputedMap(ctx2);
   for (const key of fixture.reads) lazy2.getOrInsertHandle(key, factory);
   assertSameSet(lazy2.presentKeys(), expected.lazy_present_after_reads, "lazy_present_after_reads");
 });
 
-test("async SlotMap conformance: deferral_not_deallocation.json", async () => {
+test("async ComputedMap conformance: deferral_not_deallocation.json", async () => {
   const fixture = loadFixture("deferral_not_deallocation.json");
   const { spec, expected } = fixture;
   const factory = (k) => spec.val[k];
@@ -74,7 +74,7 @@ test("async SlotMap conformance: deferral_not_deallocation.json", async () => {
   const eager = eagerSlotMap(ctx, Object.keys(spec.val), factory);
   assertSameSet(eager.presentKeys(), expected.eager_present, "eager_present");
 
-  const lazy = new AsyncSlotMap(ctx);
+  const lazy = new AsyncComputedMap(ctx);
   const sizes = [];
   for (const key of fixture.reads) {
     assert.equal(await lazy.resolve(key, factory), spec.val[key], `resolve[${key}]`);
@@ -87,7 +87,7 @@ test("async SlotMap conformance: deferral_not_deallocation.json", async () => {
   assertSameSet(lazy.presentKeys(), expected.lazy_present_after_reads, "lazy_present_after_reads");
 });
 
-test("async conformance: entry_kind_orthogonal_to_mode.json (CellMap + SlotMap)", async () => {
+test("async conformance: entry_kind_orthogonal_to_mode.json (SourceMap + ComputedMap)", async () => {
   const fixture = loadFixture("entry_kind_orthogonal_to_mode.json");
   const { spec, expected } = fixture;
   const cellKeys = [];
@@ -98,9 +98,9 @@ test("async conformance: entry_kind_orthogonal_to_mode.json (CellMap + SlotMap)"
   }
 
   const ctxE = new AsyncContext();
-  const eagerCells = new AsyncCellMap(ctxE);
+  const eagerCells = new AsyncSourceMap(ctxE);
   for (const k of cellKeys) eagerCells.set(k, lookup(k));
-  const eagerSlots = new AsyncSlotMap(ctxE);
+  const eagerSlots = new AsyncComputedMap(ctxE);
   eagerSlots.materializeAll(slotKeys, lookup);
   assertSameSet(
     [...eagerCells.presentKeys(), ...eagerSlots.presentKeys()],
@@ -113,9 +113,9 @@ test("async conformance: entry_kind_orthogonal_to_mode.json (CellMap + SlotMap)"
   }
 
   const ctxL = new AsyncContext();
-  const lazyCells = new AsyncCellMap(ctxL);
+  const lazyCells = new AsyncSourceMap(ctxL);
   for (const k of cellKeys) lazyCells.set(k, lookup(k));
-  const lazySlots = new AsyncSlotMap(ctxL);
+  const lazySlots = new AsyncComputedMap(ctxL);
   assertSameSet(lazyCells.presentKeys(), expected.lazy_present_at_build, "lazy_present_at_build");
   assert.equal(lazySlots.presentCount(), 0, "slots deferred at build");
   for (const key of fixture.reads) {
@@ -132,7 +132,7 @@ test("async conformance: entry_kind_orthogonal_to_mode.json (CellMap + SlotMap)"
 // --- unit ------------------------------------------------------------------
 test("async: eventual transparency — pending observes undefined then resolves", async () => {
   const ctx = new AsyncContext();
-  const map = new AsyncSlotMap(ctx);
+  const map = new AsyncComputedMap(ctx);
   const h = map.getOrInsertHandle(4, (k) => k * 10);
   assert.ok(h);
   assert.equal(map.isPresent(4), true);
@@ -141,9 +141,9 @@ test("async: eventual transparency — pending observes undefined then resolves"
   assert.equal(map.observe(4), 40, "resolved slot observes the canonical value");
 });
 
-test("async: CellMap resolves immediately and reacts to set; SlotMap has no set", async () => {
+test("async: SourceMap resolves immediately and reacts to set; ComputedMap has no set", async () => {
   const ctx = new AsyncContext();
-  const cells = new AsyncCellMap(ctx);
+  const cells = new AsyncSourceMap(ctx);
   cells.set(10, true);
   cells.set(20, true);
   assert.equal(cells.entryKind(), EntryKind.Cell);
@@ -152,13 +152,13 @@ test("async: CellMap resolves immediately and reacts to set; SlotMap has no set"
   cells.set(20, false);
   assert.equal(cells.observe(20), false);
 
-  const slots = new AsyncSlotMap(ctx);
-  assert.equal(typeof slots.set, "undefined", "SlotMap has no set");
+  const slots = new AsyncComputedMap(ctx);
+  assert.equal(typeof slots.set, "undefined", "ComputedMap has no set");
 });
 
 test("async: present set grows monotonically, first-writer-wins handle", async () => {
   const ctx = new AsyncContext();
-  const map = new AsyncSlotMap(ctx);
+  const map = new AsyncComputedMap(ctx);
   const a = map.getOrInsertHandle(5, (k) => k);
   const b = map.getOrInsertHandle(5, (k) => k);
   assert.equal(a.id, b.id, "stable handle on re-get");

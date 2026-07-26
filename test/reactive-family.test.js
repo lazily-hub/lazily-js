@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 import { Context } from "../src/reactive.js";
-import { CellMap, EntryKind, ReactiveMap, SlotMap } from "../src/reactive-family.js";
+import { SourceMap, EntryKind, ReactiveMap, ComputedMap } from "../src/reactive-family.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const specMaterialization = join(here, "..", "..", "lazily-spec", "conformance", "materialization");
@@ -22,17 +22,17 @@ function assertSameSet(actual, expected, label) {
   assert.deepEqual(a, e, `${label}: set differs`);
 }
 
-// An eager SlotMap: pre-mint the whole keyset. A lazy SlotMap: empty, minted on
+// An eager ComputedMap: pre-mint the whole keyset. A lazy ComputedMap: empty, minted on
 // access via getOrInsertWith. There is no eager/lazy mode flag — eager is the
 // pre-mint loop, lazy is mint-on-access (#reactivemap).
 function eagerSlotMap(ctx, keys, factory) {
-  const map = new SlotMap(ctx);
+  const map = new ComputedMap(ctx);
   map.materializeAll(keys, factory);
   return map;
 }
 
 // --- conformance: observational_transparency.json --------------------------
-test("SlotMap materialization conformance: observational_transparency.json", () => {
+test("ComputedMap materialization conformance: observational_transparency.json", () => {
   const fixture = loadFixture("observational_transparency.json");
   const { spec, expected } = fixture;
   const keys = Object.keys(spec.val);
@@ -43,7 +43,7 @@ test("SlotMap materialization conformance: observational_transparency.json", () 
 
   const ctx = new Context();
   const eager = eagerSlotMap(ctx, keys, factory);
-  const lazy = new SlotMap(ctx);
+  const lazy = new ComputedMap(ctx);
 
   // eager_materializes_all: every declared key present up front.
   assertSameSet(eager.presentKeys(), expected.eager_present, "eager_present");
@@ -58,13 +58,13 @@ test("SlotMap materialization conformance: observational_transparency.json", () 
 
   // Rebuild a fresh lazy map to observe only the `reads` sequence.
   const ctx2 = new Context();
-  const lazy2 = new SlotMap(ctx2);
+  const lazy2 = new ComputedMap(ctx2);
   for (const key of fixture.reads) lazy2.getOrInsertWith(ctx2, key, factory);
   assertSameSet(lazy2.presentKeys(), expected.lazy_present_after_reads, "lazy_present_after_reads");
 });
 
 // --- conformance: deferral_not_deallocation.json ---------------------------
-test("SlotMap materialization conformance: deferral_not_deallocation.json", () => {
+test("ComputedMap materialization conformance: deferral_not_deallocation.json", () => {
   const fixture = loadFixture("deferral_not_deallocation.json");
   const { spec, expected } = fixture;
   const keys = Object.keys(spec.val);
@@ -74,7 +74,7 @@ test("SlotMap materialization conformance: deferral_not_deallocation.json", () =
   const eager = eagerSlotMap(ctx, keys, factory);
   assertSameSet(eager.presentKeys(), expected.eager_present, "eager_present");
 
-  const lazy = new SlotMap(ctx);
+  const lazy = new ComputedMap(ctx);
   const sizes = [];
   for (const key of fixture.reads) {
     const before = lazy.getOrInsertWith(ctx, key, factory); // materialize_preserves_observe
@@ -98,7 +98,7 @@ test("SlotMap materialization conformance: deferral_not_deallocation.json", () =
 
 // --- conformance: entry_kind_orthogonal_to_mode.json -----------------------
 // A single ReactiveMap fixes one handle kind, so a mixed-kind fixture is modelled
-// by a CellMap over the cell entries and a SlotMap over the slot entries —
+// by a SourceMap over the cell entries and a ComputedMap over the slot entries —
 // sharing one logical key space (mirrors the Rust conformance harness).
 test("materialization conformance: entry_kind_orthogonal_to_mode.json", () => {
   const fixture = loadFixture("entry_kind_orthogonal_to_mode.json");
@@ -112,9 +112,9 @@ test("materialization conformance: entry_kind_orthogonal_to_mode.json", () => {
 
   // Eager build: every entry present (cells + slots).
   const ctxE = new Context();
-  const eagerCells = new CellMap(ctxE);
+  const eagerCells = new SourceMap(ctxE);
   for (const k of cellKeys) eagerCells.entry(k, lookup(k));
-  const eagerSlots = new SlotMap(ctxE);
+  const eagerSlots = new ComputedMap(ctxE);
   eagerSlots.materializeAll(slotKeys, lookup);
   assert.equal(eagerCells.entryKind(), EntryKind.Cell);
   assert.equal(eagerSlots.entryKind(), EntryKind.Slot);
@@ -130,9 +130,9 @@ test("materialization conformance: entry_kind_orthogonal_to_mode.json", () => {
 
   // Lazy build: cells present at build (always materialized); slots deferred.
   const ctxL = new Context();
-  const lazyCells = new CellMap(ctxL);
+  const lazyCells = new SourceMap(ctxL);
   for (const k of cellKeys) lazyCells.entry(k, lookup(k));
-  const lazySlots = new SlotMap(ctxL);
+  const lazySlots = new ComputedMap(ctxL);
   assertSameSet(lazyCells.presentKeys(), expected.lazy_present_at_build, "lazy_present_at_build");
   assert.equal(lazySlots.presentCount(), 0, "slots deferred at build");
 
@@ -153,10 +153,10 @@ test("materialization conformance: entry_kind_orthogonal_to_mode.json", () => {
   }
 });
 
-// --- unit: CellMap eager value-minting + membership reactivity --------------
-test("CellMap: entry caches one cell per key; get_or_insert mints once", () => {
+// --- unit: SourceMap eager value-minting + membership reactivity --------------
+test("SourceMap: entry caches one cell per key; get_or_insert mints once", () => {
   const ctx = new Context();
-  const map = new CellMap(ctx);
+  const map = new SourceMap(ctx);
   const a1 = map.entry("a", 1);
   const a2 = map.entry("a", 999);
   assert.equal(a1.id, a2.id, "same key -> same cell; second default ignored");
@@ -186,9 +186,9 @@ test("CellMap: entry caches one cell per key; get_or_insert mints once", () => {
   assert.equal(map.getOrInsertWith(ctx, "b", () => 0), 42);
 });
 
-test("CellMap: membership is reactive but value changes are not", () => {
+test("SourceMap: membership is reactive but value changes are not", () => {
   const ctx = new Context();
-  const map = new CellMap(ctx);
+  const map = new SourceMap(ctx);
   const a = map.entry("a", 1);
   map.entry("b", 2);
 
@@ -212,7 +212,7 @@ test("CellMap: membership is reactive but value changes are not", () => {
 
 test("ReactiveMap: per-entry reads are independent", () => {
   const ctx = new Context();
-  const map = new CellMap(ctx);
+  const map = new SourceMap(ctx);
   const a = map.entry("a", 1);
   const b = map.entry("b", 2);
 
@@ -229,9 +229,9 @@ test("ReactiveMap: per-entry reads are independent", () => {
   assert.equal(ctx.get(viewA), 50);
 });
 
-test("SlotMap: mints lazily on pull and caches (no re-mint)", () => {
+test("ComputedMap: mints lazily on pull and caches (no re-mint)", () => {
   const ctx = new Context();
-  const map = new SlotMap(ctx);
+  const map = new ComputedMap(ctx);
   assert.equal(map.presentCount(), 0);
   assert.equal(map.isPresent(7), false);
   assert.equal(map.getOrInsertWith(ctx, 7, (k) => k * 2), 14);
@@ -242,9 +242,9 @@ test("SlotMap: mints lazily on pull and caches (no re-mint)", () => {
   assert.equal(map.getOrInsertWith(ctx, 7, (k) => k * 999), 14, "factory not re-run");
 });
 
-test("SlotMap: materializeAll is eager", () => {
+test("ComputedMap: materializeAll is eager", () => {
   const ctx = new Context();
-  const map = new SlotMap(ctx);
+  const map = new ComputedMap(ctx);
   map.materializeAll([0, 1, 2, 5, 9], (k) => k * 3);
   assert.equal(map.presentCount(), 5);
   for (const k of [0, 1, 2, 5, 9]) assert.ok(map.isPresent(k));
@@ -252,10 +252,10 @@ test("SlotMap: materializeAll is eager", () => {
   assert.equal(map.entryKind(), EntryKind.Slot);
 });
 
-test("SlotMap has no set; ReactiveMap default kind is Slot", () => {
+test("ComputedMap has no set; ReactiveMap default kind is Slot", () => {
   const ctx = new Context();
-  const map = new SlotMap(ctx);
-  assert.equal(typeof map.set, "undefined", "SlotMap has no set");
+  const map = new ComputedMap(ctx);
+  assert.equal(typeof map.set, "undefined", "ComputedMap has no set");
   const plain = new ReactiveMap(ctx);
   assert.equal(plain.entryKind(), EntryKind.Slot, "default kind is Slot");
 });
@@ -263,7 +263,7 @@ test("SlotMap has no set; ReactiveMap default kind is Slot", () => {
 // --- unit: atomic move (#lzcellmove) ---------------------------------------
 test("moveTo reorders keys and keeps cell identity", () => {
   const ctx = new Context();
-  const map = new CellMap(ctx);
+  const map = new SourceMap(ctx);
   const a = map.entry("a", 1);
   map.entry("b", 2);
   map.entry("c", 3);
@@ -284,7 +284,7 @@ test("moveTo reorders keys and keeps cell identity", () => {
 
 test("pure move invalidates order but not membership readers", () => {
   const ctx = new Context();
-  const map = new CellMap(ctx);
+  const map = new SourceMap(ctx);
   map.entry("a", 1);
   map.entry("b", 2);
   map.entry("c", 3);
@@ -307,7 +307,7 @@ test("pure move invalidates order but not membership readers", () => {
 
 test("moveBefore / moveAfter place relative to anchor", () => {
   const ctx = new Context();
-  const map = new CellMap(ctx);
+  const map = new SourceMap(ctx);
   for (let k = 0; k < 4; k++) map.entry(k, k * 10);
   assert.deepEqual(map.keys(ctx), [0, 1, 2, 3]);
 
@@ -323,7 +323,7 @@ test("moveBefore / moveAfter place relative to anchor", () => {
 
 test("containsKey tracks membership", () => {
   const ctx = new Context();
-  const map = new CellMap(ctx);
+  const map = new SourceMap(ctx);
   const has5 = ctx.computed((c) => map.containsKey(c, 5));
   assert.ok(!ctx.get(has5));
   map.entry(5, 50);

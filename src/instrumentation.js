@@ -12,7 +12,7 @@
 // dev-only criterion-style suite that generates BENCHMARKS.md lives in `bench/`.
 
 import { Context } from "./reactive.js";
-import { SlotMap } from "./reactive-family.js";
+import { ComputedMap } from "./reactive-family.js";
 
 function nowMicros() {
   const perf = globalThis.performance;
@@ -160,7 +160,7 @@ export function runBenchmarkSuite(iterations = 1000) {
     void sink;
   }
 
-  // keyed map materialize-on-pull (lazy SlotMap).
+  // keyed map materialize-on-pull (lazy ComputedMap).
   {
     const ctx = new Context();
     let k = 0;
@@ -168,7 +168,7 @@ export function runBenchmarkSuite(iterations = 1000) {
       benchmark(
         "family_materialize",
         () => {
-          const map = new SlotMap(ctx);
+          const map = new ComputedMap(ctx);
           map.getOrInsertWith(ctx, (k = (k + 1) & 1023), (key) => key * 2);
         },
         iterations,

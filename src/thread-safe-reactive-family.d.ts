@@ -11,8 +11,8 @@ export type MapHandle<V> = CellHandle<V> | SlotHandle<V>;
  * The thread-safe keyed reactive collection (`#reactivemap`, thread-safe flavor):
  * keys map to per-entry reactive nodes on a {@link ThreadSafeContext}. Present-set
  * state is guarded by a mutex; materialization is confluent under concurrent
- * access. Its two specializations are {@link ThreadSafeCellMap} and
- * {@link ThreadSafeSlotMap}.
+ * access. Its two specializations are {@link ThreadSafeSourceMap} and
+ * {@link ThreadSafeComputedMap}.
  */
 export class ThreadSafeReactiveMap<K = unknown, V = unknown> {
   constructor(ctx: ThreadSafeContext, kind?: EntryKind);
@@ -39,7 +39,7 @@ export class ThreadSafeReactiveMap<K = unknown, V = unknown> {
  * The thread-safe input-cell map: every entry is an always-materialized input
  * cell. Adds cell-only `set`.
  */
-export class ThreadSafeCellMap<K = unknown, V = unknown> extends ThreadSafeReactiveMap<K, V> {
+export class ThreadSafeSourceMap<K = unknown, V = unknown> extends ThreadSafeReactiveMap<K, V> {
   constructor(ctx: ThreadSafeContext);
   /** Set the value at `key`, inserting a new input cell if absent. Cell-only. */
   set(key: K, value: V): void;
@@ -49,8 +49,26 @@ export class ThreadSafeCellMap<K = unknown, V = unknown> extends ThreadSafeReact
  * The thread-safe derived-slot map: entries are derived slots minted lazily on
  * access or eagerly via `materializeAll`. NO `set`.
  */
-export class ThreadSafeSlotMap<K = unknown, V = unknown> extends ThreadSafeReactiveMap<K, V> {
+export class ThreadSafeComputedMap<K = unknown, V = unknown> extends ThreadSafeReactiveMap<K, V> {
   constructor(ctx: ThreadSafeContext);
   /** Eager materialization: pre-mint a derived slot for every key in `keys`. */
   materializeAll(keys: Iterable<K>, factory: (key: K) => V): void;
 }
+
+/**
+ * @deprecated Renamed to {@link ThreadSafeSourceMap}. Kept as an alias for compatibility.
+ */
+export const ThreadSafeCellMap: typeof ThreadSafeSourceMap;
+/**
+ * @deprecated Renamed to {@link ThreadSafeSourceMap}. Kept as an alias for compatibility.
+ */
+export type ThreadSafeCellMap<K = unknown, V = unknown> = ThreadSafeSourceMap<K, V>;
+
+/**
+ * @deprecated Renamed to {@link ThreadSafeComputedMap}. Kept as an alias for compatibility.
+ */
+export const ThreadSafeSlotMap: typeof ThreadSafeComputedMap;
+/**
+ * @deprecated Renamed to {@link ThreadSafeComputedMap}. Kept as an alias for compatibility.
+ */
+export type ThreadSafeSlotMap<K = unknown, V = unknown> = ThreadSafeComputedMap<K, V>;

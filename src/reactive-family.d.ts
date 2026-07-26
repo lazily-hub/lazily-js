@@ -18,8 +18,8 @@ export type MapHandle<V> = CellHandle<V> | SlotHandle<V>;
 /**
  * A keyed reactive collection generic over the entry handle kind (`#reactivemap`):
  * reactive membership + order, `getOrInsertWith` mint-on-access, `remove`, and
- * atomic `move`. Its two specializations are {@link CellMap} (input cells) and
- * {@link SlotMap} (derived slots).
+ * atomic `move`. Its two specializations are {@link SourceMap} (input cells) and
+ * {@link ComputedMap} (derived slots).
  */
 export class ReactiveMap<K = unknown, V = unknown> {
   constructor(ctx: Context, kind?: EntryKind);
@@ -68,7 +68,7 @@ export class ReactiveMap<K = unknown, V = unknown> {
  * The input-cell specialization of {@link ReactiveMap}: adds cell-only `set` and
  * eager value-minting (`entry` / `entryWith`).
  */
-export class CellMap<K = unknown, V = unknown> extends ReactiveMap<K, V> {
+export class SourceMap<K = unknown, V = unknown> extends ReactiveMap<K, V> {
   constructor(ctx: Context);
   /** Return the cell for `key`, minting with `defaultFn()` on first access. */
   entryWith(key: K, defaultFn: () => V): CellHandle<V>;
@@ -83,8 +83,26 @@ export class CellMap<K = unknown, V = unknown> extends ReactiveMap<K, V> {
  * a slot on first access (lazy); `materializeAll` pre-mints the keyset (eager).
  * NO `set`.
  */
-export class SlotMap<K = unknown, V = unknown> extends ReactiveMap<K, V> {
+export class ComputedMap<K = unknown, V = unknown> extends ReactiveMap<K, V> {
   constructor(ctx: Context);
   /** Eager materialization: pre-mint a derived slot for every key in `keys`. */
   materializeAll(keys: Iterable<K>, factory: (key: K) => V): void;
 }
+
+/**
+ * @deprecated Renamed to {@link SourceMap}. Kept as an alias for compatibility.
+ */
+export const CellMap: typeof SourceMap;
+/**
+ * @deprecated Renamed to {@link SourceMap}. Kept as an alias for compatibility.
+ */
+export type CellMap<K = unknown, V = unknown> = SourceMap<K, V>;
+
+/**
+ * @deprecated Renamed to {@link ComputedMap}. Kept as an alias for compatibility.
+ */
+export const SlotMap: typeof ComputedMap;
+/**
+ * @deprecated Renamed to {@link ComputedMap}. Kept as an alias for compatibility.
+ */
+export type SlotMap<K = unknown, V = unknown> = ComputedMap<K, V>;
