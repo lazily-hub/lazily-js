@@ -101,6 +101,10 @@ export class AsyncEffectHandle {
   }
 }
 
+/**
+ * @deprecated Retired by the Cell kernel; retained as staged compatibility
+ * pending eager AsyncComputed support.
+ */
 export class AsyncSignalHandle {
   /** @internal */ constructor(slot, effect) {
     this.slot = slot;
@@ -247,6 +251,7 @@ export class AsyncContext {
     return new AsyncEffectHandle(id);
   }
 
+  /** @deprecated Staged compatibility pending eager AsyncComputed support. */
   signalAsync(compute) {
     const slotId = this.#allocId();
     this.#nodes[slotId] = new AsyncSlotNode(compute, true);
@@ -370,10 +375,12 @@ export class AsyncContext {
     }
   }
 
+  /** @deprecated Signal handles are retired by the Cell kernel. */
   getSignal(handle) {
     return this.get(handle.slot);
   }
 
+  /** @deprecated Signal handles are retired by the Cell kernel. */
   getSignalAsync(handle) {
     return this.getAsync(handle.slot);
   }
@@ -570,10 +577,12 @@ export class AsyncContext {
     }
   }
 
+  /** @deprecated Signal handles are retired by the Cell kernel. */
   disposeSignal(handle) {
     return this.disposeAsyncEffect(handle.effect);
   }
 
+  /** @deprecated Signal handles are retired by the Cell kernel. */
   isSignalActive(handle) {
     return this.isEffectActive(handle.effect);
   }
@@ -1001,7 +1010,7 @@ export class AsyncTeardownScope {
     return this.adopt(this.#ctx.memoAsync(compute));
   }
 
-  /** Create an eager async signal owned by this scope. */
+  /** @deprecated Staged compatibility pending eager AsyncComputed support. */
   signalAsync(compute) {
     return this.adopt(this.#ctx.signalAsync(compute));
   }

@@ -174,6 +174,7 @@ export class ThreadSafeContext {
     return this.#mutex.runExclusive(() => this.#ctx.computed(compute));
   }
 
+  /** @deprecated Use an eager Computed when the thread-safe plane exposes it. */
   signal(compute) {
     return this.#mutex.runExclusive(() => this.#ctx.signal(compute));
   }
@@ -194,6 +195,7 @@ export class ThreadSafeContext {
     return this.#mutex.runExclusive(() => this.#ctx.get(handle));
   }
 
+  /** @deprecated Signal handles are retired by the Cell kernel. */
   getSignal(handle) {
     return this.#mutex.runExclusive(() => this.#ctx.getSignal(handle));
   }
@@ -355,6 +357,7 @@ export class ThreadSafeTeardownScope {
     return this.#mutex.runExclusive(() => this.#inner.computed(compute));
   }
 
+  /** @deprecated Use an eager Computed when the thread-safe plane exposes it. */
   signal(compute) {
     return this.#mutex.runExclusive(() => this.#inner.signal(compute));
   }

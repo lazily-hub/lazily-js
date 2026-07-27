@@ -699,6 +699,7 @@ function createContext(opts = {}) {
     return getCellAny(handle.id);
   }
 
+  /** @deprecated Signal handles are retired; read an eager Computed with `get`. */
   function getSignal(handle) {
     return get(handle.slot);
   }

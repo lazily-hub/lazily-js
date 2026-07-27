@@ -207,6 +207,7 @@ export interface Context {
   // -- Deprecated split read/write --
   /** @deprecated use {@link get} — the unified cell read (#lzcellkernel). */
   getCell<T>(handle: Source<T>): T;
+  /** @deprecated Signal handles are retired; read an eager {@link Computed} with {@link get}. */
   getSignal<T>(handle: SignalHandle<T>): T;
   /** @deprecated use {@link set} — the unified cell write (#lzcellkernel). */
   setCell<T>(handle: Source<T>, value: T): void;

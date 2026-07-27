@@ -50,6 +50,7 @@ export class ThreadSafeContext {
   cell<T>(value: T): CellHandle<T>;
   /** @deprecated use {@link ThreadSafeContext#computed} (guarded, the only derived construction). */
   slot<T>(compute: () => T): SlotHandle<T>;
+  /** @deprecated Use an eager Computed when the thread-safe plane exposes it. */
   signal<T>(compute: () => T): SignalHandle<T>;
   effect(run: () => void | (() => void)): EffectHandle;
 
@@ -58,6 +59,7 @@ export class ThreadSafeContext {
   set<T>(handle: CellHandle<T>, value: T): void;
   /** @deprecated use {@link ThreadSafeContext#get} — the unified cell read (#lzcellkernel). */
   getCell<T>(handle: CellHandle<T>): T;
+  /** @deprecated Signal handles are retired by the Cell kernel. */
   getSignal<T>(handle: SignalHandle<T>): T;
   isSet<T>(handle: SlotHandle<T>): boolean;
 
@@ -100,6 +102,7 @@ export class ThreadSafeTeardownScope {
   /** @deprecated use {@link ThreadSafeTeardownScope#source}. */
   cell<T>(value: T): CellHandle<T>;
   computed<T>(compute: () => T): SlotHandle<T>;
+  /** @deprecated Use an eager Computed when the thread-safe plane exposes it. */
   signal<T>(compute: () => T): SignalHandle<T>;
   effect(run: () => void | (() => void)): EffectHandle;
   disarm(): void;

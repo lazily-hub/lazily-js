@@ -9,7 +9,7 @@ export interface AsyncComputeContext {
   getCell<T>(handle: AsyncSource<T>): T;
   /** Await a slot value, recording it as a dependency before awaiting. */
   getAsync<T>(handle: AsyncComputed<T>): Promise<T>;
-  /** Await a signal value, recording its slot as a dependency before awaiting. */
+  /** @deprecated Signal handles are staged compatibility pending eager async computeds. */
   getSignalAsync<T>(handle: AsyncSignalHandle<T>): Promise<T>;
 }
 
@@ -44,6 +44,10 @@ export class AsyncEffectHandle {
   readonly id: number;
 }
 
+/**
+ * @deprecated Retired by the Cell kernel; retained as staged compatibility
+ * pending eager {@link AsyncComputed} support.
+ */
 export class AsyncSignalHandle<T = unknown> {
   /** @internal */ constructor(slot: AsyncComputed<T>, effect: AsyncEffectHandle);
   readonly slot: AsyncComputed<T>;
@@ -66,7 +70,7 @@ export class AsyncContext {
   computedAsync<T>(compute: AsyncComputeFn<T>): AsyncComputed<T>;
   /** Create an async computed slot with an equality memo guard. */
   memoAsync<T>(compute: AsyncComputeFn<T>): AsyncComputed<T>;
-  /** Create an eager async signal (memo slot + puller effect). */
+  /** @deprecated Staged compatibility pending eager {@link AsyncComputed} support. */
   signalAsync<T>(compute: AsyncComputeFn<T>): AsyncSignalHandle<T>;
   /** Create an async effect returning an optional (possibly async) cleanup. */
   effectAsync(run: AsyncEffectRun): AsyncEffectHandle;
@@ -82,7 +86,9 @@ export class AsyncContext {
   slotState<T>(handle: AsyncComputed<T>): AsyncSlotStateView;
   /** Await a slot value (fast path via `get()`, else spawn/attach). */
   getAsync<T>(handle: AsyncComputed<T>): Promise<T>;
+  /** @deprecated Signal handles are retired by the Cell kernel. */
   getSignal<T>(handle: AsyncSignalHandle<T>): T | undefined;
+  /** @deprecated Signal handles are retired by the Cell kernel. */
   getSignalAsync<T>(handle: AsyncSignalHandle<T>): Promise<T>;
 
   /** Synchronous batch boundary; async reruns are scheduled at batch exit. */
@@ -93,7 +99,9 @@ export class AsyncContext {
   /** Dispose an async effect and await its cleanup. */
   disposeAsyncEffect(handle: AsyncEffectHandle): Promise<void>;
   isEffectActive(handle: AsyncEffectHandle): boolean;
+  /** @deprecated Signal handles are retired by the Cell kernel. */
   disposeSignal(handle: AsyncSignalHandle<unknown>): Promise<void>;
+  /** @deprecated Signal handles are retired by the Cell kernel. */
   isSignalActive(handle: AsyncSignalHandle<unknown>): boolean;
   /** Dispose the context: abort in-flight work and await active cleanups. */
   dispose(): Promise<void>;
@@ -145,6 +153,7 @@ export class AsyncTeardownScope {
   cell<T>(value: T): AsyncSource<T>;
   computedAsync<T>(compute: AsyncComputeFn<T>): AsyncComputed<T>;
   memoAsync<T>(compute: AsyncComputeFn<T>): AsyncComputed<T>;
+  /** @deprecated Staged compatibility pending eager {@link AsyncComputed} support. */
   signalAsync<T>(compute: AsyncComputeFn<T>): AsyncSignalHandle<T>;
   effectAsync(run: AsyncEffectRun): AsyncEffectHandle;
   /** Cancel this scope's teardown; the nodes themselves are untouched. */
