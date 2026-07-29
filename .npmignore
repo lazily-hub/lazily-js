@@ -5,3 +5,4 @@ Makefile
 test/
 scripts/
 .tsift/
+build/
