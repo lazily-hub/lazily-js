@@ -989,3 +989,21 @@ export class CommandRpcClient {
   ingestReceipt(receipt: CausalReceipt): CommandApplyStatus;
   pollCall(commandId: string): CallState;
 }
+
+export {
+  MAX_U64,
+  RevisionBarrier,
+  Timeout,
+  TimeoutOperation,
+  Timer,
+  TimerError,
+  checkedDeadline,
+} from "./stdlib.js";
+export type {
+  CancellationState,
+  LogicalClock,
+  RevisionBarrierObservation,
+  TimeoutObservation,
+  TimeoutOperationValue,
+  TimerObservation,
+} from "./stdlib.js";

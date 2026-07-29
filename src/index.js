@@ -2608,3 +2608,13 @@ export class CommandRpcClient {
       : { kind: CallStateKind.Pending };
   }
 }
+
+export {
+  MAX_U64,
+  RevisionBarrier,
+  Timeout,
+  TimeoutOperation,
+  Timer,
+  TimerError,
+  checkedDeadline,
+} from "./stdlib.js";
