@@ -3,7 +3,7 @@ import {
   Delta,
   CrdtSync,
   IpcMessage,
-  IpcValue,
+  IpcValueValue,
   ShmBlobRef,
   Snapshot,
 } from "./index.js";
@@ -64,16 +64,19 @@ export class ArrowBackend extends BlobBackend {
 export class BlobRouter {
   register(backend: BlobBackend): this;
   readView(ref: ShmBlobRef): BlobView;
-  resolve(value: IpcValue): BlobView;
+  resolve(value: IpcValueValue): BlobView;
 }
 
 export function spillValue(
-  value: IpcValue,
+  value: IpcValueValue,
   backend: BlobBackend,
   threshold?: number,
-): { value: IpcValue; spilled: number };
+): { value: IpcValueValue; spilled: number };
 
-export function resolveValue(value: IpcValue, backend: BlobBackend): BlobView;
+export function resolveValue(
+  value: IpcValueValue,
+  backend: BlobBackend,
+): BlobView;
 
 export function spillMessage(
   message: IpcMessage,

@@ -1,10 +1,14 @@
-.PHONY: check bench bench-scale benchmark benchmark-update benchmark-check
+.PHONY: check typecheck bench bench-scale benchmark benchmark-update benchmark-check
 
 check:
 	npm run build
+	npm run typecheck
 	npm test
 	npm run test:interop-peer
 	./scripts/check-conformance-coverage.sh
+
+typecheck:
+	npm run typecheck
 
 bench:
 	node bench/context.bench.mjs

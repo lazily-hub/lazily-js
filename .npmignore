@@ -1,5 +1,6 @@
 AGENTS.md
 Makefile
+tsconfig.json
 .env
 .env.*
 test/

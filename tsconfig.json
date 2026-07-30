@@ -1,0 +1,30 @@
+// Declaration-only typecheck gate (`npm run typecheck`).
+//
+// This project ships hand-written `.d.ts` files next to plain JavaScript.
+// `npm run build` runs `node --check` on every entry point, which proves the
+// JS *parses* and says nothing at all about the declarations — so
+// src/transport.d.ts carried four TS2749s (the `IpcValue` const factory used
+// in type position instead of the `IpcValueValue` union) through every green
+// build until this gate existed. A published type error is invisible here and
+// breaks every TypeScript consumer, so it needs its own gate.
+//
+// Deliberately narrow: it typechecks the shipped declarations only. It does not
+// try to typecheck `src/*.js` (`allowJs`/`checkJs` stay off) — that is a much
+// larger job and not what this gate is for.
+{
+  "compilerOptions": {
+    "noEmit": true,
+    "strict": true,
+    "target": "es2022",
+    "lib": ["es2022", "dom"],
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    // The whole point of the gate: do not skip checking `.d.ts` files.
+    "skipLibCheck": false,
+    "allowJs": false,
+    "checkJs": false,
+    "forceConsistentCasingInFileNames": true,
+    "types": ["node"]
+  },
+  "include": ["src/**/*.d.ts"]
+}

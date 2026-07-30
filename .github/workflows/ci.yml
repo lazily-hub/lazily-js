@@ -32,11 +32,30 @@ jobs:
       - name: Install dependencies
         run: npm ci || npm install
 
-      # `npm run build` is this repo's lint/typecheck equivalent: it syntax-checks
+      # `npm run build` is this repo's lint equivalent for the JS: it syntax-checks
       # every published entry point with `node --check` and regenerates the
       # size-limit budgets. There is no separate lint script.
       - name: Build (syntax check every entry point)
         run: npm run build
+
+      # Declaration gate. `node --check` proves the JS *parses* and says nothing
+      # about the hand-written `.d.ts` we publish alongside it, so a type error
+      # in the shipped declarations was invisible to every green run — and it
+      # breaks every TypeScript consumer. src/transport.d.ts carried four
+      # TS2749s (the `IpcValue` const factory used in type position instead of
+      # the `IpcValueValue` union) until this gate existed. Narrow by design:
+      # declarations only, and `skipLibCheck` is off so the `.d.ts` are actually
+      # checked rather than trusted.
+      - name: Typecheck shipped declarations
+        run: |
+          npm run typecheck || { echo "::error::shipped .d.ts do not typecheck"; exit 1; }
+
+          # A gate whose program is empty also exits 0. Require it to have really
+          # loaded the shipped declarations.
+          files="$(./node_modules/.bin/tsc -p tsconfig.json --listFiles | grep -c "$PWD/src/" || true)"
+          echo "typechecked $files shipped declaration files"
+          [ "$files" -gt 0 ] || {
+            echo "::error::typecheck program contained no src/ declarations — it checked nothing"; exit 1; }
 
       - name: Assert size budgets are committed and current
         run: npm run size:check
