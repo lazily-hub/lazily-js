@@ -129,3 +129,82 @@ jobs:
 
       - name: Formal model check
         run: npm run test:formal
+
+      # ---------------------------------------------------------------------
+      # Conformance ladder, rungs 1-4 (#lzguardsnotinci).
+      #
+      # `make check` runs these four rungs locally; CI ran only `npm test` and
+      # therefore enforced NONE of them. A guard that exists in the repo and
+      # never runs on a push is not a guard, it is a comment — the whole point
+      # of this ladder is to reject exactly that kind of unproven claim, so it
+      # cannot be exempt from it.
+      #
+      #   rung 1  scripts/check-conformance-coverage.sh  — fixture FILE opened
+      #   rung 2  scripts/check-assertion-keys.mjs       — every key READ
+      #   rung 3  scripts/check-assertion-keys.mjs       — every key ASSERTED
+      #   rung 4  scripts/check-scenario-coverage.mjs    — every SCENARIO replayed
+      #
+      # Rungs 2 and 3 are the two halves of one script and are invoked as one
+      # step, exactly as the Makefile invokes them.
+      #
+      # None of these run inside `npm test`. Each audits an evidence file the
+      # recorder (`test/support/conformance-manifest.cjs`, a CJS `--require`
+      # preload) writes DURING `npm test`, and the recorder is a no-op unless
+      # the three manifest env vars are set. The `test` script in package.json
+      # sets all three and truncates all three before `node --test`, so the
+      # "Test (assert fixtures actually ran)" step above is what produces the
+      # evidence these steps read — same as locally, where `make check` runs
+      # `npm test` before the guards. No env var is set here for that reason:
+      # setting one HERE and not there would point the guards at a file the
+      # recorder never wrote.
+      # ---------------------------------------------------------------------
+
+      # The evidence must exist before anything audits it. Each guard already
+      # fails on an absent or empty manifest, but that failure reads as "the
+      # guard is broken"; this names the real cause — the recorder was not
+      # attached to the test run — and proves the coupling between the test
+      # step and these steps is live rather than assumed.
+      - name: Assert the conformance recorder produced evidence (#lzguardsnotinci)
+        run: |
+          for f in build/conformance-fixtures-loaded.txt \
+                   build/conformance-assertion-keys.txt \
+                   build/conformance-scenarios.txt; do
+            test -s "$f" || {
+              echo "::error::$f is missing or empty — \`npm test\` ran without the"
+              echo "::error::conformance recorder preloaded, so rungs 1-4 below would be"
+              echo "::error::auditing nothing. Check the \`test\` script in package.json."
+              exit 1; }
+            echo "$f: $(wc -l < "$f") record(s)"
+          done
+
+      # All three guards exit 0 with `SKIP:` when ../lazily-spec/conformance is
+      # absent, so that they stay usable in a checkout without the sibling. In
+      # CI that escape hatch is a vacuous green, and the clone + presence guard
+      # above is what closes it — this greps for the skip line anyway, so the
+      # two can never drift apart silently.
+      - name: Rung 1 — canonical fixtures were OPENED (#portconformancecoverage)
+        run: |
+          set -o pipefail
+          ./scripts/check-conformance-coverage.sh 2>&1 | tee rung1.txt
+          grep -q '^SKIP:' rung1.txt && {
+            echo "::error::rung 1 skipped — the canonical corpus was not found, so it checked nothing"
+            exit 1; }
+          exit 0
+
+      - name: Rungs 2-3 — assertion keys were READ and ASSERTED (#lzassertunknownkeys, #lzconsumednotasserted)
+        run: |
+          set -o pipefail
+          node scripts/check-assertion-keys.mjs 2>&1 | tee rung23.txt
+          grep -q '^SKIP:' rung23.txt && {
+            echo "::error::rungs 2-3 skipped — the canonical corpus was not found, so they checked nothing"
+            exit 1; }
+          exit 0
+
+      - name: Rung 4 — every fixture SCENARIO was replayed (#lzscenariocoverage)
+        run: |
+          set -o pipefail
+          node scripts/check-scenario-coverage.mjs 2>&1 | tee rung4.txt
+          grep -q '^SKIP:' rung4.txt && {
+            echo "::error::rung 4 skipped — the canonical corpus was not found, so it checked nothing"
+            exit 1; }
+          exit 0
