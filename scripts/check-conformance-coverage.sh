@@ -27,6 +27,15 @@ fi
 # Fixtures deliberately not covered by this binding yet. Each entry is a claim that
 # someone looked; shrinking this list is the work. Adding to it silently is how the
 # guard rots, so keep a reason with any new entry.
+#
+# This is the coarsest of three allowlists at three resolutions. Read it together
+# with `EXCUSED_SCENARIOS` in scripts/check-scenario-coverage.mjs (individual
+# scenarios of a fixture this binding DOES open, #lzscenariocoverage) and
+# `DECLARED_UNCONSUMED` in scripts/check-assertion-keys.mjs (individual assertion
+# keys it does not consume). Between them they are the complete statement of what
+# lazily-js does not prove against the canonical corpus. A scenario of a fixture
+# listed HERE must not also appear in EXCUSED_SCENARIOS — that guard rejects it,
+# because the fixture is never opened and the gap is already reported on this line.
 KNOWN_UNCOVERED=(
   "arena_blob.json"
   "reliable-sync/coalesce_bounds_outbox.json"

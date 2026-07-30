@@ -46,6 +46,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { assertKeyWith } from "../support/assert-key.js";
+import { recordScenario } from "../support/scenario.js";
 import { ComputeFailedError, DisposedNodeError } from "./models.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -639,6 +640,7 @@ export async function replayFixture(model, name, fixture, assertFn, divergences)
   let checks = 0;
 
   for (const scenario of scenarios) {
+    recordScenario(scenario);
     const label = `${model.name}/${name}[${scenario.name ?? "?"}]`;
     const r = await replaySteps(model, scenario.steps ?? [], label, assertFn, divergences, tail);
     ops += r.ops;

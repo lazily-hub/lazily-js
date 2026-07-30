@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 import { assertKey, assertKeyWith } from "./support/assert-key.js";
+import { scenarios } from "./support/scenario.js";
 
 import { CrdtSync } from "../src/index.js";
 import { CrdtPlaneRuntime } from "../src/distributed.js";
@@ -42,7 +43,7 @@ test("family-granularity sync: materialize on ingest (#lzfamilysync)", () => {
   const namespace = fixture.namespace;
   assert.equal(fixture.value_type, "bool", "this harness replays the bool value_type");
 
-  for (const scenario of fixture.scenarios) {
+  for (const scenario of scenarios(fixture)) {
     const name = scenario.name;
 
     const origin = new CrdtPlaneRuntime(scenario.origin_peer);

@@ -11,11 +11,15 @@
 // caught even if its source still names it. Editing call sites would record what
 // each site claims to load.
 //
-// Two manifests are produced:
+// Three manifests are produced:
 //
-//   LAZILY_CONFORMANCE_MANIFEST      — which fixtures were opened.
-//   LAZILY_CONFORMANCE_KEY_MANIFEST  — which assertion KEYS inside those fixtures
-//                                      were actually read (#lzassertunknownkeys).
+//   LAZILY_CONFORMANCE_MANIFEST          — which fixtures were opened.
+//   LAZILY_CONFORMANCE_KEY_MANIFEST      — which assertion KEYS inside those
+//                                          fixtures were actually read
+//                                          (#lzassertunknownkeys).
+//   LAZILY_CONFORMANCE_SCENARIO_MANIFEST — which SCENARIOS inside those fixtures
+//                                          were actually replayed
+//                                          (#lzscenariocoverage).
 //
 // The second is a level below the first. "The fixture was replayed" does not mean
 // "the assertion the fixture exists for was checked": a runner that reads named
@@ -47,6 +51,22 @@
 // against a literal reads the key and never routes through the helper, so it
 // stays unasserted and the guard names it.
 //
+// The scenario ledger is the rung above all of that (#lzscenariocoverage). A
+// fixture with several named scenarios can be PARTIALLY replayed and nothing
+// notices: rung 1 asks only whether the FILE was opened, and rungs 2-3 bind only
+// the blocks a runner reaches, so an unreplayed scenario contributes no
+// unconsumed and no unasserted key. Worse, key records are keyed by
+// `fixture\tblock\tkey`, so sibling scenarios sharing an `expect` key name mask
+// each other outright — `collections/stableid_alignment.json` had a scenario
+// this runner never touched, hidden behind another scenario's `key_equal`.
+//
+// So this recorder also registers every element of a `scenarios` array against
+// its fixture, resolving the scenario's id in the corpus-wide fixed order
+// (`id`, else `name`, else the positional index spelled `#<n>`), and exposes a
+// channel the runner marks a replay through. The registration is what lets the
+// runner mark WITHOUT naming its own fixture, exactly as `blockOwner` does for
+// keys — a runner that names the fixture is making a claim, and a claim rots.
+//
 // All of this is a no-op when the env vars are unset, so a plain `node --test` is
 // unaffected.
 const fs = require("node:fs");
@@ -54,8 +74,12 @@ const path = require("node:path");
 
 const out = process.env.LAZILY_CONFORMANCE_MANIFEST;
 const keyOut = process.env.LAZILY_CONFORMANCE_KEY_MANIFEST;
+const scenarioOut = process.env.LAZILY_CONFORMANCE_SCENARIO_MANIFEST;
+// Both the key tracker and the scenario ledger need the parsed fixture, so the
+// JSON.parse hook and the walk are shared by them.
+const walkOut = keyOut || scenarioOut;
 
-if (out || keyOut) {
+if (out || walkOut) {
   const marker = `${path.sep}lazily-spec${path.sep}conformance${path.sep}`;
   const opened = new Set();
   // `fixture\tblock\tkey\tP` present, `...\tR` read, `...\tA` asserted,
@@ -64,6 +88,11 @@ if (out || keyOut) {
   // Instrumented block object -> `fixture\tblock`, so the assertion helpers can
   // attribute a mark without the runner naming its own fixture.
   const blockOwner = new WeakMap();
+  // Scenario object -> `fixture\tid`, the same trick one level up: the scenario
+  // helpers mark a replay by handing back the object the runner is replaying.
+  const scenarioOwner = new WeakMap();
+  // `fixture\tid` for every scenario a runner really replayed.
+  const scenarioRecords = new Set();
   // Fixture text -> corpus-relative id, so JSON.parse can attribute a parse to
   // the bytes a corpus read returned.
   const corpusText = new Map();
@@ -166,6 +195,31 @@ if (out || keyOut) {
     }
   };
 
+  // The corpus-wide scenario id resolution order (#lzscenariocoverage):
+  //
+  //   1. `id` if present
+  //   2. else `name` if present
+  //   3. else the positional index, spelled `#<n>` (0-based)
+  //
+  // The corpus is not uniform — the three `stdlib` fixtures identify a scenario
+  // by `id`, twenty-eight identify by `name`, and
+  // `collections/mergecell_algebra.json` carries no identifier at all. Step 3
+  // exists so this rung is not blocked on a shared-corpus edit; the guard
+  // REPORTS every positional fallback rather than accepting it silently, and
+  // that visibility is what makes the corpus gap fixable upstream later.
+  const scenarioId = (scenario, index) => {
+    if (scenario.id !== undefined && scenario.id !== null) return String(scenario.id);
+    if (scenario.name !== undefined && scenario.name !== null) return String(scenario.name);
+    return `#${index}`;
+  };
+
+  const registerScenarios = (rel, list) => {
+    list.forEach((scenario, index) => {
+      if (!isPlainObject(scenario)) return;
+      scenarioOwner.set(scenario, `${rel}\t${scenarioId(scenario, index)}`);
+    });
+  };
+
   const walk = (rel, node) => {
     if (Array.isArray(node)) {
       for (const item of node) walk(rel, item);
@@ -189,8 +243,11 @@ if (out || keyOut) {
         }
         continue;
       }
+      if (key === "scenarios" && Array.isArray(value) && scenarioOut) {
+        registerScenarios(rel, value);
+      }
       walk(rel, value);
-      if (TRACKED.has(key) && isPlainObject(value)) instrumentBlock(rel, key, value);
+      if (keyOut && TRACKED.has(key) && isPlainObject(value)) instrumentBlock(rel, key, value);
     }
   };
 
@@ -200,7 +257,7 @@ if (out || keyOut) {
     fs[fn] = function (file, ...rest) {
       const rel = record(file);
       const result = original.call(this, file, ...rest);
-      if (keyOut && rel && (typeof result === "string" || Buffer.isBuffer(result))) {
+      if (walkOut && rel && (typeof result === "string" || Buffer.isBuffer(result))) {
         remember(result, rel);
       }
       return result;
@@ -211,7 +268,7 @@ if (out || keyOut) {
     fs.promises.readFile = function (file, ...rest) {
       const rel = record(file);
       const promise = originalPromises.call(this, file, ...rest);
-      if (!keyOut || !rel) return promise;
+      if (!walkOut || !rel) return promise;
       return promise.then((result) => {
         try {
           if (typeof result === "string" || Buffer.isBuffer(result)) remember(result, rel);
@@ -249,7 +306,34 @@ if (out || keyOut) {
         return true;
       },
     };
+  }
 
+  if (scenarioOut) {
+    // The channel `test/support/scenario.js` marks a replay through, installed on
+    // `globalThis` for the same reason as the key channel: the recorder is a CJS
+    // `--require` preload and the runners are ESM.
+    //
+    // `owner()` returning null means the object handed in is not an element of a
+    // corpus fixture's `scenarios` array — a hand-built object, or a
+    // structuredClone of a real scenario. Unlike the key channel this is NOT
+    // absorbed quietly: a scenario whose replay cannot be attributed would be
+    // reported by the guard as never replayed, and "your runner replayed a copy"
+    // is a far more useful failure than that. The helper turns it into a throw.
+    globalThis.__lazilyConformanceScenarios = {
+      owner(scenario) {
+        if (!isPlainObject(scenario)) return null;
+        return scenarioOwner.get(scenario) ?? null;
+      },
+      record(scenario) {
+        const id = this.owner(scenario);
+        if (id === null) return false;
+        scenarioRecords.add(id);
+        return true;
+      },
+    };
+  }
+
+  if (walkOut) {
     const originalParse = JSON.parse;
     JSON.parse = function (text, reviver) {
       const value = originalParse.call(this, text, reviver);
@@ -282,5 +366,6 @@ if (out || keyOut) {
   process.on("exit", () => {
     flush(out, opened);
     flush(keyOut, keyRecords);
+    flush(scenarioOut, scenarioRecords);
   });
 }

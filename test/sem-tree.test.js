@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 import { assertKey, assertKeyWith } from "./support/assert-key.js";
+import { scenarios } from "./support/scenario.js";
 
 import { Context } from "../src/reactive.js";
 import { SemTree } from "../src/sem-tree.js";
@@ -102,7 +103,7 @@ test("removal updates derivation (dropped subtree)", () => {
 
 test("conformance: semtree_incremental.json", () => {
   const fixture = loadFixture("semtree_incremental.json");
-  for (const scenario of fixture.scenarios) {
+  for (const scenario of scenarios(fixture)) {
     const ctx = new Context();
     const fold = FOLDS[scenario.fold];
     assert.ok(fold, `unknown fold ${scenario.fold}`);

@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 import { assertKey, assertKeyWith, excuseKey } from "./support/assert-key.js";
+import { scenarios } from "./support/scenario.js";
 
 import { SeqCrdt } from "../src/seq-crdt.js";
 
@@ -237,7 +238,7 @@ function runSeqCrdtScenario(scenario) {
 
 test("conformance: seqcrdt_convergence.json", () => {
   const fixture = loadFixture("seqcrdt_convergence.json");
-  for (const scenario of fixture.scenarios) {
+  for (const scenario of scenarios(fixture)) {
     runSeqCrdtScenario(scenario);
   }
 });

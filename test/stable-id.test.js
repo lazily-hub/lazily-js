@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 import { assertKey, assertKeyWith } from "./support/assert-key.js";
+import { scenarios } from "./support/scenario.js";
 
 import {
   Block,
@@ -107,8 +108,16 @@ test("assign_stable_keys flows identity through edit", () => {
 
 test("conformance: stableid_alignment.json", () => {
   const fixture = loadFixture("stableid_alignment.json");
-  for (const scenario of fixture.scenarios) {
-    if (scenario.name.includes("content key survives")) {
+  for (const scenario of scenarios(fixture)) {
+    // Dispatch on the SHAPE the scenario carries, not on a substring of its name
+    // (#lzscenariocoverage). The name match here was `content key survives`, which
+    // is the first scenario only: `anchored key survives full body rewrite` carries
+    // the same `blocks` + `expect.key_equal` shape, matched neither arm, and fell
+    // out of the chain replaying nothing. Nothing noticed, because the key tracker
+    // records `fixture\texpect\tkey_equal` once for the whole file and the first
+    // scenario had already marked it asserted — so a fixture-level guard and a
+    // key-level guard both reported green over a scenario that never ran.
+    if (scenario.blocks) {
       const blocks = toBlocks(scenario.blocks);
       assertKeyWith(scenario.expect, "key_equal", (pairs) => {
         for (const [i, j] of pairs) {
@@ -169,6 +178,14 @@ test("conformance: stableid_alignment.json", () => {
           }
         });
       }
+    } else {
+      // No silent third arm. A scenario shape this runner does not model must fail
+      // the run rather than replay nothing, which is how the anchored scenario went
+      // missing in the first place.
+      assert.fail(
+        `${scenario.name}: unmodelled stableid_alignment scenario shape `
+        + `(keys: ${Object.keys(scenario).join(", ")})`,
+      );
     }
   }
 });

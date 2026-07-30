@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 import { assertKey, assertKeyWith } from "./support/assert-key.js";
+import { recordScenario } from "./support/scenario.js";
 
 import Ajv2020 from "ajv/dist/2020.js";
 
@@ -165,6 +166,7 @@ function assertExpect(world, expect, scenario) {
 function runFixture(name) {
   const fixture = loadFixture(name);
   fixture.scenarios.forEach((scenario, i) => {
+    recordScenario(scenario);
     const label = scenario.name ? `${name}[${scenario.name}]` : `${name}[${i}]`;
     const world = new World();
     world.replicas.set("a", new LosslessTreeCrdt(scenario.seed.peer));

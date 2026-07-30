@@ -7,6 +7,7 @@ check:
 	npm run test:interop-peer
 	./scripts/check-conformance-coverage.sh
 	node scripts/check-assertion-keys.mjs
+	node scripts/check-scenario-coverage.mjs
 
 typecheck:
 	npm run typecheck

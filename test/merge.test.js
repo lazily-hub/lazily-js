@@ -5,6 +5,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { assertKey } from "./support/assert-key.js";
+import { scenarios } from "./support/scenario.js";
 
 import { Context } from "../src/reactive.js";
 import {
@@ -142,7 +143,7 @@ test("mergecell_algebra.json fixture: cross-language converged determinism", (t)
   const fixture = JSON.parse(readFileSync(path, "utf8"));
   const byName = { KeepLatest, Sum, Max };
   let seen = 0;
-  for (const scenario of fixture.scenarios) {
+  for (const scenario of scenarios(fixture)) {
     const policy = byName[scenario.policy];
     assert.ok(policy, `unknown policy ${scenario.policy}`);
     // Flags match the fixture.

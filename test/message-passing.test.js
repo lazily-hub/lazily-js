@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 import { assertKey, assertKeyWith } from "./support/assert-key.js";
+import { scenarios } from "./support/scenario.js";
 
 import {
   CallStateKind,
@@ -248,7 +249,7 @@ test("terminal conflict fails closed fixture", () => {
 test("cancel preempts nonterminal scenarios", () => {
   if (!fixturesPresent()) return;
   const fx = load("cancel_preempts_nonterminal.json");
-  for (const scenario of fx.scenarios) {
+  for (const scenario of scenarios(fx)) {
     const p = new CommandProjection();
     // `ignored_frame_indices` is what distinguishes "the cancel was preempted"
     // from "the cancel was applied and then overwritten": both leave the same

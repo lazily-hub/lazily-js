@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 import { assertKey, assertKeyWith, excuseKey } from "./support/assert-key.js";
+import { recordScenario, scenarios } from "./support/scenario.js";
 
 import { TextCrdt } from "../src/text-crdt.js";
 
@@ -89,7 +90,10 @@ test("CrdtTree: algebra.json canonical fixture", () => {
   const fixture = loadCrdtTreeFixture("algebra.json");
   assert.equal(fixture.kind, "CrdtTree");
 
-  const mergeScenario = fixture.scenarios[0];
+  // Selected by POSITION while the corpus identifies these three by `name`, so the
+  // ledger is marked with the scenario object itself rather than an id spelled here
+  // — a runner that names its own scenario id is making a claim, and a claim rots.
+  const mergeScenario = recordScenario(fixture.scenarios[0]);
   const base = TextCrdt.fromStr(mergeScenario.seed.peer, mergeScenario.seed.text);
   const replicas = new Map(mergeScenario.replicas.map((definition) => {
     const replica = base.fork(definition.peer);
@@ -119,7 +123,7 @@ test("CrdtTree: algebra.json canonical fixture", () => {
     "merge order independence: version_vectors_equal",
   );
 
-  const snapshotScenario = fixture.scenarios[1];
+  const snapshotScenario = recordScenario(fixture.scenarios[1]);
   const canonical = TextCrdt.fromStr(snapshotScenario.seed.peer, snapshotScenario.seed.text);
   const snapshot = canonical.deltaSince({});
   const restored = new TextCrdt(snapshotScenario.restore_peer);
@@ -155,7 +159,7 @@ test("CrdtTree: algebra.json canonical fixture", () => {
     );
   }
 
-  const steadyScenario = fixture.scenarios[2];
+  const steadyScenario = recordScenario(fixture.scenarios[2]);
   const steady = TextCrdt.fromStr(steadyScenario.seed.peer, steadyScenario.seed.text);
   const empty = steady.deltaSince(steady.versionVector());
   assertKey(steadyScenario.expect, "delta", empty);
@@ -365,14 +369,14 @@ function runTextCrdtScenario(scenario) {
 
 test("conformance: textcrdt_convergence.json", () => {
   const fixture = loadFixture("textcrdt_convergence.json");
-  for (const scenario of fixture.scenarios) {
+  for (const scenario of scenarios(fixture)) {
     runTextCrdtScenario(scenario);
   }
 });
 
 test("conformance: textcrdt_delta_sync.json (#lztextsync)", () => {
   const fixture = loadFixture("textcrdt_delta_sync.json");
-  for (const scenario of fixture.scenarios) {
+  for (const scenario of scenarios(fixture)) {
     runTextCrdtScenario(scenario);
   }
 });

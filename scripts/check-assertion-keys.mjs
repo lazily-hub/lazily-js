@@ -7,6 +7,10 @@
 //   2. this guard, unconsumed-key half  — every assertion key was READ.
 //   3. this guard, unasserted-key half  — every read key reached a COMPARISON
 //                                         against the fixture's own value.
+//   4. `check-scenario-coverage.mjs`     — every SCENARIO of the fixture was
+//                                         replayed. Rungs 2-3 bind only the
+//                                         blocks a runner reaches, so a whole
+//                                         unreplayed scenario is invisible here.
 //
 // Rung 3 exists because a read is not an assertion. A runner can iterate the
 // block (marking every key read) and `continue` past one; bind a value and never
@@ -53,6 +57,9 @@ const FIXTURE_MANIFEST =
 
 // Assertion keys this binding knowingly does not consume. Every entry is a claim
 // that someone looked, with the reason and the mechanism that will retire it.
+// The finest of three allowlists at three resolutions — see `KNOWN_UNCOVERED` in
+// check-conformance-coverage.sh (whole fixtures) and `EXCUSED_SCENARIOS` in
+// check-scenario-coverage.mjs (single scenarios of an opened fixture).
 // Adding one silently is how a guard rots, so the stale-entry checks below fail
 // the build the moment an excuse outlives the gap it described.
 //

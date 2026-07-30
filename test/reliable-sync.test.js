@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 import { assertKey, assertKeyWith } from "./support/assert-key.js";
+import { recordScenario, scenarios } from "./support/scenario.js";
 
 import {
   Delta,
@@ -45,10 +46,16 @@ function loadFixture(name) {
   return JSON.parse(readFileSync(path, "utf8"));
 }
 
+// Several fixtures here are replayed by NAME rather than by iteration, which is
+// exactly the shape #lzscenariocoverage exists for: `liveness_orset_lww.json`
+// carries four scenarios and this runner picked three, so the fourth simply never
+// ran while both the coverage guard and the key guard stayed green. Marking the
+// ledger inside the selector means every by-name pick is accounted for and a
+// scenario nobody selects is reported.
 const scenario = (fx, name) => {
   const found = fx.scenarios.find((s) => s.name === name);
   assert.ok(found, `fixture has no scenario named ${name}`);
-  return found;
+  return recordScenario(found);
 };
 const msg = (wire) => IpcMessage.fromWire(wire);
 
@@ -131,7 +138,7 @@ test("reliable-sync: outbox_store_protocol.json", () => {
   const fixture = loadFixture("outbox_store_protocol.json");
   assert.equal(fixture.model, "OutboxStore");
 
-  for (const entry of fixture.scenarios) {
+  for (const entry of scenarios(fixture)) {
     const store = new InMemoryStore();
     if (entry.save_cursor !== undefined) {
       const handles = { stale: new Outbox(store), current: new Outbox(store) };
@@ -212,7 +219,7 @@ test("reliable-sync: multi_epoch_delta.json", () => {
       });
   }
 
-  for (const sc of fx.scenarios) {
+  for (const sc of scenarios(fx)) {
     const delta = msg({ Delta: sc.delta }).delta;
     const coord = new ResyncCoordinator(sc.receiver_last_epoch);
     const state = new Map();

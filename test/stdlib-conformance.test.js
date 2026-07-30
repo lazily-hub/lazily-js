@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 import { assertBlock } from "./support/assert-key.js";
+import { scenarios } from "./support/scenario.js";
 import {
   RevisionBarrier,
   Timeout,
@@ -109,11 +110,11 @@ test("portable stdlib canonical corpus", () => {
   ]);
   for (const name of ["timer.json", "timeout.json", "revision_barrier.json"]) {
     const fixture = load(name);
-    const scenarios = new Set(fixture.scenarios.map((scenario) => scenario.id));
-    for (const scenario of fixture.scenarios) runners.get(fixture.feature)(scenario.steps);
+    const scenarioIds = new Set(fixture.scenarios.map((scenario) => scenario.id));
+    for (const scenario of scenarios(fixture)) runners.get(fixture.feature)(scenario.steps);
     for (const mutation of fixture.mutations) {
       assert.ok(mutation.must_fail.length > 0);
-      for (const id of mutation.must_fail) assert.ok(scenarios.has(id));
+      for (const id of mutation.must_fail) assert.ok(scenarioIds.has(id));
     }
   }
 });

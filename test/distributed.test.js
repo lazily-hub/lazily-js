@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 import { assertKey, assertKeyWith } from "./support/assert-key.js";
+import { scenarios } from "./support/scenario.js";
 
 import {
   CrdtOp,
@@ -171,7 +172,7 @@ function ingestOps(runtime, ops, startMicros = 100) {
 
 test("distributed/anti_entropy_converge.json converges and is idempotent", () => {
   const fixture = loadFixture("distributed/anti_entropy_converge.json");
-  for (const scenario of fixture.scenarios) {
+  for (const scenario of scenarios(fixture)) {
     const ops = opsFromFixture(scenario.ops);
 
     const runtime = new CrdtPlaneRuntime(9);
