@@ -1,4 +1,4 @@
-import type { Compute, Context } from "./reactive.js";
+import type { AsyncComputeContext, AsyncComputed, AsyncContext } from "./reactive-async.js";
 import type {
   QueueCloseResult,
   QueueInitial,
@@ -16,9 +16,9 @@ import type {
   WorkQueueItem,
 } from "./queue-core.js";
 
-// Reactive queue family bound to the single-threaded Context. The transition
-// algebra lives in ./queue-core.js and is shared with the thread-safe and async
-// flavors.
+// The `AsyncContext` flavor of the queue family. Mutators are synchronous —
+// ordering is not async-coloured; only reader materialization is, because this
+// binding's async graph has no synchronous compute constructor.
 
 export type {
   QueueCloseResult,
@@ -58,49 +58,52 @@ export {
   emptyWorkQueueInvalidates,
 } from "./queue-core.js";
 
-/** A reactive FIFO queue — SPSC primitive with an MPSC usage rule. */
-export class QueueCell {
-  constructor(ctx: Context, initial?: QueueInitial, storage?: QueueStorage);
-  static from(ctx: Context, initial?: QueueInitial, storage?: QueueStorage): QueueCell;
-  readonly core: import("./queue-core.js").QueueCore;
+/** The `AsyncContext` reactive FIFO. Reads resolve through `getAsync`. */
+export class AsyncQueueCell {
+  constructor(ctx: AsyncContext, initial?: QueueInitial, storage?: QueueStorage);
+  static from(
+    ctx: AsyncContext,
+    initial?: QueueInitial,
+    storage?: QueueStorage,
+  ): AsyncQueueCell;
   tryPush(value: unknown): QueuePushResult;
   tryPop(): QueuePopResult;
   close(): QueueCloseResult;
-  head(cx?: Compute): unknown;
-  len(cx?: Compute): number;
-  isEmpty(cx?: Compute): boolean;
-  isFull(cx?: Compute): boolean;
-  isClosed(cx?: Compute): boolean;
+  head(cx?: AsyncComputeContext): Promise<unknown>;
+  len(cx?: AsyncComputeContext): Promise<number>;
+  isEmpty(cx?: AsyncComputeContext): Promise<boolean>;
+  isFull(cx?: AsyncComputeContext): Promise<boolean>;
+  isClosed(cx?: AsyncComputeContext): Promise<boolean>;
   capacity(): number | null;
   elements(): unknown[];
+  readerHandles(): Record<string, AsyncComputed<unknown>>;
 }
 
-/** Broadcast log with independent, non-destructive subscriber cursors. */
-export class TopicCell {
-  constructor(ctx: Context, initial?: TopicInitial);
-  static from(ctx: Context, initial?: TopicInitial): TopicCell;
-  readonly core: import("./queue-core.js").TopicCore;
+/** The `AsyncContext` broadcast topic. */
+export class AsyncTopicCell {
+  constructor(ctx: AsyncContext, initial?: TopicInitial);
+  static from(ctx: AsyncContext, initial?: TopicInitial): AsyncTopicCell;
   subscribe(id: string, durability: TopicDurabilityLabel): TopicMutationResult;
   reconnect(id: string): TopicMutationResult;
   disconnect(id: string): TopicMutationResult;
   publish(value: unknown): TopicMutationResult;
-  readStream(id: string, cx?: Compute): unknown[];
-  read(id: string, cx?: Compute): unknown;
   advance(id: string): TopicMutationResult;
   restart(id: string): TopicMutationResult;
   gc(): TopicMutationResult;
+  readStream(id: string, cx?: AsyncComputeContext): Promise<unknown[]>;
+  read(id: string, cx?: AsyncComputeContext): Promise<unknown>;
   baseOffset(): number;
   endOffset(): number;
   elements(): unknown[];
   subscription(id: string): TopicSubscriptionSnapshot | null;
   subscriptions(): Record<string, TopicSubscriptionSnapshot>;
   snapshot(): Required<TopicInitial>;
+  readerHandle(id: string): AsyncComputed<unknown[]>;
 }
 
-/** Pull-based competing-consumer work queue with exclusive delivery leases. */
-export class WorkQueueCell<T = unknown> {
-  constructor(ctx: Context, config: WorkQueueConfig);
-  readonly core: import("./queue-core.js").WorkQueueCore<T>;
+/** The `AsyncContext` competing-consumer work queue. */
+export class AsyncWorkQueueCell<T = unknown> {
+  constructor(ctx: AsyncContext, config: WorkQueueConfig);
   push(value: T): { returns: number; invalidates: WorkQueueInvalidates };
   claim(
     worker: string,
@@ -109,11 +112,12 @@ export class WorkQueueCell<T = unknown> {
   ack(worker: string, deliveryId: number): { returns: boolean; invalidates: WorkQueueInvalidates };
   nack(worker: string, deliveryId: number): { returns: boolean; invalidates: WorkQueueInvalidates };
   reapExpired(now: number): { returns: number; invalidates: WorkQueueInvalidates };
-  pendingLen(cx?: Compute): number;
-  isEmpty(cx?: Compute): boolean;
-  inFlightLen(cx?: Compute): number;
-  deadLetterLen(cx?: Compute): number;
+  pendingLen(cx?: AsyncComputeContext): Promise<number>;
+  isEmpty(cx?: AsyncComputeContext): Promise<boolean>;
+  inFlightLen(cx?: AsyncComputeContext): Promise<number>;
+  deadLetterLen(cx?: AsyncComputeContext): Promise<number>;
   pendingItems(): WorkQueueItem<T>[];
   inFlightDeliveries(): WorkQueueDelivery<T>[];
   deadLetterItems(): WorkQueueDeadLetter<T>[];
+  readerHandles(): Record<string, AsyncComputed<unknown>>;
 }

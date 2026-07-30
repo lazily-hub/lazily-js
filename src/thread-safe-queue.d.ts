@@ -1,4 +1,5 @@
-import type { Compute, Context } from "./reactive.js";
+import type { AtomicMutex, ThreadSafeContext } from "./thread-safe.js";
+import type { Compute } from "./reactive.js";
 import type {
   QueueCloseResult,
   QueueInitial,
@@ -16,9 +17,9 @@ import type {
   WorkQueueItem,
 } from "./queue-core.js";
 
-// Reactive queue family bound to the single-threaded Context. The transition
-// algebra lives in ./queue-core.js and is shared with the thread-safe and async
-// flavors.
+// The `Send + Sync` flavor of the queue family. Same algebra as ./queue.js —
+// what differs is that the core is behind its own mutex and every mutator
+// releases it before writing the graph.
 
 export type {
   QueueCloseResult,
@@ -58,11 +59,22 @@ export {
   emptyWorkQueueInvalidates,
 } from "./queue-core.js";
 
-/** A reactive FIFO queue — SPSC primitive with an MPSC usage rule. */
-export class QueueCell {
-  constructor(ctx: Context, initial?: QueueInitial, storage?: QueueStorage);
-  static from(ctx: Context, initial?: QueueInitial, storage?: QueueStorage): QueueCell;
-  readonly core: import("./queue-core.js").QueueCore;
+/** The `Send + Sync` reactive FIFO. */
+export class ThreadSafeQueueCell {
+  constructor(
+    ctx: ThreadSafeContext,
+    initial?: QueueInitial,
+    storage?: QueueStorage,
+    mutex?: AtomicMutex,
+  );
+  static from(
+    ctx: ThreadSafeContext,
+    initial?: QueueInitial,
+    storage?: QueueStorage,
+    mutex?: AtomicMutex,
+  ): ThreadSafeQueueCell;
+  /** The mutex guarding the queue core (never the context's). */
+  readonly mutex: AtomicMutex;
   tryPush(value: unknown): QueuePushResult;
   tryPop(): QueuePopResult;
   close(): QueueCloseResult;
@@ -73,34 +85,40 @@ export class QueueCell {
   isClosed(cx?: Compute): boolean;
   capacity(): number | null;
   elements(): unknown[];
+  readerHandles(): Record<string, unknown>;
 }
 
-/** Broadcast log with independent, non-destructive subscriber cursors. */
-export class TopicCell {
-  constructor(ctx: Context, initial?: TopicInitial);
-  static from(ctx: Context, initial?: TopicInitial): TopicCell;
-  readonly core: import("./queue-core.js").TopicCore;
+/** The `Send + Sync` broadcast topic. */
+export class ThreadSafeTopicCell {
+  constructor(ctx: ThreadSafeContext, initial?: TopicInitial, mutex?: AtomicMutex);
+  static from(
+    ctx: ThreadSafeContext,
+    initial?: TopicInitial,
+    mutex?: AtomicMutex,
+  ): ThreadSafeTopicCell;
+  readonly mutex: AtomicMutex;
   subscribe(id: string, durability: TopicDurabilityLabel): TopicMutationResult;
   reconnect(id: string): TopicMutationResult;
   disconnect(id: string): TopicMutationResult;
   publish(value: unknown): TopicMutationResult;
-  readStream(id: string, cx?: Compute): unknown[];
-  read(id: string, cx?: Compute): unknown;
   advance(id: string): TopicMutationResult;
   restart(id: string): TopicMutationResult;
   gc(): TopicMutationResult;
+  readStream(id: string, cx?: Compute): unknown[];
+  read(id: string, cx?: Compute): unknown;
   baseOffset(): number;
   endOffset(): number;
   elements(): unknown[];
   subscription(id: string): TopicSubscriptionSnapshot | null;
   subscriptions(): Record<string, TopicSubscriptionSnapshot>;
   snapshot(): Required<TopicInitial>;
+  readerHandle(id: string): unknown;
 }
 
-/** Pull-based competing-consumer work queue with exclusive delivery leases. */
-export class WorkQueueCell<T = unknown> {
-  constructor(ctx: Context, config: WorkQueueConfig);
-  readonly core: import("./queue-core.js").WorkQueueCore<T>;
+/** The `Send + Sync` competing-consumer work queue. */
+export class ThreadSafeWorkQueueCell<T = unknown> {
+  constructor(ctx: ThreadSafeContext, config: WorkQueueConfig, mutex?: AtomicMutex);
+  readonly mutex: AtomicMutex;
   push(value: T): { returns: number; invalidates: WorkQueueInvalidates };
   claim(
     worker: string,
@@ -116,4 +134,5 @@ export class WorkQueueCell<T = unknown> {
   pendingItems(): WorkQueueItem<T>[];
   inFlightDeliveries(): WorkQueueDelivery<T>[];
   deadLetterItems(): WorkQueueDeadLetter<T>[];
+  readerHandles(): Record<string, unknown>;
 }

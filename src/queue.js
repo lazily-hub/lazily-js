@@ -1,8 +1,15 @@
-// Reactive queue: QueueCell + pluggable QueueStorage backend (#lzqueue).
+// Reactive queue family — single-threaded flavor (#lzqueue, #lztopiccell,
+// #lzworkqueue).
 //
-// Storage and transition algebra stay graph-agnostic, while each family object
-// is bound to a Context and mints dependency-free Computed reader kinds. A
-// successful op clears exactly the changed readers in one frontier walk.
+// The transition algebra lives in `./queue-core.js` and is graph-agnostic; this
+// file is the `Context`-bound shell. It mints dependency-free Computed reader
+// kinds and, after each op, clears exactly the readers the core reported as
+// dirtied — in one frontier walk, so no subscriber observes one reader kind
+// updated while a sibling still reads stale.
+//
+// The same three cores back `./thread-safe-queue.js` and `./async-queue.js`
+// (#lzqueuefamilyflavors), which is what makes "the three flavors obey ONE
+// contract" structural rather than three copies agreeing by hand.
 //
 // QueueCell is specified as a single-producer / single-consumer (SPSC)
 // primitive; MPSC (multi-producer) is a *usage rule* on the same type —
@@ -19,160 +26,42 @@
 // reader kinds changed — the core reader-kind independence law, which mirrors
 // the `PartialEq` guard the reactive bindings implement for free.
 
-// ---------------------------------------------------------------------------
-// Error sentinels — observable rejection labels (distinct observable signals).
-// `Full` and `Closed` are the two push-rejection reasons; `Empty` and `Closed`
-// are the two pop-rejection reasons. These match the cross-language conformance
-// fixture `returns` labels (`lazily-spec/conformance/collections/queuecell_*`).
-// ---------------------------------------------------------------------------
+import {
+  QueueCore,
+  TopicCore,
+  WorkQueueCore,
+  VecDequeStorage,
+} from "./queue-core.js";
 
-export const QueuePushError = Object.freeze({
-  /** Bounded backend at capacity (reject policy on the default backend). */
-  Full: "Full",
-  /** Queue is closed; push is rejected regardless of capacity. Terminal. */
-  Closed: "Closed",
-});
-
-export const QueuePopError = Object.freeze({
-  /** Queue is open but contains no elements. */
-  Empty: "Empty",
-  /** Queue is closed and empty (drained). Distinct from `Empty`. */
-  Closed: "Closed",
-});
-
-// ---------------------------------------------------------------------------
-// QueueStorage contract (duck-typed).
-// ---------------------------------------------------------------------------
-//
-// The shell / storage split keeps the reactive shell storage-agnostic. The
-// default backend is `VecDequeStorage` (unbounded or bounded array-backed
-// FIFO).
-//
-// Minimal required contract: a backend MUST implement `tryPush` / `tryPop` /
-// `len` / `isClosed` / `close`. `peek` and `capacity` are OPTIONAL capabilities
-// (default: absent) — a raw channel that satisfies only the five required
-// methods is fully conforming; it simply has no `head` reader (no `peek`) and no
-// `isFull` reader (unbounded, `capacity() → null`). A conforming backend MUST
-// also:
-//
-// 1. FIFO order — `tryPop()` returns elements in `tryPush()` order.
-// 2. Cardinality compatibility — native producer/consumer shape is a superset
-//    of SPSC; MPSC usage requires a multi-writer backend.
-// 3. Bounded contract (optional) — a bounded backend's `capacity()` returns a
-//    number and `tryPush()` returns `QueuePushError.Full` at capacity.
-// 4. Position identity — invalidation is phrased over reader kind, not storage
-//    indices; the shell layers its own logical reader-kind derivations above
-//    storage.
+export {
+  QUEUE_READER_KINDS,
+  QueueCore,
+  QueuePopError,
+  QueuePushError,
+  TopicCore,
+  TopicDurability,
+  TopicSubscribeOutcome,
+  VecDequeStorage,
+  WORK_QUEUE_READER_KINDS,
+  WorkQueueCore,
+  WorkQueueDeadLetterReason,
+  emptyQueueInvalidates,
+  emptyWorkQueueInvalidates,
+} from "./queue-core.js";
 
 // ---------------------------------------------------------------------------
-// VecDequeStorage — the reference unbounded/bounded backend.
+// QueueCell — the single-threaded reactive shell.
 // ---------------------------------------------------------------------------
 
 /**
- * The reference `QueueStorage` backend: an array-backed FIFO, optionally
- * bounded. Serializes as a JSON array (element order = FIFO order) per
- * `lazily-spec/cell-model.md` § "Wire and snapshot shape".
- */
-export class VecDequeStorage {
-  /**
-   * @param {{ elements?: unknown[], capacity?: number | null, closed?: boolean }} [initial]
-   */
-  constructor(initial = {}) {
-    this.elements = Array.isArray(initial.elements) ? [...initial.elements] : [];
-    this.#capacity =
-      initial.capacity === undefined || initial.capacity === null
-        ? null
-        : initial.capacity;
-    this.#closed = Boolean(initial.closed);
-    if (this.#capacity !== null && this.#capacity <= 0) {
-      throw new RangeError("VecDequeStorage capacity must be > 0");
-    }
-    Object.freeze(this);
-  }
-
-  #capacity;
-  #closed;
-
-  static from(initial) {
-    return new VecDequeStorage(initial);
-  }
-
-  /**
-   * Append `value` to the tail.
-   * @returns {null | "Full" | "Closed"} `null` on success, else the error label.
-   */
-  tryPush(value) {
-    if (this.#closed) {
-      return QueuePushError.Closed;
-    }
-    if (this.#capacity !== null && this.elements.length >= this.#capacity) {
-      return QueuePushError.Full;
-    }
-    this.elements.push(value);
-    return null;
-  }
-
-  /**
-   * Remove and return the head element.
-   * @returns {unknown | "Empty" | "Closed"} the element, or the error label.
-   */
-  tryPop() {
-    if (this.elements.length === 0) {
-      return this.#closed ? QueuePopError.Closed : QueuePopError.Empty;
-    }
-    return this.elements.shift();
-  }
-
-  /** @returns {unknown} the head element, or `null` when empty. */
-  peek() {
-    return this.elements.length === 0 ? null : this.elements[0];
-  }
-
-  /** @returns {number} */
-  len() {
-    return this.elements.length;
-  }
-
-  /** @returns {number | null} the bounded capacity, or `null` if unbounded. */
-  capacity() {
-    return this.#capacity;
-  }
-
-  /** @returns {boolean} */
-  isClosed() {
-    return this.#closed;
-  }
-
-  /** Close the queue. Idempotent and terminal. */
-  close() {
-    this.#closed = true;
-  }
-
-  /** @returns {{ elements: unknown[], capacity: number | null, closed: boolean }} */
-  snapshot() {
-    return {
-      elements: [...this.elements],
-      capacity: this.#capacity,
-      closed: this.#closed,
-    };
-  }
-}
-
-// ---------------------------------------------------------------------------
-// QueueCell — the reactive shell (pure logic).
-// ---------------------------------------------------------------------------
-
-/**
- * A reactive FIFO queue — SPSC primitive with an MPSC usage rule (`#lzqueue`).
+ * A reactive FIFO queue — SPSC primitive with an MPSC usage rule (#lzqueue).
  *
- * Pure logic: wraps a pluggable `QueueStorage` backend and, after each op,
- * reports which reader kinds (`head` / `len` / `is_empty` / `is_full` /
- * `closed`) changed via the returned `invalidates` matrix. Wire the matrix to a
- * reactive `Context` to make the queue live-reactive. The reader-kind
+ * Wraps a pluggable `QueueStorage` backend through `QueueCore` and, after each
+ * op, reports which reader kinds (`head` / `len` / `is_empty` / `is_full` /
+ * `closed`) changed via the returned `invalidates` matrix. The reader-kind
  * independence law — a push to a non-empty queue does NOT invalidate the `head`
- * reader, a pop does — falls out of the transition predicates this shell
- * computes (derivable kinds by value-diff; `head` by op direction, so no `peek`
- * is required). `peek`/`capacity` are optional storage capabilities.
+ * reader, a pop does — is the core's; this shell only projects it onto a graph.
+ * `peek`/`capacity` are optional storage capabilities.
  */
 export class QueueCell {
   /**
@@ -184,67 +73,30 @@ export class QueueCell {
    */
   constructor(ctx, initial = {}, storage) {
     requireContext(ctx);
-    this.#ctx = ctx;
-    this.#storage = storage ?? new VecDequeStorage(initial);
-    this.#prev = this.#snapshot();
-    this.#readers = {
-      head: ctx.computed(() => this.#storage.peek?.() ?? null),
-      len: ctx.computed(() => this.#storage.len()),
-      is_empty: ctx.computed(() => this.#storage.len() === 0),
-      is_full: ctx.computed(() => {
-        const cap = this.#storage.capacity?.() ?? null;
-        return cap !== null && this.#storage.len() >= cap;
-      }),
-      closed: ctx.computed(() => this.#storage.isClosed()),
+    this._ctx = ctx;
+    this._core = new QueueCore(storage ?? new VecDequeStorage(initial));
+    this._readers = {
+      head: ctx.computed(() => this._core.peek()),
+      len: ctx.computed(() => this._core.len()),
+      is_empty: ctx.computed(() => this._core.isEmpty()),
+      is_full: ctx.computed(() => this._core.isFull()),
+      closed: ctx.computed(() => this._core.isClosed()),
     };
     Object.freeze(this);
   }
-
-  #ctx;
-  #storage;
-  #prev;
-  #readers;
 
   static from(ctx, initial, storage) {
     return new QueueCell(ctx, initial, storage);
   }
 
-  // -- internal: reader-kind state + invalidation diff ----------------------
-
-  #snapshot() {
-    const len = this.#storage.len();
-    const cap = this.#storage.capacity?.() ?? null;
-    return {
-      len,
-      is_empty: len === 0,
-      is_full: cap !== null && len >= cap,
-      closed: this.#storage.isClosed(),
-    };
+  /** The graph-agnostic core, for callers composing on the algebra directly. */
+  get core() {
+    return this._core;
   }
 
-  /**
-   * Diff the derivable reader-kinds (len / is_empty / is_full / closed) against
-   * the previous snapshot. `head` is NOT derived here — it depends on op
-   * *direction*, not just `len`, and deriving it would require `peek()`, which is
-   * now an optional storage capability (`relaycell-backpressure-analysis.md`
-   * §4.1). The caller passes `headChanged` from the transition predicate: a pop
-   * always changes head; a push changes it only from empty. This keeps the
-   * minimal storage contract (`tryPush`/`tryPop`/`len`/`isClosed`/`close`) free
-   * of `peek`.
-   * @param {boolean} headChanged
-   */
-  #diff(next, headChanged) {
-    const prev = this.#prev;
-    const invalidates = {
-      head: headChanged,
-      len: prev.len !== next.len,
-      is_empty: prev.is_empty !== next.is_empty,
-      is_full: prev.is_full !== next.is_full,
-      closed: prev.closed !== next.closed,
-    };
-    this.#prev = next;
-    clearChanged(this.#ctx, this.#readers, invalidates);
-    return invalidates;
+  _apply(result) {
+    clearChanged(this._ctx, this._readers, result.invalidates);
+    return result;
   }
 
   // -- mutating ops ---------------------------------------------------------
@@ -256,16 +108,7 @@ export class QueueCell {
    *   `invalidates` matrix is all-false.
    */
   tryPush(value) {
-    const lenBefore = this.#storage.len();
-    const err = this.#storage.tryPush(value);
-    if (err !== null) {
-      return { returns: err, invalidates: emptyInvalidates() };
-    }
-    // Head changes on a push only when the queue was empty (the new element
-    // becomes the head); a push to a non-empty queue leaves head untouched —
-    // the reader-kind independence law.
-    const headChanged = lenBefore === 0;
-    return { returns: null, invalidates: this.#diff(this.#snapshot(), headChanged) };
+    return this._apply(this._core.tryPush(value));
   }
 
   /**
@@ -274,12 +117,7 @@ export class QueueCell {
    * @returns {{ returns: unknown | "Empty" | "Closed", invalidates: QueueInvalidates }}
    */
   tryPop() {
-    const value = this.#storage.tryPop();
-    if (value === QueuePopError.Empty || value === QueuePopError.Closed) {
-      return { returns: value, invalidates: emptyInvalidates() };
-    }
-    // A successful pop always advances the head (to the next element or empty).
-    return { returns: value, invalidates: this.#diff(this.#snapshot(), true) };
+    return this._apply(this._core.tryPop());
   }
 
   /**
@@ -290,12 +128,7 @@ export class QueueCell {
    *   The `closed` reader is invalidated only on the open → closed transition.
    */
   close() {
-    if (this.#storage.isClosed()) {
-      return { returns: null, invalidates: emptyInvalidates() };
-    }
-    this.#storage.close();
-    // Close touches only `closed`; head is unchanged.
-    return { returns: null, invalidates: this.#diff(this.#snapshot(), false) };
+    return this._apply(this._core.close());
   }
 
   // -- reader-kind reads (current state, non-mutating) ----------------------
@@ -307,17 +140,17 @@ export class QueueCell {
    * `false`.
    */
   head(cx) {
-    return readComputed(this.#ctx, this.#readers.head, cx);
+    return readComputed(this._ctx, this._readers.head, cx);
   }
 
   /** Number of buffered elements. */
   len(cx) {
-    return readComputed(this.#ctx, this.#readers.len, cx);
+    return readComputed(this._ctx, this._readers.len, cx);
   }
 
   /** Whether the queue is empty. */
   isEmpty(cx) {
-    return readComputed(this.#ctx, this.#readers.is_empty, cx);
+    return readComputed(this._ctx, this._readers.is_empty, cx);
   }
 
   /**
@@ -325,17 +158,17 @@ export class QueueCell {
    * for an unbounded backend.
    */
   isFull(cx) {
-    return readComputed(this.#ctx, this.#readers.is_full, cx);
+    return readComputed(this._ctx, this._readers.is_full, cx);
   }
 
   /** Whether the queue has been closed. */
   isClosed(cx) {
-    return readComputed(this.#ctx, this.#readers.closed, cx);
+    return readComputed(this._ctx, this._readers.closed, cx);
   }
 
   /** The backend's capacity, or `null` if unbounded. */
   capacity() {
-    return this.#storage.capacity?.() ?? null;
+    return this._core.capacity();
   }
 
   /**
@@ -345,27 +178,13 @@ export class QueueCell {
    * @returns {unknown[]}
    */
   elements() {
-    if (typeof this.#storage.elements === "function") {
-      return this.#storage.elements();
-    }
-    return this.#storage.snapshot().elements;
+    return this._core.elements();
   }
 }
 
 // ---------------------------------------------------------------------------
 // TopicCell — broadcast log with independent subscriber cursors (#lztopiccell)
 // ---------------------------------------------------------------------------
-
-export const TopicDurability = Object.freeze({
-  Durable: "durable",
-  Ephemeral: "ephemeral",
-});
-
-export const TopicSubscribeOutcome = Object.freeze({
-  Created: "Created",
-  Reconnected: "Reconnected",
-  AlreadyConnected: "AlreadyConnected",
-});
 
 /**
  * Broadcast topic: every subscriber receives every published element using an
@@ -374,6 +193,7 @@ export const TopicSubscribeOutcome = Object.freeze({
  */
 export class TopicCell {
   /**
+   * @param {import("./reactive.js").Context} ctx
    * @param {{
    *   base_offset?: number,
    *   elements?: unknown[],
@@ -382,146 +202,67 @@ export class TopicCell {
    */
   constructor(ctx, initial = {}) {
     requireContext(ctx);
-    this.#ctx = ctx;
-    this.#baseOffset = initial.base_offset ?? 0;
-    this.#elements = Array.from(initial.elements ?? []);
-    this.#subscriptions = new Map();
-    if (!Number.isSafeInteger(this.#baseOffset) || this.#baseOffset < 0) {
-      throw new RangeError("TopicCell base_offset must be a non-negative safe integer");
-    }
-    const end = this.endOffset();
-    for (const [id, raw] of Object.entries(initial.subscriptions ?? {})) {
-      if (!Number.isSafeInteger(raw.cursor) || raw.cursor < this.#baseOffset || raw.cursor > end) {
-        throw new RangeError(`TopicCell cursor for ${id} is outside the retained offset range`);
-      }
-      if (raw.durability !== TopicDurability.Durable && raw.durability !== TopicDurability.Ephemeral) {
-        throw new TypeError(`invalid TopicCell durability for ${id}`);
-      }
-      if (typeof raw.connected !== "boolean") {
-        throw new TypeError(`TopicCell connected flag for ${id} must be boolean`);
-      }
-      if (raw.durability === TopicDurability.Ephemeral && !raw.connected) {
-        throw new TypeError(`disconnected ephemeral TopicCell subscription ${id} must be removed`);
-      }
-      this.#subscriptions.set(id, {
-        cursor: raw.cursor,
-        durability: raw.durability,
-        connected: raw.connected,
-      });
-    }
+    this._ctx = ctx;
+    this._core = new TopicCore(initial);
+    this._readers = new Map();
   }
-
-  #baseOffset;
-  #elements;
-  #subscriptions;
-  #ctx;
-  #readers = new Map();
 
   static from(ctx, initial = {}) {
     return new TopicCell(ctx, initial);
   }
 
-  #reader(id) {
-    let reader = this.#readers.get(id);
+  /** The graph-agnostic core. */
+  get core() {
+    return this._core;
+  }
+
+  _reader(id) {
+    let reader = this._readers.get(id);
     if (reader === undefined) {
       // Connection/cursor identity is observable even when the unread value is
       // the same empty array before and after a transition, so a cleared topic
       // reader must propagate rather than equality-suppress.
-      reader = this.#ctx.computedRippleWhen(() => this.#rawReadStream(id), () => true);
-      this.#readers.set(id, reader);
+      reader = this._ctx.computedRippleWhen(
+        () => this._core.readStream(id),
+        () => true,
+      );
+      this._readers.set(id, reader);
     }
     return reader;
   }
 
-  #rawReadStream(id) {
-    const sub = this.#subscriptions.get(id);
-    if (!sub || !sub.connected) return [];
-    return this.#elements.slice(Math.max(0, sub.cursor - this.#baseOffset));
-  }
-
-  #publishInvalidations(invalidates) {
+  _apply(result) {
     const readers = [];
-    for (const [id, changed] of Object.entries(invalidates)) {
-      if (changed) readers.push(this.#reader(id));
+    for (const [id, changed] of Object.entries(result.invalidates)) {
+      if (changed) readers.push(this._reader(id));
     }
-    this.#ctx.clearComputeds(readers);
-    return invalidates;
-  }
-
-  #allFalse() {
-    return Object.fromEntries(Array.from(this.#subscriptions.keys(), (id) => [id, false]));
-  }
-
-  #only(id, changed) {
-    const invalidates = this.#allFalse();
-    invalidates[id] = changed;
-    return this.#publishInvalidations(invalidates);
+    this._ctx.clearComputeds(readers);
+    return result;
   }
 
   /** Create at tail, or reconnect an existing durable identity in place. */
   subscribe(id, durability) {
-    const existing = this.#subscriptions.get(id);
-    if (existing) {
-      if (existing.connected) {
-        return {
-          returns: TopicSubscribeOutcome.AlreadyConnected,
-          invalidates: this.#allFalse(),
-        };
-      }
-      existing.connected = true;
-      return {
-        returns: TopicSubscribeOutcome.Reconnected,
-        invalidates: this.#only(id, true),
-      };
-    }
-    if (durability !== TopicDurability.Durable && durability !== TopicDurability.Ephemeral) {
-      throw new TypeError(`invalid TopicCell durability for ${id}`);
-    }
-    this.#subscriptions.set(id, {
-      cursor: this.endOffset(),
-      durability,
-      connected: true,
-    });
-    return { returns: TopicSubscribeOutcome.Created, invalidates: this.#only(id, true) };
+    return this._apply(this._core.subscribe(id, durability));
   }
 
   /** Reconnect a durable identity; unknown ids are created at the current tail. */
   reconnect(id) {
-    return this.subscribe(id, TopicDurability.Durable);
+    return this._apply(this._core.reconnect(id));
   }
 
   /** Durable ids remain offline; ephemeral ids are removed. */
   disconnect(id) {
-    const sub = this.#subscriptions.get(id);
-    if (!sub || !sub.connected) {
-      return { returns: null, invalidates: this.#allFalse() };
-    }
-    const invalidates = this.#only(id, true);
-    if (sub.durability === TopicDurability.Ephemeral) {
-      this.#subscriptions.delete(id);
-    } else {
-      sub.connected = false;
-    }
-    return { returns: null, invalidates };
+    return this._apply(this._core.disconnect(id));
   }
 
   /** Append one element without moving any cursor. */
   publish(value) {
-    const offset = this.endOffset();
-    this.#elements.push(value);
-    const invalidates = Object.fromEntries(
-      Array.from(this.#subscriptions, ([id, sub]) => [
-        id,
-        sub.connected && sub.cursor <= offset,
-      ]),
-    );
-    this.#publishInvalidations(invalidates);
-    return { returns: null, offset, invalidates };
+    return this._apply(this._core.publish(value));
   }
 
   /** Unread suffix for a connected subscriber. */
   readStream(id, cx) {
-    return readComputed(this.#ctx, this.#reader(id), cx);
+    return readComputed(this._ctx, this._reader(id), cx);
   }
 
   /** Element at a subscriber cursor, or null at the tail/offline. */
@@ -531,70 +272,47 @@ export class TopicCell {
 
   /** Advance only the named connected cursor by one. */
   advance(id) {
-    const sub = this.#subscriptions.get(id);
-    if (!sub || !sub.connected || sub.cursor >= this.endOffset()) {
-      return { returns: null, invalidates: this.#allFalse() };
-    }
-    const value = this.#elements[sub.cursor - this.#baseOffset];
-    sub.cursor += 1;
-    return { returns: value, invalidates: this.#only(id, true) };
+    return this._apply(this._core.advance(id));
   }
 
   /** Process restart is observational: persisted durable state is unchanged. */
-  restart(_id) {
-    return { returns: null, invalidates: this.#allFalse() };
+  restart(id) {
+    return this._apply(this._core.restart(id));
   }
 
   /** Remove only the prefix below the minimum durable absolute cursor. */
   gc() {
-    const durable = Array.from(this.#subscriptions.values())
-      .filter((sub) => sub.durability === TopicDurability.Durable)
-      .map((sub) => sub.cursor);
-    const frontier = durable.length === 0 ? this.endOffset() : Math.min(...durable);
-    const removed = frontier - this.#baseOffset;
-    this.#elements.splice(0, removed);
-    this.#baseOffset = frontier;
-    return { returns: removed, invalidates: this.#allFalse() };
+    return this._apply(this._core.gc());
   }
 
   baseOffset() {
-    return this.#baseOffset;
+    return this._core.baseOffset();
   }
 
   endOffset() {
-    return this.#baseOffset + this.#elements.length;
+    return this._core.endOffset();
   }
 
   elements() {
-    return Array.from(this.#elements);
+    return this._core.elements();
   }
 
   subscription(id) {
-    const sub = this.#subscriptions.get(id);
-    return sub ? { ...sub } : null;
+    return this._core.subscription(id);
   }
 
   subscriptions() {
-    return Object.fromEntries(Array.from(this.#subscriptions, ([id, sub]) => [id, { ...sub }]));
+    return this._core.subscriptions();
   }
 
   snapshot() {
-    return {
-      base_offset: this.#baseOffset,
-      elements: this.elements(),
-      subscriptions: this.subscriptions(),
-    };
+    return this._core.snapshot();
   }
 }
 
 // ---------------------------------------------------------------------------
 // WorkQueueCell — competing consumers with exclusive leases (#lzworkqueue)
 // ---------------------------------------------------------------------------
-
-export const WorkQueueDeadLetterReason = Object.freeze({
-  Nack: "nack",
-  Expired: "expired",
-});
 
 /**
  * Pull-based competing-consumer work queue.
@@ -610,197 +328,83 @@ export class WorkQueueCell {
    */
   constructor(ctx, config) {
     requireContext(ctx);
-    if (!config || !Number.isSafeInteger(config.visibility_timeout) || config.visibility_timeout <= 0) {
-      throw new RangeError("visibility_timeout must be a positive safe integer");
-    }
-    if (!Number.isSafeInteger(config.max_deliveries) || config.max_deliveries < 1) {
-      throw new RangeError("max_deliveries must be at least one");
-    }
-    this.#ctx = ctx;
-    this.#visibilityTimeout = config.visibility_timeout;
-    this.#maxDeliveries = config.max_deliveries;
-    this.#readers = {
-      pending_len: ctx.computed(() => this.#pending.length),
-      is_empty: ctx.computed(() => this.#pending.length === 0),
-      in_flight_len: ctx.computed(() => this.#inFlight.size),
-      dead_letter_len: ctx.computed(() => this.#deadLetters.length),
+    this._ctx = ctx;
+    this._core = new WorkQueueCore(config);
+    this._readers = {
+      pending_len: ctx.computed(() => this._core.pendingLen()),
+      is_empty: ctx.computed(() => this._core.isEmpty()),
+      in_flight_len: ctx.computed(() => this._core.inFlightLen()),
+      dead_letter_len: ctx.computed(() => this._core.deadLetterLen()),
     };
   }
 
-  #ctx;
-  #readers;
-  #visibilityTimeout;
-  #maxDeliveries;
-  #pending = [];
-  #inFlight = new Map();
-  #deadLetters = [];
-  #nextItemId = 0;
-  #nextDeliveryId = 0;
-
-  #counts() {
-    return {
-      pending: this.#pending.length,
-      in_flight: this.#inFlight.size,
-      dead_letters: this.#deadLetters.length,
-    };
+  /** The graph-agnostic core. */
+  get core() {
+    return this._core;
   }
 
-  #invalidates(before) {
-    const after = this.#counts();
-    const invalidates = {
-      pending_len: before.pending !== after.pending,
-      is_empty: (before.pending === 0) !== (after.pending === 0),
-      in_flight_len: before.in_flight !== after.in_flight,
-      dead_letter_len: before.dead_letters !== after.dead_letters,
-    };
-    clearChanged(this.#ctx, this.#readers, invalidates);
-    return invalidates;
-  }
-
-  #unchanged() {
-    return {
-      pending_len: false,
-      is_empty: false,
-      in_flight_len: false,
-      dead_letter_len: false,
-    };
-  }
-
-  #validateNow(now) {
-    if (!Number.isSafeInteger(now) || now < 0) {
-      throw new RangeError("now must be a non-negative safe integer");
-    }
-  }
-
-  #fail(delivery, reason) {
-    if (delivery.attempt < this.#maxDeliveries) {
-      this.#pending.push({
-        item_id: delivery.item_id,
-        value: delivery.value,
-        attempts: delivery.attempt,
-      });
-    } else {
-      this.#deadLetters.push({
-        item_id: delivery.item_id,
-        value: delivery.value,
-        attempts: delivery.attempt,
-        reason,
-      });
-    }
+  _apply(result) {
+    clearChanged(this._ctx, this._readers, result.invalidates);
+    return result;
   }
 
   /** Append a pending item and return its stable item id. */
   push(value) {
-    const before = this.#counts();
-    if (this.#nextItemId >= Number.MAX_SAFE_INTEGER) throw new RangeError("item id exhausted");
-    const itemId = this.#nextItemId;
-    this.#nextItemId += 1;
-    this.#pending.push({ item_id: itemId, value, attempts: 0 });
-    return { returns: itemId, invalidates: this.#invalidates(before) };
+    return this._apply(this._core.push(value));
   }
 
   /** Claim the oldest pending item for one worker. */
   claim(worker, now) {
-    this.#validateNow(now);
-    if (this.#pending.length === 0) {
-      return { returns: null, invalidates: this.#unchanged() };
-    }
-    if (this.#nextDeliveryId >= Number.MAX_SAFE_INTEGER) throw new RangeError("delivery id exhausted");
-    const before = this.#counts();
-    const item = this.#pending.shift();
-    const deliveryId = this.#nextDeliveryId;
-    this.#nextDeliveryId += 1;
-    const delivery = {
-      delivery_id: deliveryId,
-      item_id: item.item_id,
-      value: item.value,
-      worker,
-      attempt: item.attempts + 1,
-      deadline: Math.min(Number.MAX_SAFE_INTEGER, now + this.#visibilityTimeout),
-    };
-    this.#inFlight.set(deliveryId, delivery);
-    return { returns: { ...delivery }, invalidates: this.#invalidates(before) };
+    return this._apply(this._core.claim(worker, now));
   }
 
   /** Ack only the exact current delivery owned by `worker`. */
   ack(worker, deliveryId) {
-    const delivery = this.#inFlight.get(deliveryId);
-    if (!delivery || delivery.worker !== worker) {
-      return { returns: false, invalidates: this.#unchanged() };
-    }
-    const before = this.#counts();
-    this.#inFlight.delete(deliveryId);
-    return { returns: true, invalidates: this.#invalidates(before) };
+    return this._apply(this._core.ack(worker, deliveryId));
   }
 
   /** Nack a delivery, requeueing at the tail or dead-lettering at the limit. */
   nack(worker, deliveryId) {
-    const delivery = this.#inFlight.get(deliveryId);
-    if (!delivery || delivery.worker !== worker) {
-      return { returns: false, invalidates: this.#unchanged() };
-    }
-    const before = this.#counts();
-    this.#inFlight.delete(deliveryId);
-    this.#fail(delivery, WorkQueueDeadLetterReason.Nack);
-    return { returns: true, invalidates: this.#invalidates(before) };
+    return this._apply(this._core.nack(worker, deliveryId));
   }
 
   /** Expire every lease with `deadline < now`, in delivery-id order. */
   reapExpired(now) {
-    this.#validateNow(now);
-    const expired = Array.from(this.#inFlight.values())
-      .filter((delivery) => delivery.deadline < now)
-      .sort((a, b) => a.delivery_id - b.delivery_id);
-    if (expired.length === 0) {
-      return { returns: 0, invalidates: this.#unchanged() };
-    }
-    const before = this.#counts();
-    for (const delivery of expired) {
-      this.#inFlight.delete(delivery.delivery_id);
-      this.#fail(delivery, WorkQueueDeadLetterReason.Expired);
-    }
-    return { returns: expired.length, invalidates: this.#invalidates(before) };
+    return this._apply(this._core.reapExpired(now));
   }
 
   pendingLen(cx) {
-    return readComputed(this.#ctx, this.#readers.pending_len, cx);
+    return readComputed(this._ctx, this._readers.pending_len, cx);
   }
 
   isEmpty(cx) {
-    return readComputed(this.#ctx, this.#readers.is_empty, cx);
+    return readComputed(this._ctx, this._readers.is_empty, cx);
   }
 
   inFlightLen(cx) {
-    return readComputed(this.#ctx, this.#readers.in_flight_len, cx);
+    return readComputed(this._ctx, this._readers.in_flight_len, cx);
   }
 
   deadLetterLen(cx) {
-    return readComputed(this.#ctx, this.#readers.dead_letter_len, cx);
+    return readComputed(this._ctx, this._readers.dead_letter_len, cx);
   }
 
   pendingItems() {
-    return this.#pending.map((item) => ({ ...item }));
+    return this._core.pendingItems();
   }
 
   inFlightDeliveries() {
-    return Array.from(this.#inFlight.values(), (delivery) => ({ ...delivery })).sort(
-      (a, b) => a.delivery_id - b.delivery_id,
-    );
+    return this._core.inFlightDeliveries();
   }
 
   deadLetterItems() {
-    return this.#deadLetters.map((item) => ({ ...item }));
+    return this._core.deadLetterItems();
   }
 }
 
 // ---------------------------------------------------------------------------
 // helpers
 // ---------------------------------------------------------------------------
-
-/** @returns {QueueInvalidates} */
-function emptyInvalidates() {
-  return { head: false, len: false, is_empty: false, is_full: false, closed: false };
-}
 
 function requireContext(ctx) {
   if (

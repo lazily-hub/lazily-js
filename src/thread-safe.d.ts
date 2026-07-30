@@ -1,5 +1,6 @@
 import type {
   CellHandle,
+  ChangedFn,
   Context,
   EffectHandle,
   NodeHandle,
@@ -46,6 +47,10 @@ export class ThreadSafeContext {
   // #lzcellkernel v2 constructor surface
   source<T>(value: T, policy?: unknown): CellHandle<T>;
   computed<T>(compute: () => T): SlotHandle<T>;
+  /** A computed with a caller-supplied propagate predicate. The queue
+   * family topic flavor needs an always-propagate guard, because connection
+   * identity is observable even when the unread suffix compares equal. */
+  computedRippleWhen<T>(compute: () => T, changed: ChangedFn<T>): SlotHandle<T>;
   /** @deprecated use {@link ThreadSafeContext#source}. */
   cell<T>(value: T): CellHandle<T>;
   /** @deprecated use {@link ThreadSafeContext#computed} (guarded, the only derived construction). */

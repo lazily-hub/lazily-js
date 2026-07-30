@@ -169,6 +169,17 @@ export class ThreadSafeContext {
     return this.#mutex.runExclusive(() => this.#ctx.computed(compute));
   }
 
+  /**
+   * A computed with a caller-supplied propagate predicate, mirroring
+   * {@link Context#computedRippleWhen}. The queue family's topic flavor needs
+   * `() => true` because connection/cursor identity is observable even when the
+   * unread suffix is the same empty array on both sides of a transition, and
+   * `defaultEqual` would suppress exactly that hand-off.
+   */
+  computedRippleWhen(compute, changed) {
+    return this.#mutex.runExclusive(() => this.#ctx.computedRippleWhen(compute, changed));
+  }
+
   /** @deprecated use {@link ThreadSafeContext#computed} (guarded, the only derived construction). */
   slot(compute) {
     return this.#mutex.runExclusive(() => this.#ctx.computed(compute));
