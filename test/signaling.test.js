@@ -90,53 +90,135 @@ test("join without capabilities omits the key; with capabilities includes it", (
   assert.deepEqual(decoded.toWire(), { type: "join", peer: 1 });
 });
 
+// Every key of a frame's `assertions` block, checked against the decoded
+// message. The switch has no fall-through: an assertion key this runner does not
+// know fails here rather than being skipped in silence.
+//
+// The `in`-guarded chain this replaced had two defects of that exact shape.
+// `roster_excludes_self` was never compared against the fixture's value — the
+// arm asserted the property unconditionally, so a fixture claiming
+// `roster_excludes_self: false` would still have passed — and
+// `server_stamped_from` was carried by four frames and read by nothing.
+function assertFrameAssertion(message, frame, key, expected) {
+  const where = `${frame.label}: ${key}`;
+  switch (key) {
+    case "peer": assert.equal(message.peer, expected, where); break;
+    case "to": assert.equal(message.to, expected, where); break;
+    case "from": assert.equal(message.from, expected, where); break;
+    case "peers": assert.deepEqual([...message.peers], expected, where); break;
+    case "code": assert.equal(message.code, expected, where); break;
+    case "has_capabilities":
+      assert.equal(message.capabilities !== null, expected, where);
+      break;
+    case "capabilities":
+      assert.deepEqual([...message.capabilities], expected, where);
+      break;
+    case "roster_excludes_self":
+      assert.equal([...message.peers].includes(message.peer) === false, expected, where);
+      break;
+    // The server forwards a directed frame stamped with the SENDER's registered
+    // peer and strips the client's `to`. Spoofing is prevented by there being no
+    // client-supplied `from` on the wire at all, so both halves are checked.
+    case "server_stamped_from":
+      assert.equal(
+        message.from !== null && message.from !== undefined
+          && ("to" in message ? message.to === null || message.to === undefined : true)
+          && !("to" in frame.wire),
+        expected,
+        where,
+      );
+      break;
+    default:
+      assert.fail(`${frame.label}: unknown frame assertion key \`${key}\``);
+  }
+}
+
 test("assertions metadata on each frame matches the decoded message", () => {
   const fixture = loadFixture("signaling/frames.json");
+  let checked = 0;
   for (const frame of fixture.frames) {
     const a = frame.assertions ?? {};
     const message = decodeFrame(frame.direction, frame.wire);
-    if ("peer" in a) assert.equal(message.peer, a.peer, frame.label);
-    if ("to" in a) assert.equal(message.to, a.to, frame.label);
-    if ("from" in a) assert.equal(message.from, a.from, frame.label);
-    if ("peers" in a) assert.deepEqual([...message.peers], a.peers, frame.label);
-    if ("code" in a) assert.equal(message.code, a.code, frame.label);
-    if ("has_capabilities" in a) {
-      assert.equal(message.capabilities !== null, a.has_capabilities, frame.label);
-    }
-    if ("capabilities" in a) {
-      assert.deepEqual([...message.capabilities], a.capabilities, frame.label);
-    }
-    if ("roster_excludes_self" in a) {
-      assert.equal([...message.peers].includes(message.peer), false, frame.label);
+    for (const [key, expected] of Object.entries(a)) {
+      assertFrameAssertion(message, frame, key, expected);
+      checked += 1;
     }
     assert.ok(
       frame.direction !== "client" || CLIENT_VARIANTS.has(frame.variant),
       frame.label,
     );
   }
+  assert.ok(checked > 0, "frames.json carried no assertions to check");
 });
+
+const FORWARDED_VARIANTS = new Set(["offer", "answer", "ice", "relay"]);
 
 test("anti_spoof_session.json replays through SignalingRoom", () => {
   const fixture = loadFixture("signaling/anti_spoof_session.json");
   const room = new SignalingRoom({ mode: fixture.mode ?? "open" });
 
+  // The fixture's top-level `assertions` block names the three properties the
+  // transcript exists to pin. Replaying the steps proves the frames match; it
+  // does NOT prove these hold, because a transcript that happened to be sorted
+  // and self-excluding would replay identically under a room that guarantees
+  // neither. So each is observed over the emitted stream and compared against
+  // the fixture's own value, and the counters below refuse a vacuous pass.
+  let rostersSeen = 0;
+  let forwardsSeen = 0;
+  let rosterExcludesSelf = true;
+  let rosterSortedAscending = true;
+  let forwardedFromIsServerRegistered = true;
+  const registeredPeerByConn = new Map();
+
   for (const step of fixture.steps) {
     const message = ClientMessage.fromWire(step.input.recv);
-    const emitted = room.receive(step.input.conn, message);
+    const conn = step.input.conn;
+    if (message instanceof ClientJoin) registeredPeerByConn.set(conn, message.peer);
+    const emitted = room.receive(conn, message);
 
     assert.equal(
       emitted.length,
       step.expect.length,
-      `step conn=${step.input.conn} emit count`,
+      `step conn=${conn} emit count`,
     );
     for (let i = 0; i < emitted.length; i += 1) {
       assert.equal(emitted[i].to, step.expect[i].to, "routed connection id");
       assert.deepEqual(
         emitted[i].message.toWire(),
         step.expect[i].frame,
-        `frame ${i} for conn=${step.input.conn}`,
+        `frame ${i} for conn=${conn}`,
       );
+
+      const out = emitted[i].message;
+      if (out instanceof ServerWelcome) {
+        rostersSeen += 1;
+        const roster = [...out.peers];
+        if (roster.includes(out.peer)) rosterExcludesSelf = false;
+        if (roster.some((p, n) => n > 0 && p <= roster[n - 1])) rosterSortedAscending = false;
+      }
+      if (FORWARDED_VARIANTS.has(out.type)) {
+        forwardsSeen += 1;
+        // `from` is the SENDER's registered peer, never anything the client sent.
+        if (out.from !== registeredPeerByConn.get(conn)) {
+          forwardedFromIsServerRegistered = false;
+        }
+        if (step.input.recv.from !== undefined) forwardedFromIsServerRegistered = false;
+      }
     }
+  }
+
+  assert.ok(rostersSeen > 0, "no welcome roster was emitted — roster assertions are vacuous");
+  assert.ok(forwardsSeen > 0, "no directed frame was forwarded — the anti-spoof assertion is vacuous");
+
+  const a = fixture.assertions;
+  const observed = {
+    roster_excludes_self: rosterExcludesSelf,
+    roster_sorted_ascending: rosterSortedAscending,
+    forwarded_from_is_server_registered: forwardedFromIsServerRegistered,
+  };
+  for (const [key, expected] of Object.entries(a)) {
+    assert.ok(key in observed, `unknown session assertion key \`${key}\``);
+    assert.equal(observed[key], expected, `anti_spoof_session assertion "${key}"`);
   }
 });
 

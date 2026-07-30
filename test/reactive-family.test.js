@@ -83,9 +83,18 @@ test("ComputedMap materialization conformance: deferral_not_deallocation.json", 
   const keys = Object.keys(spec.val);
   const factory = (k) => spec.val[k];
 
+  assert.equal(expected.default_mode, "eager", "default strategy is eager");
+
   const ctx = new Context();
   const eager = eagerSlotMap(ctx, keys, factory);
   assertSameSet(eager.presentKeys(), expected.eager_present, "eager_present");
+
+  // materialize_preserves_observe, stated over the whole map: the fixture's
+  // `observe` block is the canonical value of EVERY key, and this runner only
+  // ever compared the keys the `reads` sequence happens to touch.
+  for (const [key, value] of Object.entries(expected.observe)) {
+    assert.equal(eager.get(ctx, key), value, `eager observe[${key}]`);
+  }
 
   const lazy = new ComputedMap(ctx);
   const sizes = [];
@@ -126,6 +135,7 @@ test("materialization conformance: entry_kind_orthogonal_to_mode.json", () => {
   // entries into both buckets rather than dumping everything into one.
   assert.ok(cellKeys.length > 0, "fixture has source entries");
   assert.ok(slotKeys.length > 0, "fixture has computed entries");
+  assert.equal(expected.default_mode, "eager", "default strategy is eager");
 
   // Eager build: every entry present (cells + slots).
   const ctxE = new Context();

@@ -205,6 +205,12 @@ function assertFixtureAssertions(message, fixture) {
         case "first_op_payload_kind":
           actual = Object.keys(delta.ops[0].payload.toWire())[0];
           break;
+        // The zero-copy backend discriminator. Read here, not only in the
+        // focused transport test, so the fixture's whole `assertions` block goes
+        // through this fail-closed path instead of one hand-picked key.
+        case "first_op_payload_backend":
+          actual = delta.ops[0].payload.blob?.backend;
+          break;
         case "added_type_tags":
           actual = delta.ops
             .filter((op) => op instanceof DeltaOpNodeAdd)
@@ -639,6 +645,20 @@ test("conformance causal receipts fixture replays", () => {
     fixture.assertions.terminal_outcome,
   );
   assert.deepEqual(projection.staleReceiptIds(), fixture.assertions.stale_receipt_ids);
+
+  // The fixture also pins which outcomes are NON-terminal. That is the half of
+  // the fold the terminal assertion cannot reach: a binding that classified
+  // `accepted` as terminal would still report `applied` as the terminal outcome
+  // here (first terminal wins) and pass every other key in this block.
+  const stale = new Set(fixture.assertions.stale_receipt_ids);
+  assert.deepEqual(
+    receipts
+      .filter((r) => r.causationId === fixture.assertions.causation_id)
+      .filter((r) => !stale.has(r.receiptId))
+      .filter((r) => !r.isTerminal)
+      .map((r) => r.outcome),
+    fixture.assertions.nonterminal_outcomes,
+  );
 });
 
 test("conformance snapshot minimal", () => {
@@ -802,6 +822,7 @@ test("all fixtures round trip", () => {
     "delta_sequential.json",
     "delta_non_sequential.json",
     "delta_shared_blob.json",
+    "delta_zero_copy_arrow.json",
     "agent-doc/snapshot_agent_doc_state.json",
     "agent-doc/delta_agent_doc_state.json",
   ]) {

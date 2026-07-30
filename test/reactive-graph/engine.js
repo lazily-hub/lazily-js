@@ -472,6 +472,26 @@ async function replaySteps(model, steps, label, assertFn, divergences, tail) {
     if (tail) {
       const where = `${label}#expected`;
 
+      // The step-level `expect` switch fails closed on an unknown key. This tail
+      // did not: it reached in for the three keys it knew and let anything else
+      // fall through, so a scenario-shaped fixture could grow an expectation and
+      // be replayed without it ever being evaluated.
+      for (const key of Object.keys(tail)) {
+        if (!["observationally_equal", "final_state", "after_publish"].includes(key)) {
+          throw new Error(`${where}: unknown fixture expectation ${key}`);
+        }
+      }
+      for (const key of Object.keys(tail.final_state ?? {})) {
+        if (!["dependents_of", "readable", "read"].includes(key)) {
+          throw new Error(`${where}: unknown final_state expectation ${key}`);
+        }
+      }
+      for (const key of Object.keys(tail.after_publish ?? {})) {
+        if (!["op", "observed_by", "read", "dependents_of"].includes(key)) {
+          throw new Error(`${where}: unknown after_publish expectation ${key}`);
+        }
+      }
+
       const finalState = tail.final_state ?? {};
       for (const id of Object.keys(finalState.dependents_of ?? {}).sort()) {
         const got = instance.dependentsOf(id);

@@ -6,6 +6,7 @@ check:
 	npm test
 	npm run test:interop-peer
 	./scripts/check-conformance-coverage.sh
+	node scripts/check-assertion-keys.mjs
 
 typecheck:
 	npm run typecheck

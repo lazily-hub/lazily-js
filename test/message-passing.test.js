@@ -211,7 +211,11 @@ test("terminal conflict fails closed fixture", () => {
       assert.equal(status.kind, CommandApplyStatusKind.TerminalConflict);
     }
   });
-  assert.equal(p.hasConflict(commandId), true);
+  // Compared against the fixture's own `conflict`, not a hardcoded `true`: the
+  // key was previously carried and never read, so a fixture asserting that a
+  // sequence does NOT conflict would have been replayed under this runner and
+  // reported green while the runner demanded the opposite.
+  assert.equal(p.hasConflict(commandId), fx.expect.conflict);
   const before = CommandProjectionImage.fromWire(fx.expect.projection_before_conflict);
   assert.deepEqual(p.toImage().toWire(), before.toWire());
 });
@@ -221,7 +225,22 @@ test("cancel preempts nonterminal scenarios", () => {
   const fx = load("cancel_preempts_nonterminal.json");
   for (const scenario of fx.scenarios) {
     const p = new CommandProjection();
-    for (const frame of scenario.frames) foldFrame(p, frame);
+    // `ignored_frame_indices` is what distinguishes "the cancel was preempted"
+    // from "the cancel was applied and then overwritten": both leave the same
+    // final projection. Only the per-frame status tells them apart, and the
+    // scenario that carries the key was folded without ever looking at it.
+    const ignored = scenario.expect.ignored_frame_indices ?? [];
+    scenario.frames.forEach((frame, i) => {
+      const before = ignored.includes(i) ? JSON.stringify(p.toImage().toWire()) : null;
+      foldFrame(p, frame);
+      if (before !== null) {
+        assert.equal(
+          JSON.stringify(p.toImage().toWire()),
+          before,
+          `${scenario.name}: frame ${i} is listed as ignored but changed the projection`,
+        );
+      }
+    });
     assertProjection(p, scenario.expect);
   }
 });

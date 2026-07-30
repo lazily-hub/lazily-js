@@ -99,24 +99,54 @@ test("CrdtTree: algebra.json canonical fixture", () => {
     for (const name of order) folded.mergeFrom(replicas.get(name));
     return folded;
   });
-  for (const folded of folds.slice(1)) {
-    assert.equal(folded.value(), folds[0].value());
-    assert.deepEqual(folded.versionVector(), folds[0].versionVector());
-  }
+  // Compared against the fixture's own booleans rather than asserted flat: the
+  // scenario declares WHICH of the two relations it claims, and a runner that
+  // hardcodes both would replay a fixture claiming otherwise and still pass.
+  assert.equal(
+    folds.slice(1).every((folded) => folded.value() === folds[0].value()),
+    mergeScenario.expect.texts_equal,
+    "merge order independence: texts_equal",
+  );
+  assert.equal(
+    folds.slice(1).every((folded) =>
+      JSON.stringify(folded.versionVector()) === JSON.stringify(folds[0].versionVector()),
+    ),
+    mergeScenario.expect.version_vectors_equal,
+    "merge order independence: version_vectors_equal",
+  );
 
   const snapshotScenario = fixture.scenarios[1];
   const canonical = TextCrdt.fromStr(snapshotScenario.seed.peer, snapshotScenario.seed.text);
   const snapshot = canonical.deltaSince({});
   const restored = new TextCrdt(snapshotScenario.restore_peer);
   assert.equal(restored.applyDelta(snapshot), true);
-  assert.equal(restored.value(), canonical.value());
-  assert.deepEqual(restored.deltaSince({}), snapshot, "snapshot preserves operation identity");
+  assert.equal(
+    restored.value() === canonical.value(),
+    snapshotScenario.expect.restored_text_equal,
+    "snapshot: restored_text_equal",
+  );
+  assert.equal(
+    JSON.stringify(restored.deltaSince({})) === JSON.stringify(snapshot),
+    snapshotScenario.expect.op_ids_equal,
+    "snapshot preserves operation identity (op_ids_equal)",
+  );
   canonical.insertStr(canonical.len(), "A");
   restored.insertStr(restored.len(), "B");
   canonical.applyDelta(restored.deltaSince(canonical.versionVector()));
   restored.applyDelta(canonical.deltaSince(restored.versionVector()));
   assert.equal(canonical.value(), restored.value());
   assert.equal(canonical.len(), snapshotScenario.seed.text.length + 2);
+  // A snapshot that re-minted op ids on restore would converge on TEXT and still
+  // double every element on the later merge. That is what this key counts, and
+  // nothing else in the scenario can see it.
+  for (const [name, replica] of [["canonical", canonical], ["restored", restored]]) {
+    const ids = replica.deltaSince({}).map((op) => `${op.id.peer}:${op.id.counter}`);
+    assert.equal(
+      ids.length - new Set(ids).size,
+      snapshotScenario.expect.later_merge_duplicates,
+      `snapshot: later_merge_duplicates on ${name}`,
+    );
+  }
 
   const steadyScenario = fixture.scenarios[2];
   const steady = TextCrdt.fromStr(steadyScenario.seed.peer, steadyScenario.seed.text);
@@ -252,28 +282,66 @@ function runTextCrdtScenario(scenario) {
     }
   }
 
+  // Exhaustive over the expect block. The `if (expect.x !== undefined)` chain
+  // this replaced skipped `a_starts_with`, `a_ends_with` and `tombstone_count`
+  // in silence: three fixtures carried them, the scenarios replayed, and the
+  // suite reported green without ever asking for the value.
   const expect = scenario.expect;
-  if (expect) {
-    if (expect.text !== undefined) {
-      assert.equal(replicas.get(expect.on ?? "a").text(), expect.text, label);
-    }
-    if (expect.texts_equal) {
-      for (const [x, y] of expect.texts_equal) {
-        assert.equal(replicas.get(x).text(), replicas.get(y).text(), label);
-      }
-    }
-    if (expect.len !== undefined) {
-      assert.equal(replicas.get(expect.on ?? "a").len(), expect.len, label);
-    }
-    if (expect.text_on) {
-      for (const [name, want] of Object.entries(expect.text_on)) {
-        assert.equal(replicas.get(name).text(), want, `${label}: text_on ${name}`);
-      }
-    }
-    if (expect.version_vector_on) {
-      for (const [name, want] of Object.entries(expect.version_vector_on)) {
-        assert.deepEqual(replicas.get(name).versionVector(), want, `${label}: version_vector_on ${name}`);
-      }
+  const main_ = () => replicas.get(expect.on ?? "a");
+  for (const key of Object.keys(expect ?? {})) {
+    const want = expect[key];
+    switch (key) {
+      case "on":
+        // Selector for the single-replica assertions above, not an assertion.
+        break;
+      case "text":
+        assert.equal(main_().text(), want, label);
+        break;
+      case "len":
+        assert.equal(main_().len(), want, label);
+        break;
+      case "texts_equal":
+        for (const [x, y] of want) {
+          assert.equal(replicas.get(x).text(), replicas.get(y).text(), label);
+        }
+        break;
+      case "text_on":
+        for (const [name, wantText] of Object.entries(want)) {
+          assert.equal(replicas.get(name).text(), wantText, `${label}: text_on ${name}`);
+        }
+        break;
+      case "version_vector_on":
+        for (const [name, wantVv] of Object.entries(want)) {
+          assert.deepEqual(
+            replicas.get(name).versionVector(),
+            wantVv,
+            `${label}: version_vector_on ${name}`,
+          );
+        }
+        break;
+      // The interleaving fixture pins the ENDS of the converged text, which is
+      // the part `texts_equal` cannot see: two replicas that agreed on a wrong
+      // order would satisfy `texts_equal` and `len` together.
+      case "a_starts_with":
+        assert.ok(
+          replicas.get("a").text().startsWith(want),
+          `${label}: a_starts_with ${JSON.stringify(want)} (got ${JSON.stringify(replicas.get("a").text())})`,
+        );
+        break;
+      case "a_ends_with":
+        assert.ok(
+          replicas.get("a").text().endsWith(want),
+          `${label}: a_ends_with ${JSON.stringify(want)} (got ${JSON.stringify(replicas.get("a").text())})`,
+        );
+        break;
+      // The gc fixture's whole point: the visible text is unchanged AND the
+      // tombstone really went away. Text alone cannot distinguish a collected
+      // tombstone from a retained one.
+      case "tombstone_count":
+        assert.equal(main_().tombstoneCount(), want, `${label}: tombstone_count`);
+        break;
+      default:
+        assert.fail(`${label}: unknown textcrdt expectation \`${key}\``);
     }
   }
 }

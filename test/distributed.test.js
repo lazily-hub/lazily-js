@@ -13,6 +13,7 @@ import {
   OpKind,
   PeerPermissions,
   Snapshot,
+  wireStampGreater,
 } from "../src/index.js";
 import {
   CrdtPlaneRuntime,
@@ -121,32 +122,35 @@ test("distributed/crdt_sync_frames.json round-trips each CrdtSync envelope", () 
     // Byte round-trip through encode/decode.
     assert.deepEqual(IpcMessage.decodeJson(message.encodeJson()), message, frame.label);
 
-    const a = frame.assertions ?? {};
-    if ("frontier_len" in a) {
-      assert.equal(message.crdtSync.frontier.length, a.frontier_len, frame.label);
-    }
-    if ("frontier_omitted" in a) {
-      // #lzspecfrontiersuppress: an omitted frontier decodes as empty.
-      assert.equal(a.frontier_omitted, true, frame.label);
-      assert.equal("frontier" in frame.wire.CrdtSync, false, frame.label);
-      assert.equal(message.crdtSync.frontier.length, 0, frame.label);
-    }
-    if ("op_count" in a) {
-      assert.equal(message.crdtSync.ops.length, a.op_count, frame.label);
-    }
-    if ("has_keyed_op" in a) {
-      assert.equal(
-        message.crdtSync.ops.some((op) => op.key !== null),
-        a.has_keyed_op,
-        frame.label,
-      );
-    }
-    if ("has_keyless_op" in a) {
-      assert.equal(
-        message.crdtSync.ops.some((op) => op.key === null),
-        a.has_keyless_op,
-        frame.label,
-      );
+    // Exhaustive, not `in`-guarded: an assertion key this runner does not know
+    // must fail rather than fall through, or a frame's metadata can arrive and
+    // be skipped while the fixture still reports as replayed.
+    for (const [key, expected] of Object.entries(frame.assertions ?? {})) {
+      const where = `${frame.label}: ${key}`;
+      switch (key) {
+        case "frontier_len":
+          assert.equal(message.crdtSync.frontier.length, expected, where);
+          break;
+        case "frontier_omitted":
+          // Frontier-suppression exemption: an omitted frontier decodes as empty.
+          assert.equal(
+            !("frontier" in frame.wire.CrdtSync) && message.crdtSync.frontier.length === 0,
+            expected,
+            where,
+          );
+          break;
+        case "op_count":
+          assert.equal(message.crdtSync.ops.length, expected, where);
+          break;
+        case "has_keyed_op":
+          assert.equal(message.crdtSync.ops.some((op) => op.key !== null), expected, where);
+          break;
+        case "has_keyless_op":
+          assert.equal(message.crdtSync.ops.some((op) => op.key === null), expected, where);
+          break;
+        default:
+          assert.fail(`${frame.label}: unknown frame assertion key \`${key}\``);
+      }
     }
   }
 });
@@ -184,6 +188,24 @@ test("distributed/anti_entropy_converge.json converges and is idempotent", () =>
       scenario.expect.converged,
       `${scenario.name} converged after redeliver`,
     );
+
+    // `resolution` names WHICH op is expected to win, which no other key in the
+    // block pins: `converged` says what the winning state is, and a runtime that
+    // resolved by arrival order would produce the same bytes on a fixture whose
+    // last-delivered op also happens to carry the highest stamp.
+    assert.equal(scenario.expect.resolution, "max_stamp", `${scenario.name} resolution`);
+    for (const entry of scenario.expect.converged) {
+      const candidates = ops.filter((op) => op.node === entry.node && op.key === entry.key);
+      assert.ok(candidates.length > 0, `${scenario.name}: no op for ${entry.node}/${entry.key}`);
+      const winner = candidates.reduce((best, op) =>
+        wireStampGreater(op.stamp, best.stamp) ? op : best,
+      );
+      assert.deepEqual(
+        winner.state.toWire(),
+        entry.state,
+        `${scenario.name}: ${entry.node}/${entry.key} did not converge to the max-stamp op`,
+      );
+    }
 
     // Delivery-order independence: reverse order converges to the same winner.
     if (scenario.expect.order_independent || scenario.reverse_order_equivalent) {

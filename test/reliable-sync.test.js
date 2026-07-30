@@ -22,6 +22,7 @@ import {
   SyncDriver,
   WireLwwRegister,
   WireStamp,
+  wireStampGreater,
 } from "../src/index.js";
 
 // Replays the canonical lazily-spec/conformance/reliable-sync fixtures against the
@@ -42,8 +43,54 @@ function loadFixture(name) {
   return JSON.parse(readFileSync(path, "utf8"));
 }
 
-const scenario = (fx, name) => fx.scenarios.find((s) => s.name === name);
+const scenario = (fx, name) => {
+  const found = fx.scenarios.find((s) => s.name === name);
+  assert.ok(found, `fixture has no scenario named ${name}`);
+  return found;
+};
 const msg = (wire) => IpcMessage.fromWire(wire);
+
+// -- receiver-side state model ----------------------------------------------
+//
+// Several fixtures state their outcome as a converged node map (`state_after`,
+// `converged_nodes`) or as an op-accounting claim (`ops_lost`, `ops_doubled`).
+// Those keys are the only ones that can tell "the coordinator returned Apply"
+// apart from "the ops actually landed, once each": a coordinator that returned
+// the right action while dropping or doubling the op list satisfies every epoch
+// assertion in the corpus. Nothing in this runner folded a frame's ops before,
+// so all of them were carried and never read.
+//
+// `{node: bytes}` is exactly the shape the fixtures use, so no translation layer
+// stands between the observation and the claim.
+function foldFrame(state, message) {
+  if (message.isSnapshot) {
+    state.clear();
+    for (const node of message.snapshot.nodes) state.set(node.node, [...node.state.bytes]);
+    return message.snapshot.nodes.length;
+  }
+  let applied = 0;
+  for (const op of message.delta.ops) {
+    if (op.node === undefined || op.payload === undefined) continue;
+    state.set(op.node, [...op.payload.bytes]);
+    applied += 1;
+  }
+  return applied;
+}
+
+const stateWire = (state) =>
+  Object.fromEntries([...state.entries()].sort((a, b) => a[0] - b[0]).map(([k, v]) => [String(k), v]));
+
+const seedState = (wire) =>
+  new Map(Object.entries(wire ?? {}).map(([node, bytes]) => [Number(node), [...bytes]]));
+
+// Every (node, byte) an accepted frame carries, as a multiset, so a lost or
+// doubled op is countable rather than merely invisible in the final state.
+function opKeysOf(message) {
+  if (message.isSnapshot) return [];
+  return message.delta.ops
+    .filter((op) => op.node !== undefined && op.payload !== undefined)
+    .map((op) => `${op.node}=${[...op.payload.bytes].join(",")}`);
+}
 
 // -- control-frame serde round-trip -----------------------------------------
 
@@ -124,21 +171,82 @@ test("reliable-sync: multi_epoch_delta.json", () => {
   const fx = loadFixture("multi_epoch_delta.json");
   assert.equal(fx.kind, "ReliableSync");
 
-  const sc = scenario(fx, "span_3_applies_equal_to_unit_fold");
-  const { base_epoch: base, epoch } = sc.delta;
-  assert.ok(epoch > base + 1, "fixture pins a multi-epoch span");
-  const delta = new Delta({ baseEpoch: base, epoch });
-  assert.equal(delta.span(), epoch - base);
-  const coord = new ResyncCoordinator(sc.receiver_last_epoch);
-  assert.equal(coord.ingestDelta(delta).action, ResyncAction.Apply);
-  assert.equal(coord.lastEpoch, sc.expect.receiver_last_epoch_after);
+  // The fixture's `assertions` block, decoded from the `wire` frame it ships.
+  // Neither was touched before: the runner rebuilt bare epoch-only Deltas from
+  // the scenarios, so `wire` was never decoded and all five keys — including
+  // `op_count`, the one that would notice a dropped op list — went unread.
+  const wireDelta = msg(fx.wire).delta;
+  for (const [key, expected] of Object.entries(fx.assertions)) {
+    switch (key) {
+      case "base_epoch": assert.equal(wireDelta.baseEpoch, expected, key); break;
+      case "epoch": assert.equal(wireDelta.epoch, expected, key); break;
+      case "span": assert.equal(wireDelta.span(), expected, key); break;
+      case "is_multi_epoch":
+        assert.equal(wireDelta.epoch > wireDelta.baseEpoch + 1, expected, key);
+        break;
+      case "op_count": assert.equal(wireDelta.ops.length, expected, key); break;
+      default: assert.fail(`multi_epoch_delta: unknown assertion key \`${key}\``);
+    }
+  }
 
-  const gap = scenario(fx, "gap_rule_unchanged_under_span");
-  const gc = new ResyncCoordinator(gap.receiver_last_epoch);
-  const res = gc.ingestDelta(new Delta({ baseEpoch: gap.delta.base_epoch, epoch: gap.delta.epoch }));
-  assert.equal(res.action, ResyncAction.RequestSnapshot);
-  assert.equal(res.fromEpoch, gap.expect.request_from);
-  assert.equal(gc.lastEpoch, gap.receiver_last_epoch);
+  for (const sc of fx.scenarios) {
+    const delta = msg({ Delta: sc.delta }).delta;
+    const coord = new ResyncCoordinator(sc.receiver_last_epoch);
+    const state = new Map();
+    const res = coord.ingestDelta(delta);
+    const applied = res.action === ResyncAction.Apply;
+    if (applied) foldFrame(state, IpcMessage.delta(delta));
+
+    for (const [key, expected] of Object.entries(sc.expect)) {
+      const where = `${sc.name}: ${key}`;
+      switch (key) {
+        case "action":
+          assert.equal(res.action, ResyncAction[expected], where);
+          break;
+        case "applied":
+          assert.equal(applied, expected, where);
+          break;
+        case "receiver_last_epoch_after":
+          assert.equal(coord.lastEpoch, expected, where);
+          break;
+        case "request_from":
+          assert.equal(res.fromEpoch, expected, where);
+          break;
+        // last_epoch jumps straight to `epoch`; it never stops at base+1, which
+        // is where a receiver that folded the span as a run of unit deltas and
+        // advanced per op would land.
+        case "atomic_advance":
+          assert.equal(
+            coord.lastEpoch === delta.epoch && coord.lastEpoch !== delta.baseEpoch + 1,
+            expected,
+            where,
+          );
+          break;
+        // batch = fold: the same ops delivered as unit deltas must leave the
+        // same last_epoch AND the same node state. Comparing epochs alone would
+        // pass on a receiver that advanced correctly and applied nothing.
+        case "fold_equivalent": {
+          const unitCoord = new ResyncCoordinator(sc.receiver_last_epoch);
+          const unitState = new Map();
+          for (const step of sc.equivalent_unit_fold ?? []) {
+            const unit = msg({ Delta: step }).delta;
+            if (unitCoord.ingestDelta(unit).action === ResyncAction.Apply) {
+              foldFrame(unitState, IpcMessage.delta(unit));
+            }
+          }
+          assert.equal(
+            unitCoord.lastEpoch === coord.lastEpoch
+              && JSON.stringify(stateWire(unitState)) === JSON.stringify(stateWire(state)),
+            expected,
+            where,
+          );
+          break;
+        }
+        default:
+          assert.fail(`${sc.name}: unknown expectation \`${key}\``);
+      }
+    }
+  }
 });
 
 // -- resync_gap_converge.json -----------------------------------------------
@@ -148,6 +256,7 @@ test("reliable-sync: resync_gap_converge.json", () => {
 
   const sc = scenario(fx, "drop_suffix_then_resync_converges");
   const coord = new ResyncCoordinator(sc.start_last_epoch);
+  const state = new Map();
   let requests = 0;
   for (const frame of sc.inbound) {
     if (frame.dropped) continue;
@@ -161,10 +270,39 @@ test("reliable-sync: resync_gap_converge.json", () => {
     } else {
       assert.equal(res.action, ResyncAction.Ignore);
     }
+    if (res.action === ResyncAction.Apply) foldFrame(state, msg(frame.frame));
     assert.equal(coord.lastEpoch, frame.last_epoch_after);
   }
-  assert.equal(coord.lastEpoch, sc.expect.final_last_epoch);
-  assert.equal(requests, sc.expect.resync_requests_emitted);
+
+  // The receiver that missed nothing. `equals_no_drop_receiver` is the whole
+  // claim of the scenario — that resync CONVERGES, not merely that it stops
+  // requesting — and neither it nor `converged_nodes` was read before, so the
+  // dropped-suffix receiver's graph was never compared to anything.
+  const whole = new ResyncCoordinator(sc.start_last_epoch);
+  const wholeState = new Map();
+  for (const frame of sc.inbound) {
+    if (!frame.frame) continue;
+    if (whole.ingest(msg(frame.frame)).action === ResyncAction.Apply) {
+      foldFrame(wholeState, msg(frame.frame));
+    }
+  }
+
+  for (const [key, expected] of Object.entries(sc.expect)) {
+    const where = `drop_suffix_then_resync_converges: ${key}`;
+    switch (key) {
+      case "final_last_epoch": assert.equal(coord.lastEpoch, expected, where); break;
+      case "resync_requests_emitted": assert.equal(requests, expected, where); break;
+      case "converged_nodes": assert.deepEqual(stateWire(state), expected, where); break;
+      case "equals_no_drop_receiver":
+        assert.equal(
+          JSON.stringify(stateWire(state)) === JSON.stringify(stateWire(wholeState)),
+          expected,
+          where,
+        );
+        break;
+      default: assert.fail(`drop_suffix_then_resync_converges: unknown expectation \`${key}\``);
+    }
+  }
 
   const single = scenario(fx, "single_request_per_gap");
   const c2 = new ResyncCoordinator(single.start_last_epoch);
@@ -172,7 +310,14 @@ test("reliable-sync: resync_gap_converge.json", () => {
   for (const frame of single.inbound) {
     if (c2.ingest(msg(frame.frame)).action === ResyncAction.RequestSnapshot) req2++;
   }
-  assert.equal(req2, single.expect.resync_requests_emitted);
+  for (const [key, expected] of Object.entries(single.expect)) {
+    const where = `single_request_per_gap: ${key}`;
+    switch (key) {
+      case "final_last_epoch": assert.equal(c2.lastEpoch, expected, where); break;
+      case "resync_requests_emitted": assert.equal(req2, expected, where); break;
+      default: assert.fail(`single_request_per_gap: unknown expectation \`${key}\``);
+    }
+  }
 });
 
 // -- idempotent_redelivery.json ---------------------------------------------
@@ -182,11 +327,32 @@ test("reliable-sync: idempotent_redelivery.json", () => {
   for (const name of ["replayed_delta_is_ignored", "duplicate_current_head_is_ignored"]) {
     const sc = scenario(fx, name);
     const coord = new ResyncCoordinator(sc.start_last_epoch);
+    // The state the receiver already holds. Folding it is what makes the
+    // redelivery test real: the replayed frame in the first scenario carries
+    // node 1 = 99, so a receiver that double-applied would be caught HERE and
+    // nowhere else — every epoch assertion in this fixture stays satisfied.
+    const state = seedState(sc.state_before);
     for (const frame of sc.inbound) {
-      assert.equal(coord.ingest(msg(frame.frame)).action, ResyncAction.Ignore, name);
+      const result = coord.ingest(msg(frame.frame));
+      assert.equal(result.action, ResyncAction.Ignore, name);
+      if (result.action === ResyncAction.Apply) foldFrame(state, msg(frame.frame));
       assert.equal(coord.lastEpoch, frame.last_epoch_after);
     }
-    assert.equal(coord.lastEpoch, sc.expect.final_last_epoch);
+    for (const [key, expected] of Object.entries(sc.expect)) {
+      const where = `${name}: ${key}`;
+      switch (key) {
+        case "final_last_epoch": assert.equal(coord.lastEpoch, expected, where); break;
+        case "state_after": assert.deepEqual(stateWire(state), expected, where); break;
+        case "net_effect_unchanged":
+          assert.equal(
+            JSON.stringify(stateWire(state)) === JSON.stringify(stateWire(seedState(sc.state_before))),
+            expected,
+            where,
+          );
+          break;
+        default: assert.fail(`${name}: unknown expectation \`${key}\``);
+      }
+    }
   }
 });
 
@@ -257,25 +423,91 @@ test("reliable-sync: outbox_replay_after_crash.json", () => {
   // "crash": reopen the durable file outbox from disk.
   file = new FileOutbox(path);
   const replay = file.replayFrom(cursor);
-  assert.deepEqual(replay.map(([e]) => e), sc.expect.replayed_from_cursor);
 
   const coord = new ResyncCoordinator(cursor);
   const applied = [];
+  const landed = [];
   for (const [, m] of replay) {
-    if (coord.ingest(m).action === ResyncAction.Apply) applied.push(coord.lastEpoch);
+    if (coord.ingest(m).action === ResyncAction.Apply) {
+      applied.push(coord.lastEpoch);
+      landed.push(...opKeysOf(m));
+    }
   }
-  assert.deepEqual(applied, sc.expect.receiver_applies);
-  assert.equal(coord.lastEpoch, sc.expect.receiver_last_epoch_after);
+  // Every op the sender appended ABOVE the reconnect cursor must land exactly
+  // once. Below it, nothing may be re-applied — that is the "doubled" half.
+  const owed = appended.filter(([e]) => e > cursor).flatMap(([, m]) => opKeysOf(m));
+  const alreadySeen = appended.filter(([e]) => e <= cursor).flatMap(([, m]) => opKeysOf(m));
+  const lost = owed.filter((k) => !landed.includes(k)).length;
+  const doubled = landed.filter((k, i) => landed.indexOf(k) !== i).length
+    + landed.filter((k) => alreadySeen.includes(k)).length;
+
+  for (const [key, expected] of Object.entries(sc.expect)) {
+    const where = `${sc.name}: ${key}`;
+    switch (key) {
+      case "retained_after_ack":
+        assert.deepEqual(mem.retainedEpochs(), expected, where);
+        break;
+      case "replayed_from_cursor":
+        assert.deepEqual(replay.map(([e]) => e), expected, where);
+        break;
+      // Order, not just membership: at-least-once replay that arrives out of
+      // order fails the base_epoch chain, and `replayed_from_cursor` compared as
+      // a set would not have seen it.
+      case "replay_order":
+        assert.deepEqual(replay.map(([e]) => e), expected, where);
+        break;
+      case "receiver_applies":
+        assert.deepEqual(applied, expected, where);
+        break;
+      case "receiver_last_epoch_after":
+        assert.equal(coord.lastEpoch, expected, where);
+        break;
+      case "ops_lost": assert.equal(lost, expected, where); break;
+      case "ops_doubled": assert.equal(doubled, expected, where); break;
+      // The property the whole fixture is named for. At-least-once delivery plus
+      // idempotent apply = exactly-once EFFECT; the epoch keys above cannot see
+      // it because they never look at the ops.
+      case "exactly_once_effect":
+        assert.equal(lost === 0 && doubled === 0, expected, where);
+        break;
+      default: assert.fail(`${sc.name}: unknown expectation \`${key}\``);
+    }
+  }
 
   // send_failure_retains_frame_for_next_tick
   const sc2 = scenario(fx, "send_failure_retains_frame_for_next_tick");
   const mem2 = new InMemoryOutbox();
   for (const [e, m] of framesOf(sc2, "appended")) mem2.append(e, m);
-  assert.deepEqual(mem2.retainedEpochs(), sc2.expect.retained);
-  assert.deepEqual(
-    mem2.replayFrom(sc2.expect.retained[0] - 1).map(([e]) => e),
-    sc2.expect.retained,
-  );
+  // The send is modelled as failing: nothing is acked, so nothing is pruned.
+  const resent = mem2.replayFrom(sc2.expect.retained[0] - 1).map(([e]) => e);
+  const appendedEpochs = framesOf(sc2, "appended").map(([e]) => e);
+  for (const [key, expected] of Object.entries(sc2.expect)) {
+    const where = `${sc2.name}: ${key}`;
+    switch (key) {
+      case "retained": assert.deepEqual(mem2.retainedEpochs(), expected, where); break;
+      // Append-before-send: a failed send leaves the frame durable, which is
+      // exactly what the pre-outbox bug did not do.
+      case "frame_retained_after_failed_send":
+        assert.equal(
+          appendedEpochs.every((e) => mem2.retainedEpochs().includes(e)),
+          expected,
+          where,
+        );
+        break;
+      case "resent_on_next_tick": assert.deepEqual(resent, expected, where); break;
+      // The pre-outbox defect: bumping the out-epoch before the send left a hole
+      // no later tick could fill. A gap is permanent iff some appended epoch is
+      // neither retained nor re-sent.
+      case "permanent_gap":
+        assert.equal(
+          appendedEpochs.some((e) => !resent.includes(e)),
+          expected,
+          where,
+        );
+        break;
+      default: assert.fail(`${sc2.name}: unknown expectation \`${key}\``);
+    }
+  }
 
   rmSync(dir, { recursive: true, force: true });
 });
@@ -284,21 +516,82 @@ test("reliable-sync: outbox_replay_after_crash.json", () => {
 
 const stamp = (o) => new WireStamp({ wallTime: o.wall_time, logical: o.logical, peer: o.peer });
 
+// Fold an OR-set op list into a fresh OrSet, so a scenario can be replayed in
+// any order and any number of times.
+function foldOrSet(ops, order = (o) => o) {
+  const set = new OrSet();
+  for (const op of order([...ops])) {
+    if (op.op === "add") set.add(op.tag);
+    else if (op.op === "remove") set.removeObserved(op.observed_tags);
+  }
+  return set;
+}
+
+const reverse = (ops) => ops.reverse();
+
 test("reliable-sync: liveness_orset_lww.json", () => {
   const fx = loadFixture("liveness_orset_lww.json");
 
   const add = scenario(fx, "open_set_add_wins_over_stale_remove");
-  const set = new OrSet();
-  for (const op of add.ops) {
-    if (op.op === "add") set.add(op.tag);
-    else if (op.op === "remove") set.removeObserved(op.observed_tags);
+  const set = foldOrSet(add.ops);
+  for (const [key, expected] of Object.entries(add.expect)) {
+    const where = `open_set_add_wins_over_stale_remove: ${key}`;
+    switch (key) {
+      case "present": assert.equal(set.present(), expected, where); break;
+      // The mechanism, not just the verdict: `present` alone is satisfied by an
+      // OR-set that ignores removes entirely. This pins that the doc stays open
+      // BECAUSE the remove observed only the earlier tag.
+      case "reason": {
+        const removed = new Set(add.ops.flatMap((op) => op.observed_tags ?? []));
+        const survivor = add.ops.find((op) => op.op === "add" && !removed.has(op.tag));
+        assert.ok(survivor, where);
+        assert.equal(`add_tag_${survivor.tag}_not_observed_by_remove`, expected, where);
+        break;
+      }
+      // A join semilattice: delivery order cannot change the result.
+      case "order_independent":
+        assert.equal(foldOrSet(add.ops, reverse).present() === set.present(), expected, where);
+        break;
+      // Re-delivering every op applies nothing new (state-based idempotence).
+      case "redeliver_applied_count": {
+        const before = `${[...set.adds].sort()}|${[...set.removes].sort()}`;
+        const again = foldOrSet([...add.ops, ...add.ops]);
+        const after = `${[...again.adds].sort()}|${[...again.removes].sort()}`;
+        assert.equal(before === after ? 0 : 1, expected, where);
+        break;
+      }
+      default: assert.fail(`open_set_add_wins_over_stale_remove: unknown expectation \`${key}\``);
+    }
   }
-  assert.equal(set.present(), add.expect.present);
 
   const lww = scenario(fx, "lww_alive_highest_stamp_wins");
-  const reg = new WireLwwRegister(stamp(lww.ops[0].stamp), lww.ops[0].value);
-  for (const op of lww.ops.slice(1)) reg.set(stamp(op.stamp), op.value);
-  assert.equal(reg.value, lww.expect.value);
+  const foldLww = (ops) => {
+    const reg = new WireLwwRegister(stamp(ops[0].stamp), ops[0].value);
+    for (const op of ops.slice(1)) reg.set(stamp(op.stamp), op.value);
+    return reg;
+  };
+  const reg = foldLww(lww.ops);
+  for (const [key, expected] of Object.entries(lww.expect)) {
+    const where = `lww_alive_highest_stamp_wins: ${key}`;
+    switch (key) {
+      case "value": assert.equal(reg.value, expected, where); break;
+      // Which op won, not just what value survived: a register resolving by
+      // arrival order lands on the same value whenever the last write happens to
+      // carry the highest stamp, and this fixture is built so it does not.
+      case "resolution": {
+        assert.equal(expected, "max_stamp", where);
+        const winner = lww.ops.reduce((best, op) =>
+          wireStampGreater(stamp(op.stamp), stamp(best.stamp)) ? op : best,
+        );
+        assert.equal(reg.value, winner.value, where);
+        break;
+      }
+      case "order_independent":
+        assert.equal(foldLww([...lww.ops].reverse()).value === reg.value, expected, where);
+        break;
+      default: assert.fail(`lww_alive_highest_stamp_wins: unknown expectation \`${key}\``);
+    }
+  }
 
   const death = scenario(fx, "whole_editor_death_cascades");
   const open = death.open_set
@@ -311,11 +604,94 @@ test("reliable-sync: liveness_orset_lww.json", () => {
   for (const [pid, v] of Object.entries(death.alive_before)) {
     alive.set(Number(pid), new WireLwwRegister(new WireStamp({ wallTime: 1, logical: 0, peer: 1 }), v));
   }
+  const liveDocs = () =>
+    [...new Set(open.filter(([, p]) => alive.get(p)?.value === true).map(([doc]) => doc))].sort();
+  const liveBefore = liveDocs();
   const op = death.op;
   const pid = Number(op.key.replace("alive/pid", ""));
   alive.get(pid).set(stamp(op.stamp), op.value);
-  const live = [...new Set(open.filter(([, p]) => alive.get(p)?.value === true).map(([doc]) => doc))].sort();
-  assert.deepEqual(live, [...death.expect.live_docs_after].sort());
+  const live = liveDocs();
+
+  for (const [key, expected] of Object.entries(death.expect)) {
+    const where = `whole_editor_death_cascades: ${key}`;
+    switch (key) {
+      // Checked, not assumed. The "after" set alone does not say the cascade
+      // happened — an aggregate that was already {docC} before the death would
+      // satisfy it.
+      case "live_docs_before": assert.deepEqual(liveBefore, [...expected].sort(), where); break;
+      case "live_docs_after": assert.deepEqual(live, [...expected].sort(), where); break;
+      case "cascade":
+        assert.equal(live.length < liveBefore.length, expected, where);
+        break;
+      case "note":
+        // Prose. Carries no assertion, and is consumed here so it cannot hide a
+        // key that does.
+        assert.equal(typeof expected, "string", where);
+        break;
+      default: assert.fail(`whole_editor_death_cascades: unknown expectation \`${key}\``);
+    }
+  }
+
+  // This scenario was in the fixture and replayed by nothing: the runner picked
+  // its three scenarios by name and the fourth simply never ran, so the derived
+  // per-doc aggregate — the property the fixture is FOR — went unchecked.
+  const agg = scenario(fx, "derived_live_doc_aggregate_converges_under_retry");
+  const foldAggregate = (ops) => {
+    const sets = new Map();
+    const regs = new Map();
+    for (const o of ops) {
+      if (o.register_kind === "orset") {
+        if (!sets.has(o.key)) sets.set(o.key, new OrSet());
+        if (o.op === "add") sets.get(o.key).add(o.tag);
+        else sets.get(o.key).removeObserved(o.observed_tags ?? []);
+      } else if (o.register_kind === "lww") {
+        const existing = regs.get(o.key);
+        if (existing) existing.set(stamp(o.stamp), o.value);
+        else regs.set(o.key, new WireLwwRegister(stamp(o.stamp), o.value));
+      } else {
+        assert.fail(`${agg.name}: unknown register_kind \`${o.register_kind}\``);
+      }
+    }
+    const docs = new Set();
+    for (const [key, set] of sets) {
+      const [doc, pidKey] = key.split("/");
+      if (set.present() && regs.get(`alive/${pidKey}`)?.value === true) docs.add(doc);
+    }
+    return [...docs].sort();
+  };
+  const aggregate = foldAggregate(agg.ops);
+  for (const [key, expected] of Object.entries(agg.expect)) {
+    const where = `${agg.name}: ${key}`;
+    switch (key) {
+      case "converged_live_docs": assert.deepEqual(aggregate, expected, where); break;
+      case "order_independent":
+        assert.equal(
+          JSON.stringify(foldAggregate([...agg.ops].reverse())) === JSON.stringify(aggregate),
+          expected,
+          where,
+        );
+        break;
+      case "redeliver_applied_count":
+        assert.equal(
+          JSON.stringify(foldAggregate([...agg.ops, ...agg.ops])) === JSON.stringify(aggregate)
+            ? 0
+            : 1,
+          expected,
+          where,
+        );
+        break;
+      // Per-doc isolation: dropping one doc's ops removes only that doc.
+      case "per_doc_isolation": {
+        const isolated = aggregate.every((doc) =>
+          JSON.stringify(foldAggregate(agg.ops.filter((o) => !o.key.startsWith(`${doc}/`))))
+            === JSON.stringify(aggregate.filter((d) => d !== doc)),
+        );
+        assert.equal(isolated, expected, where);
+        break;
+      }
+      default: assert.fail(`${agg.name}: unknown expectation \`${key}\``);
+    }
+  }
 });
 
 // -- SyncDriver (#sync-driver): the loop-shape mechanism over a scripted seam --

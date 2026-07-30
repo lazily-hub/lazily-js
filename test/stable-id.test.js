@@ -130,6 +130,19 @@ test("conformance: stableid_alignment.json", () => {
       if (scenario.expect.removed) {
         assert.deepEqual(a.removed, scenario.expect.removed, scenario.name);
       }
+      // The threshold the "Edited, not Insert+Remove" classification rests on.
+      // `matches` records the verdict; only this pins that the verdict came from
+      // a similarity at or above the floor rather than from a lucky tie-break.
+      if (scenario.expect.similarity_min !== undefined) {
+        const edited = a.newMatches.filter((m) => m.kind === "edited");
+        assert.ok(edited.length > 0, `${scenario.name}: no edited match to score`);
+        for (const m of edited) {
+          assert.ok(
+            m.similarity >= scenario.expect.similarity_min,
+            `${scenario.name}: similarity ${m.similarity} < ${scenario.expect.similarity_min}`,
+          );
+        }
+      }
       if (scenario.expect.new_key_equals_old_key) {
         const keys = assignStableKeys(oldB, newB);
         const oldKeys = oldB.map((b) => blockKey(b).asString());
