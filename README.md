@@ -728,16 +728,29 @@ property test.
 
 ## The lazily family
 
-| Binding | Language | Package / role |
-|---------|----------|----------------|
-| [`lazily-rs`][rs] | Rust | `lazily` on crates.io; single-threaded, thread-safe, and async context layers |
-| [`lazily-py`][py] | Python | `lazily` on PyPI; dict-backed context plus IPC/shared-blob host types |
-| **`lazily-js`** | JavaScript / TypeScript | `@lazily-hub/lazily-js`; reactive core + async context, spec wire types, state charts, CRDTs, distributed plane (signaling + WebRTC) |
+lazily is one reactive kernel — `Source` / `Computed` / `Effect`, keyed
+collections, state charts, CRDTs, and a distributed plane — implemented natively
+in each language and held to a single cross-language contract:
+
+- [`lazily-spec`][spec] — the wire protocol, the generated feature matrix, and
+  the conformance corpus every binding replays.
+- [`lazily-formal`][formal] — the Lean 4 formal model the bindings share.
+
+| Binding | Language | Role |
+|---------|----------|------|
+| [`lazily-rs`][rs] | Rust | the reference implementation; single-threaded, thread-safe, and async context layers |
+| [`lazily-py`][py] | Python | dict-backed context plus IPC/shared-blob host types |
+| [`lazily-go`][go] | Go | Go reactive core and distributed plane |
+| [`lazily-kt`][kt] | Kotlin / JVM | Kotlin reactive core plus typed state charts |
+| **`lazily-js`** | JavaScript / TypeScript | `@lazily-hub/lazily-js` — you are here; reactive core + async context, spec wire types, state charts, CRDTs, distributed plane (signaling + WebRTC) |
+| [`lazily-cs`][cs] | C# / .NET | .NET reactive core and distributed plane |
+| [`lazily-cpp`][cpp] | C++ | C++ reactive core and native transport surface |
 | [`lazily-zig`][zig] | Zig | Zig library / FFI-oriented embedding surface |
-| [`lazily-kt`][kt] | Kotlin/JVM | Kotlin reactive core plus typed state charts |
-| [`lazily-dart`][dart] | Dart | Dart binding with statechart conformance |
-| [`lazily-spec`][spec] | Specification | wire protocol, JSON Schemas, conformance fixtures |
-| [`lazily-formal`][formal] | Lean 4 | executable formal model for the shared primitives, FSM, and state charts |
+| [`lazily-dart`][dart] | Dart / Flutter | Dart binding with statechart conformance |
+| [`lazily-react`][react] | React / Preact | **not a separate language binding** — `@lazily-hub/lazily-react` is a thin hook layer (`useSource` / `useComputed` / `useLazily`) over this package |
+
+Per-binding feature parity is tracked in the `coverage.json`-generated matrix in
+[`lazily-spec`][spec]; read it there rather than any hand copy.
 
 ## Development
 
@@ -812,14 +825,21 @@ npm run test:size        # gate: fails CI if any entry exceeds its budget
   conformance fixtures.
 - [`lazily-formal`][formal] - Lean 4 formal model behind the shared behavioral
   guarantees.
-- [`lazily-rs`][rs] / [`lazily-py`][py] / [`lazily-zig`][zig] /
-  [`lazily-kt`][kt] / [`lazily-dart`][dart] - sibling bindings.
+- [`lazily-rs`][rs] / [`lazily-py`][py] / [`lazily-go`][go] / [`lazily-kt`][kt] /
+  [`lazily-cs`][cs] / [`lazily-cpp`][cpp] / [`lazily-zig`][zig] /
+  [`lazily-dart`][dart] - sibling bindings; see the "The lazily family" section
+  above.
+- [`lazily-react`][react] - React / Preact hooks layered over this package.
 
 [rs]: https://github.com/lazily-hub/lazily-rs
 [py]: https://github.com/lazily-hub/lazily-py
+[go]: https://github.com/lazily-hub/lazily-go
 [zig]: https://github.com/lazily-hub/lazily-zig
 [kt]: https://github.com/lazily-hub/lazily-kt
+[cs]: https://github.com/lazily-hub/lazily-cs
+[cpp]: https://github.com/lazily-hub/lazily-cpp
 [dart]: https://github.com/lazily-hub/lazily-dart
+[react]: https://github.com/lazily-hub/lazily-react
 [spec]: https://github.com/lazily-hub/lazily-spec
 [formal]: https://github.com/lazily-hub/lazily-formal
 [statecharts]: https://github.com/lazily-hub/lazily-spec/blob/main/docs/state-charts.md
