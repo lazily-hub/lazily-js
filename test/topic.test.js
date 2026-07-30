@@ -4,6 +4,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
+import { assertKey, assertKeyWith } from "./support/assert-key.js";
+
 import { TopicCell, TopicDurability } from "../src/queue.js";
 import { Context } from "../src/reactive.js";
 
@@ -66,21 +68,27 @@ function runFixture(fixture) {
     }
 
     const expected = step.expected;
-    assert.equal(topic.baseOffset(), expected.base_offset, `step ${i}: base_offset`);
-    assert.deepEqual(topic.elements(), expected.elements, `step ${i}: elements`);
-    assert.deepEqual(topic.subscriptions(), expected.subscriptions, `step ${i}: subscriptions`);
-    for (const [id, stream] of Object.entries(expected.reads ?? {})) {
-      assert.deepEqual(topic.readStream(id), stream, `step ${i}: reads.${id}`);
+    assertKey(expected, "base_offset", topic.baseOffset(), `step ${i}: base_offset`);
+    assertKey(expected, "elements", topic.elements(), `step ${i}: elements`);
+    assertKey(expected, "subscriptions", topic.subscriptions(), `step ${i}: subscriptions`);
+    if ("reads" in expected) {
+      assertKeyWith(expected, "reads", (reads) => {
+        for (const [id, stream] of Object.entries(reads)) {
+          assert.deepEqual(topic.readStream(id), stream, `step ${i}: reads.${id}`);
+        }
+      });
     }
-    assert.deepEqual(result.invalidates, expected.invalidates, `step ${i}: invalidates`);
     for (const probe of probes.values()) ctx.get(probe.node);
-    for (const [id, invalidated] of Object.entries(expected.invalidates ?? {})) {
-      assert.equal(
-        probeFor(id).count > countsBefore.get(id),
-        invalidated,
-        `step ${i}: reactive subscriber reader ${id} recomputation`,
-      );
-    }
+    assertKeyWith(expected, "invalidates", (invalidates) => {
+      assert.deepEqual(result.invalidates, invalidates, `step ${i}: invalidates`);
+      for (const [id, invalidated] of Object.entries(invalidates)) {
+        assert.equal(
+          probeFor(id).count > countsBefore.get(id),
+          invalidated,
+          `step ${i}: reactive subscriber reader ${id} recomputation`,
+        );
+      }
+    });
     if ("returns" in step) assert.equal(result.returns, step.returns, `step ${i}: returns`);
   }
 }

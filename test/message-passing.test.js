@@ -4,6 +4,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
+import { assertKey, assertKeyWith } from "./support/assert-key.js";
+
 import {
   CallStateKind,
   CausalReceipt,
@@ -51,8 +53,10 @@ function foldFrame(projection, frame) {
 }
 
 function assertProjection(projection, expect) {
-  const want = CommandProjectionImage.fromWire(expect.projection);
-  assert.deepEqual(projection.toImage().toWire(), want.toWire());
+  assertKeyWith(expect, "projection", (wire) => {
+    const want = CommandProjectionImage.fromWire(wire);
+    assert.deepEqual(projection.toImage().toWire(), want.toWire());
+  });
 }
 
 function submitFixture(commandId, generation) {
@@ -174,13 +178,14 @@ test("sync tmux layout submit shared blob", () => {
 test("accepted then applied receipt is terminal only at receipt", () => {
   if (!fixturesPresent()) return;
   const fx = load("accepted_then_applied_receipt.json");
-  const terminalAt = fx.expect.terminal_after_frame_index;
   const p = new CommandProjection();
-  fx.frames.forEach((frame, i) => {
-    foldFrame(p, frame);
-    const isTerminal = p.terminalFor("cmd-run-1") !== null;
-    if (i < terminalAt) assert.equal(isTerminal, false, `frame ${i} must be non-terminal`);
-    else assert.equal(isTerminal, true, `frame ${i} must be terminal`);
+  assertKeyWith(fx.expect, "terminal_after_frame_index", (terminalAt) => {
+    fx.frames.forEach((frame, i) => {
+      foldFrame(p, frame);
+      const isTerminal = p.terminalFor("cmd-run-1") !== null;
+      if (i < terminalAt) assert.equal(isTerminal, false, `frame ${i} must be non-terminal`);
+      else assert.equal(isTerminal, true, `frame ${i} must be terminal`);
+    });
   });
   assertProjection(p, fx.expect);
 });
@@ -188,13 +193,19 @@ test("accepted then applied receipt is terminal only at receipt", () => {
 test("stale generation events and receipts are ignored", () => {
   if (!fixturesPresent()) return;
   const fx = load("stale_generation_ignored.json");
-  const ignored = fx.expect.ignored_frame_indices;
   const p = new CommandProjection();
-  fx.frames.forEach((frame, i) => {
-    const status = foldFrame(p, frame);
-    if (ignored.includes(i)) {
-      assert.equal(status.kind, CommandApplyStatusKind.StaleGeneration, `frame ${i} must be stale`);
-    }
+  assertKeyWith(fx.expect, "ignored_frame_indices", (ignored) => {
+    assert.ok(ignored.length > 0, "the fixture lists no ignored frames — nothing to prove stale");
+    fx.frames.forEach((frame, i) => {
+      const status = foldFrame(p, frame);
+      if (ignored.includes(i)) {
+        assert.equal(
+          status.kind,
+          CommandApplyStatusKind.StaleGeneration,
+          `frame ${i} must be stale`,
+        );
+      }
+    });
   });
   assertProjection(p, fx.expect);
 });
@@ -202,22 +213,36 @@ test("stale generation events and receipts are ignored", () => {
 test("terminal conflict fails closed fixture", () => {
   if (!fixturesPresent()) return;
   const fx = load("terminal_conflict_fail_closed.json");
-  const conflictAt = fx.expect.conflict_after_frame_index;
   const commandId = fx.expect.conflict_command_id;
   const p = new CommandProjection();
-  fx.frames.forEach((frame, i) => {
-    const status = foldFrame(p, frame);
-    if (i === conflictAt) {
-      assert.equal(status.kind, CommandApplyStatusKind.TerminalConflict);
-    }
+  assertKeyWith(fx.expect, "conflict_after_frame_index", (conflictAt) => {
+    let sawConflict = false;
+    fx.frames.forEach((frame, i) => {
+      const status = foldFrame(p, frame);
+      if (i === conflictAt) {
+        assert.equal(status.kind, CommandApplyStatusKind.TerminalConflict);
+        sawConflict = true;
+      }
+    });
+    assert.ok(sawConflict, `no frame at index ${conflictAt} — the conflict index is out of range`);
   });
   // Compared against the fixture's own `conflict`, not a hardcoded `true`: the
   // key was previously carried and never read, so a fixture asserting that a
   // sequence does NOT conflict would have been replayed under this runner and
   // reported green while the runner demanded the opposite.
-  assert.equal(p.hasConflict(commandId), fx.expect.conflict);
-  const before = CommandProjectionImage.fromWire(fx.expect.projection_before_conflict);
-  assert.deepEqual(p.toImage().toWire(), before.toWire());
+  assertKey(fx.expect, "conflict", p.hasConflict(commandId));
+  // The command id is the handle the conflict verdict is read through, so it is
+  // asserted against the folded projection rather than trusted as an input.
+  assertKeyWith(fx.expect, "conflict_command_id", (id) => {
+    assert.ok(
+      p.toImage().toWire().commands.some((c) => c.command_id === id),
+      `conflict_command_id ${id} names no command in the folded projection`,
+    );
+  });
+  assertKeyWith(fx.expect, "projection_before_conflict", (wire) => {
+    const before = CommandProjectionImage.fromWire(wire);
+    assert.deepEqual(p.toImage().toWire(), before.toWire());
+  });
 });
 
 test("cancel preempts nonterminal scenarios", () => {
@@ -229,18 +254,24 @@ test("cancel preempts nonterminal scenarios", () => {
     // from "the cancel was applied and then overwritten": both leave the same
     // final projection. Only the per-frame status tells them apart, and the
     // scenario that carries the key was folded without ever looking at it.
-    const ignored = scenario.expect.ignored_frame_indices ?? [];
-    scenario.frames.forEach((frame, i) => {
-      const before = ignored.includes(i) ? JSON.stringify(p.toImage().toWire()) : null;
-      foldFrame(p, frame);
-      if (before !== null) {
-        assert.equal(
-          JSON.stringify(p.toImage().toWire()),
-          before,
-          `${scenario.name}: frame ${i} is listed as ignored but changed the projection`,
-        );
-      }
-    });
+    const fold = (ignored) => {
+      scenario.frames.forEach((frame, i) => {
+        const before = ignored.includes(i) ? JSON.stringify(p.toImage().toWire()) : null;
+        foldFrame(p, frame);
+        if (before !== null) {
+          assert.equal(
+            JSON.stringify(p.toImage().toWire()),
+            before,
+            `${scenario.name}: frame ${i} is listed as ignored but changed the projection`,
+          );
+        }
+      });
+    };
+    if ("ignored_frame_indices" in scenario.expect) {
+      assertKeyWith(scenario.expect, "ignored_frame_indices", fold);
+    } else {
+      fold([]);
+    }
     assertProjection(p, scenario.expect);
   }
 });
@@ -256,16 +287,17 @@ test("reconnect command projection resyncs", () => {
 test("rpc call waits for terminal", () => {
   if (!fixturesPresent()) return;
   const fx = load("rpc_call_waits_for_terminal.json");
-  const rpc = fx.expect.rpc;
-  const commandId = rpc.command_id;
-  const resolvesAt = rpc.resolves_after_frame_index;
-  const unresolved = rpc.unresolved_after_frame_indices;
   const p = new CommandProjection();
-  fx.frames.forEach((frame, i) => {
-    foldFrame(p, frame);
-    const resolved = p.terminalFor(commandId) !== null;
-    if (unresolved.includes(i)) assert.equal(resolved, false, `frame ${i} must not resolve`);
-    if (i === resolvesAt) assert.equal(resolved, true, `frame ${i} must resolve`);
+  assertKeyWith(fx.expect, "rpc", (rpc) => {
+    const commandId = rpc.command_id;
+    const resolvesAt = rpc.resolves_after_frame_index;
+    const unresolved = rpc.unresolved_after_frame_indices;
+    fx.frames.forEach((frame, i) => {
+      foldFrame(p, frame);
+      const resolved = p.terminalFor(commandId) !== null;
+      if (unresolved.includes(i)) assert.equal(resolved, false, `frame ${i} must not resolve`);
+      if (i === resolvesAt) assert.equal(resolved, true, `frame ${i} must resolve`);
+    });
   });
   assertProjection(p, fx.expect);
 });

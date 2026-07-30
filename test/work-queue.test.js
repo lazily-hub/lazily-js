@@ -4,6 +4,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
+import { assertKey, assertKeyWith } from "./support/assert-key.js";
+
 import { WorkQueueCell } from "../src/queue.js";
 import { Context } from "../src/reactive.js";
 
@@ -62,26 +64,34 @@ function runFixture(fixture) {
     }
 
     assert.deepEqual(result.returns, step.returns, `step ${i}: returns`);
-    assert.deepEqual(result.invalidates, step.expected.invalidates, `step ${i}: invalidates`);
     for (const probe of Object.values(probes)) ctx.get(probe.node);
-    for (const [kind, invalidated] of Object.entries(step.expected.invalidates)) {
-      assert.equal(
-        probes[kind].count > countsBefore[kind],
-        invalidated,
-        `step ${i}: reactive reader ${kind} recomputation`,
-      );
-    }
-    assert.deepEqual(queue.pendingItems(), step.expected.pending, `step ${i}: pending`);
-    assert.deepEqual(queue.inFlightDeliveries(), step.expected.in_flight, `step ${i}: in_flight`);
-    assert.deepEqual(queue.deadLetterItems(), step.expected.dead_letters, `step ${i}: dead_letters`);
-    assert.deepEqual(
+    assertKeyWith(step.expected, "invalidates", (invalidates) => {
+      assert.deepEqual(result.invalidates, invalidates, `step ${i}: invalidates`);
+      for (const [kind, invalidated] of Object.entries(invalidates)) {
+        assert.equal(
+          probes[kind].count > countsBefore[kind],
+          invalidated,
+          `step ${i}: reactive reader ${kind} recomputation`,
+        );
+      }
+    });
+    assertKey(step.expected, "pending", queue.pendingItems(), `step ${i}: pending`);
+    assertKey(step.expected, "in_flight", queue.inFlightDeliveries(), `step ${i}: in_flight`);
+    assertKey(
+      step.expected,
+      "dead_letters",
+      queue.deadLetterItems(),
+      `step ${i}: dead_letters`,
+    );
+    assertKey(
+      step.expected,
+      "reads",
       {
         pending_len: queue.pendingLen(),
         is_empty: queue.isEmpty(),
         in_flight_len: queue.inFlightLen(),
         dead_letter_len: queue.deadLetterLen(),
       },
-      step.expected.reads,
       `step ${i}: reads`,
     );
   }

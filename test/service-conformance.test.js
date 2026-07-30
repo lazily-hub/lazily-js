@@ -4,6 +4,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
+import { assertKey, assertKeyWith } from "./support/assert-key.js";
+
 import { Context } from "../src/reactive.js";
 import { DiscoveryCell, HealthCell, ReadinessCell, ServiceRegistry } from "../src/service.js";
 
@@ -24,7 +26,9 @@ function observe(ctx, cell) {
 function checkInval(ctx, obs, step, reader) {
   const wasCached = ctx.isSet(obs);
   ctx.get(obs);
-  assert.equal(!wasCached, step.expected.invalidates[reader], `${reader} invalidation`);
+  assertKeyWith(step.expected, "invalidates", (want) => {
+    assert.equal(!wasCached, want[reader], `${reader} invalidation`);
+  });
 }
 
 test("HealthCell", () => {
@@ -35,7 +39,7 @@ test("HealthCell", () => {
   for (const step of fx.steps) {
     const op = step.op;
     h.set(op.name, op.up, op.critical);
-    assert.equal(h.health(), step.expected.health);
+    assertKey(step.expected, "health", h.health());
     checkInval(ctx, obs, step, "health");
   }
 });
@@ -47,7 +51,7 @@ test("ReadinessCell", () => {
   const obs = observe(ctx, r.readyCell);
   for (const step of fx.steps) {
     r.set(step.op.name, step.op.ready);
-    assert.equal(r.ready(), step.expected.ready);
+    assertKey(step.expected, "ready", r.ready());
     checkInval(ctx, obs, step, "ready");
   }
 });
@@ -63,7 +67,7 @@ test("DiscoveryCell", () => {
     else if (op.type === "deregister") d.deregister(op.service);
     else if (op.type === "evict") d.evict(op.peer);
     else if (op.type === "resolve") assert.equal(d.resolve(op.service), step.returns);
-    assert.deepEqual(d.discovery(), step.expected.discovery);
+    assertKey(step.expected, "discovery", d.discovery());
     checkInval(ctx, obs, step, "discovery");
   }
 });
@@ -78,7 +82,7 @@ test("ServiceRegistry", () => {
     if (op.type === "register") reg.register(op.service, op.endpoint);
     else if (op.type === "deregister") reg.deregister(op.service);
     else if (op.type === "replay") reg.replay();
-    assert.deepEqual(reg.projection(), step.expected.projection);
+    assertKey(step.expected, "projection", reg.projection());
     checkInval(ctx, obs, step, "projection");
   }
 });

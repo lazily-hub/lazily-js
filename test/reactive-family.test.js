@@ -4,6 +4,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
+import { assertKey, assertKeyWith, excuseKey } from "./support/assert-key.js";
+
 import { Context } from "../src/reactive.js";
 import { SourceMap, EntryKind, ReactiveMap, ComputedMap } from "../src/reactive-family.js";
 
@@ -52,28 +54,43 @@ test("ComputedMap materialization conformance: observational_transparency.json",
   const factory = (k) => spec.val[k];
 
   // default_mode_eager: eager is the default materialization strategy.
-  assert.equal(expected.default_mode, "eager", "default strategy is eager");
+  excuseKey(
+    expected,
+    "default_mode",
+    "materialization mode is not a value this binding can report: eager is the "
+      + "pre-mint loop (materializeAll) and lazy is mint-on-access, so there is no "
+      + "mode flag to read back. The key selects which construction this runner "
+      + "replays as the default; the behaviour it selects is asserted through "
+      + "eager_present, lazy_present_at_build and lazy_present_after_reads.",
+  );
+  assert.equal(
+    expected.default_mode,
+    "eager",
+    "runner models the eager default only — a corpus that changes it needs a new path",
+  );
 
   const ctx = new Context();
   const eager = eagerSlotMap(ctx, keys, factory);
   const lazy = new ComputedMap(ctx);
 
   // eager_materializes_all: every declared key present up front.
-  assertSameSet(eager.presentKeys(), expected.eager_present, "eager_present");
+  assertKeyWith(expected, "eager_present", (want) => assertSameSet(eager.presentKeys(), want, "eager_present"));
   // lazy_defers_slots: nothing materialized until read.
   assert.equal(lazy.presentCount(), 0, "lazy defers all slots at build");
 
   // observe_canonical / eager_lazy_observationally_equivalent: identical values.
-  for (const [key, value] of Object.entries(expected.observe)) {
-    assert.equal(eager.get(ctx, key), value, `eager observe[${key}]`);
-    assert.equal(lazy.getOrInsertWith(ctx, key, factory), value, `lazy observe[${key}]`);
-  }
+  assertKeyWith(expected, "observe", (observe) => {
+    for (const [key, value] of Object.entries(observe)) {
+      assert.equal(eager.get(ctx, key), value, `eager observe[${key}]`);
+      assert.equal(lazy.getOrInsertWith(ctx, key, factory), value, `lazy observe[${key}]`);
+    }
+  });
 
   // Rebuild a fresh lazy map to observe only the `reads` sequence.
   const ctx2 = new Context();
   const lazy2 = new ComputedMap(ctx2);
   for (const key of fixture.reads) lazy2.getOrInsertWith(ctx2, key, factory);
-  assertSameSet(lazy2.presentKeys(), expected.lazy_present_after_reads, "lazy_present_after_reads");
+  assertKeyWith(expected, "lazy_present_after_reads", (want) => assertSameSet(lazy2.presentKeys(), want, "lazy_present_after_reads"));
 });
 
 // --- conformance: deferral_not_deallocation.json ---------------------------
@@ -83,18 +100,33 @@ test("ComputedMap materialization conformance: deferral_not_deallocation.json", 
   const keys = Object.keys(spec.val);
   const factory = (k) => spec.val[k];
 
-  assert.equal(expected.default_mode, "eager", "default strategy is eager");
+  excuseKey(
+    expected,
+    "default_mode",
+    "materialization mode is not a value this binding can report: eager is the "
+      + "pre-mint loop (materializeAll) and lazy is mint-on-access, so there is no "
+      + "mode flag to read back. The key selects which construction this runner "
+      + "replays as the default; the behaviour it selects is asserted through "
+      + "eager_present, lazy_present_at_build and lazy_present_after_reads.",
+  );
+  assert.equal(
+    expected.default_mode,
+    "eager",
+    "runner models the eager default only — a corpus that changes it needs a new path",
+  );
 
   const ctx = new Context();
   const eager = eagerSlotMap(ctx, keys, factory);
-  assertSameSet(eager.presentKeys(), expected.eager_present, "eager_present");
+  assertKeyWith(expected, "eager_present", (want) => assertSameSet(eager.presentKeys(), want, "eager_present"));
 
   // materialize_preserves_observe, stated over the whole map: the fixture's
   // `observe` block is the canonical value of EVERY key, and this runner only
   // ever compared the keys the `reads` sequence happens to touch.
-  for (const [key, value] of Object.entries(expected.observe)) {
-    assert.equal(eager.get(ctx, key), value, `eager observe[${key}]`);
-  }
+  assertKeyWith(expected, "observe", (observe) => {
+    for (const [key, value] of Object.entries(observe)) {
+      assert.equal(eager.get(ctx, key), value, `eager observe[${key}]`);
+    }
+  });
 
   const lazy = new ComputedMap(ctx);
   const sizes = [];
@@ -105,13 +137,13 @@ test("ComputedMap materialization conformance: deferral_not_deallocation.json", 
   }
 
   // materialize_present_monotone: re-reads do not grow the set.
-  assert.deepEqual(sizes, expected.present_after_each_read, "present_after_each_read");
+  assertKey(expected, "present_after_each_read", sizes, "present_after_each_read");
   for (let i = 1; i < sizes.length; i++) {
     assert.ok(sizes[i] >= sizes[i - 1], "present count is monotone");
   }
 
   // lazy_present_subset_eager: final lazy present set ⊆ eager present set.
-  assertSameSet(lazy.presentKeys(), expected.lazy_present_after_reads, "lazy_present_after_reads");
+  assertKeyWith(expected, "lazy_present_after_reads", (want) => assertSameSet(lazy.presentKeys(), want, "lazy_present_after_reads"));
   const eagerSet = new Set(expected.eager_present.map(String));
   for (const k of lazy.presentKeys()) {
     assert.ok(eagerSet.has(String(k)), `lazy key ${k} ⊆ eager present`);
@@ -135,7 +167,20 @@ test("materialization conformance: entry_kind_orthogonal_to_mode.json", () => {
   // entries into both buckets rather than dumping everything into one.
   assert.ok(cellKeys.length > 0, "fixture has source entries");
   assert.ok(slotKeys.length > 0, "fixture has computed entries");
-  assert.equal(expected.default_mode, "eager", "default strategy is eager");
+  excuseKey(
+    expected,
+    "default_mode",
+    "materialization mode is not a value this binding can report: eager is the "
+      + "pre-mint loop (materializeAll) and lazy is mint-on-access, so there is no "
+      + "mode flag to read back. The key selects which construction this runner "
+      + "replays as the default; the behaviour it selects is asserted through "
+      + "eager_present, lazy_present_at_build and lazy_present_after_reads.",
+  );
+  assert.equal(
+    expected.default_mode,
+    "eager",
+    "runner models the eager default only — a corpus that changes it needs a new path",
+  );
 
   // Eager build: every entry present (cells + slots).
   const ctxE = new Context();
@@ -145,39 +190,37 @@ test("materialization conformance: entry_kind_orthogonal_to_mode.json", () => {
   eagerSlots.materializeAll(slotKeys, lookup);
   assert.equal(eagerCells.entryKind(), EntryKind.Source);
   assert.equal(eagerSlots.entryKind(), EntryKind.Computed);
-  assertSameSet(
-    [...eagerCells.presentKeys(), ...eagerSlots.presentKeys()],
-    expected.eager_present,
-    "eager_present",
-  );
-  for (const [key, value] of Object.entries(expected.observe)) {
-    const got = cellKeys.includes(key) ? eagerCells.get(ctxE, key) : eagerSlots.get(ctxE, key);
-    assert.equal(got, value, `eager observe[${key}]`);
-  }
+  assertKeyWith(expected, "eager_present", (want) =>
+     assertSameSet([...eagerCells.presentKeys(), ...eagerSlots.presentKeys()], want, "eager_present"));
+  assertKeyWith(expected, "observe", (observe) => {
+    for (const [key, value] of Object.entries(observe)) {
+      const got = cellKeys.includes(key) ? eagerCells.get(ctxE, key) : eagerSlots.get(ctxE, key);
+      assert.equal(got, value, `eager observe[${key}]`);
+    }
+  });
 
   // Lazy build: cells present at build (always materialized); slots deferred.
   const ctxL = new Context();
   const lazyCells = new SourceMap(ctxL);
   for (const k of cellKeys) lazyCells.entry(k, lookup(k));
   const lazySlots = new ComputedMap(ctxL);
-  assertSameSet(lazyCells.presentKeys(), expected.lazy_present_at_build, "lazy_present_at_build");
+  assertKeyWith(expected, "lazy_present_at_build", (want) => assertSameSet(lazyCells.presentKeys(), want, "lazy_present_at_build"));
   assert.equal(lazySlots.presentCount(), 0, "slots deferred at build");
 
   for (const key of fixture.reads) {
     if (slotKeys.includes(key)) lazySlots.getOrInsertWith(ctxL, key, lookup);
     else lazyCells.getOrInsertWith(ctxL, key, lookup);
   }
-  assertSameSet(
-    [...lazyCells.presentKeys(), ...lazySlots.presentKeys()],
-    expected.lazy_present_after_reads,
-    "lazy_present_after_reads",
-  );
-  for (const [key, value] of Object.entries(expected.observe)) {
-    const got = cellKeys.includes(key)
-      ? lazyCells.get(ctxL, key)
-      : lazySlots.getOrInsertWith(ctxL, key, lookup);
-    assert.equal(got, value, `lazy observe[${key}]`);
-  }
+  assertKeyWith(expected, "lazy_present_after_reads", (want) =>
+     assertSameSet([...lazyCells.presentKeys(), ...lazySlots.presentKeys()], want, "lazy_present_after_reads"));
+  assertKeyWith(expected, "observe", (observe) => {
+    for (const [key, value] of Object.entries(observe)) {
+      const got = cellKeys.includes(key)
+        ? lazyCells.get(ctxL, key)
+        : lazySlots.getOrInsertWith(ctxL, key, lookup);
+      assert.equal(got, value, `lazy observe[${key}]`);
+    }
+  });
 });
 
 // The fixture `kind` reader is forward-compatible: it accepts the current wire

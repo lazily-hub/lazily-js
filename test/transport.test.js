@@ -4,6 +4,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
+import { assertKey } from "./support/assert-key.js";
+
 import {
   BlobBackendKind,
   CrdtOp,
@@ -330,7 +332,7 @@ test("conformance delta_zero_copy_arrow: arrow-backed SharedBlob descriptor", ()
   const op = message.delta.ops[0];
 
   assert.ok(op.payload instanceof IpcValueSharedBlob);
-  assert.equal(op.payload.blob.backend, fixture.assertions.first_op_payload_backend);
+  assertKey(fixture.assertions, "first_op_payload_backend", op.payload.blob.backend);
   assert.equal(op.payload.blob.backend, "arrow");
   assert.equal(op.payload.blob.offset, 40);
   assert.equal(op.payload.blob.len, 17);

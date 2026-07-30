@@ -4,6 +4,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
+import { assertKey, assertKeyWith } from "./support/assert-key.js";
+
 import { CrdtSync } from "../src/index.js";
 import { CrdtPlaneRuntime } from "../src/distributed.js";
 
@@ -61,36 +63,47 @@ test("family-granularity sync: materialize on ingest (#lzfamilysync)", () => {
 
     if (scenario.reingest) {
       const reapplied = target.ingest(new CrdtSync({ frontier: origin.frontierEntries(), ops: frame.ops }), 1001);
-      assert.equal(reapplied, scenario.expect.reingest_applied, `[${name}] re-ingest is idempotent`);
+      assertKey(
+        scenario.expect,
+        "reingest_applied",
+        reapplied,
+        `[${name}] re-ingest is idempotent`,
+      );
     }
 
     const expect = scenario.expect;
 
     const gotKeys = target.familyKeys(namespace).map(suffixOf).sort();
-    const wantKeys = [...expect.target_keys].sort();
-    assert.deepEqual(gotKeys, wantKeys, `[${name}] materialized key set`);
+    assertKeyWith(expect, "target_keys", (want) => {
+      assert.deepEqual(gotKeys, [...want].sort(), `[${name}] materialized key set`);
+    });
 
-    assert.equal(
+    assertKey(
+      expect,
+      "target_present_count",
       target.familyKeys(namespace).length,
-      expect.target_present_count,
       `[${name}] present count`,
     );
 
-    for (const [key, want] of Object.entries(expect.target_values)) {
-      assert.equal(target.familyValueLww(namespace, key), want, `[${name}] value for ${key}`);
-    }
+    assertKeyWith(expect, "target_values", (values) => {
+      for (const [key, want] of Object.entries(values)) {
+        assert.equal(target.familyValueLww(namespace, key), want, `[${name}] value for ${key}`);
+      }
+    });
 
     const countTrue = target
       .familyKeys(namespace)
       .filter((k) => target.familyValueLww(namespace, suffixOf(k)) === true).length;
-    assert.equal(countTrue, expect.target_count_true, `[${name}] derived count of true entries`);
+    assertKey(expect, "target_count_true", countTrue, `[${name}] derived count of true entries`);
 
-    if (expect.target_epoch_bumped) {
-      assert.notEqual(
-        target.membershipEpoch(),
-        epochBefore,
-        `[${name}] membership epoch bumped on materialize`,
-      );
-    }
+    // Both directions. Gating on the fixture value and asserting only when it is
+    // true is the third read-then-discard shape: a fixture saying the epoch must
+    // NOT move would have been replayed with nothing checked.
+    assertKey(
+      expect,
+      "target_epoch_bumped",
+      target.membershipEpoch() !== epochBefore,
+      `[${name}] membership epoch bumped on materialize`,
+    );
   }
 });

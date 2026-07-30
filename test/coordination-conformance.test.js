@@ -4,6 +4,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
+import { assertKey, assertKeyWith } from "./support/assert-key.js";
+
 import { Context } from "../src/reactive.js";
 import { BarrierCell, LeaderCell, LeaseCell, LockCell, SemaphoreCell } from "../src/coordination.js";
 
@@ -24,7 +26,9 @@ function observe(ctx, cell) {
 function checkInval(ctx, obs, step, reader) {
   const wasCached = ctx.isSet(obs);
   ctx.get(obs);
-  assert.equal(!wasCached, step.expected.invalidates[reader], `${reader} invalidation`);
+  assertKeyWith(step.expected, "invalidates", (want) => {
+    assert.equal(!wasCached, want[reader], `${reader} invalidation`);
+  });
 }
 
 test("LeaseCell", () => {
@@ -37,9 +41,9 @@ test("LeaseCell", () => {
     if (op.type === "acquire") assert.equal(lease.acquire(op.peer, op.now, op.ttl), step.returns);
     else if (op.type === "renew") assert.equal(lease.renew(op.peer, op.now, op.ttl), step.returns);
     else if (op.type === "tick") assert.equal(lease.tick(op.now), step.returns);
-    assert.equal(lease.holder(op.now), step.expected.holder);
-    assert.equal(lease.isHeld(op.now), step.expected.held);
-    assert.equal(lease.fence(), step.expected.fence);
+    assertKey(step.expected, "holder", lease.holder(op.now));
+    assertKey(step.expected, "held", lease.isHeld(op.now));
+    assertKey(step.expected, "fence", lease.fence());
     checkInval(ctx, obs, step, "holder");
   }
 });
@@ -55,8 +59,8 @@ test("LeaderCell", () => {
     if (op.type === "campaign") role = leader.campaign(op.now, op.ttl);
     else if (op.type === "contend") role = leader.contend(op.peer, op.now, op.ttl);
     else role = leader.tick(op.now);
-    assert.equal(role, step.expected.role);
-    assert.equal(leader.currentLeader(op.now), step.expected.current_leader);
+    assertKey(step.expected, "role", role);
+    assertKey(step.expected, "current_leader", leader.currentLeader(op.now));
     checkInval(ctx, obs, step, "current_leader");
   }
 });
@@ -72,8 +76,8 @@ test("LockCell", () => {
     if (op.type === "acquire") assert.equal(lock.acquire(op.peer, now, op.ttl), step.returns);
     else if (op.type === "validate") assert.equal(lock.validate(op.fence), step.returns);
     else if (op.type === "tick") assert.equal(lock.tick(now), step.returns);
-    assert.equal(lock.isLocked(now), step.expected.is_locked);
-    assert.equal(lock.fence(), step.expected.fence);
+    assertKey(step.expected, "is_locked", lock.isLocked(now));
+    assertKey(step.expected, "fence", lock.fence());
     checkInval(ctx, obs, step, "is_locked");
   }
 });
@@ -86,7 +90,7 @@ test("SemaphoreCell", () => {
   for (const step of fx.steps) {
     if (step.op.type === "acquire") assert.equal(sem.acquire(), step.returns);
     else sem.release();
-    assert.equal(sem.permitsAvailable(), step.expected.permits_available);
+    assertKey(step.expected, "permits_available", sem.permitsAvailable());
     checkInval(ctx, obs, step, "permits_available");
   }
 });
@@ -98,8 +102,8 @@ test("QuorumCell", () => {
   const obs = observe(ctx, q.isOpenCell);
   for (const step of fx.steps) {
     assert.equal(q.arrive(step.op.peer), step.returns);
-    assert.equal(q.count(), step.expected.votes);
-    assert.equal(q.isOpen(), step.expected.is_open);
+    assertKey(step.expected, "votes", q.count());
+    assertKey(step.expected, "is_open", q.isOpen());
     checkInval(ctx, obs, step, "is_open");
   }
 });

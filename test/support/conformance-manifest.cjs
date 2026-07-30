@@ -33,7 +33,21 @@
 // key). `"x" in block` deliberately does NOT count as a read — membership is how
 // the silent path is spelled; only fetching the value is consumption.
 //
-// Both are no-ops when their env var is unset, so a plain `node --test` is
+// A read is still not an assertion (#lzconsumednotasserted). A runner can read a
+// key and discard it: a named `continue` inside a loop that iterates the block, a
+// value bound and never compared, or an arm that reads the key and then compares
+// against a hardcoded literal instead of the fixture's own value. Every one of
+// those marks the key READ and proves nothing. So the recorder tracks a second
+// fact — which keys reached a comparison against their own fixture value — and a
+// third — which keys a runner declared it cannot assert here, with a reason.
+//
+// Those two facts cannot be inferred by watching property access, so they are
+// reported by the runner through `test/support/assert-key.js`, whose helpers are
+// the ONLY path that marks a key asserted. That is deliberate: an arm comparing
+// against a literal reads the key and never routes through the helper, so it
+// stays unasserted and the guard names it.
+//
+// All of this is a no-op when the env vars are unset, so a plain `node --test` is
 // unaffected.
 const fs = require("node:fs");
 const path = require("node:path");
@@ -44,8 +58,12 @@ const keyOut = process.env.LAZILY_CONFORMANCE_KEY_MANIFEST;
 if (out || keyOut) {
   const marker = `${path.sep}lazily-spec${path.sep}conformance${path.sep}`;
   const opened = new Set();
-  // `fixture\tblock\tkey\tP` for present, `...\tR` for read.
+  // `fixture\tblock\tkey\tP` present, `...\tR` read, `...\tA` asserted,
+  // `...\tX\t<reason>` excused.
   const keyRecords = new Set();
+  // Instrumented block object -> `fixture\tblock`, so the assertion helpers can
+  // attribute a mark without the runner naming its own fixture.
+  const blockOwner = new WeakMap();
   // Fixture text -> corpus-relative id, so JSON.parse can attribute a parse to
   // the bytes a corpus read returned.
   const corpusText = new Map();
@@ -83,7 +101,30 @@ if (out || keyOut) {
   // observation against. That exemption is ENFORCED below rather than assumed —
   // a non-string value in an `invariants` block is a machine-checkable assertion
   // hiding in the one block nothing checks, and it throws.
-  const TRACKED = new Set(["assertions", "expect", "expected"]);
+  // `expect_initial` / `expect_after` are the same kind of block under a
+  // phase-qualified name (`collections/semtree_incremental.json`). Leaving them
+  // out let a whole assertion block sit outside both rungs, which is the gap
+  // the tracked-name list exists to close.
+  const TRACKED = new Set([
+    "assertions",
+    "expect",
+    "expected",
+    "expect_initial",
+    "expect_after",
+  ]);
+
+  // Prose keys inside a tracked block. Their values are English sentences about
+  // the step, not values to compare, so they are exempt from read, assertion and
+  // excuse accounting alike. The exemption is conditional on the value REALLY
+  // being a string, for the same reason the `invariants` exemption is enforced: a
+  // machine-checkable value must never be able to hide behind a prose name.
+  //
+  // `reason` is deliberately NOT here. In this corpus it carries error
+  // discriminators (`clock_regression`, `deadline_overflow`,
+  // `operation_unavailable`) that a runner must compare, so exempting it would
+  // silence a real assertion.
+  const PROSE = new Set(["comment", "description", "note", "notes", "why"]);
+  const isProse = (key, value) => PROSE.has(key) && typeof value === "string";
 
   const remember = (data, rel) => {
     try {
@@ -101,7 +142,9 @@ if (out || keyOut) {
   const isPlainObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
 
   const instrumentBlock = (rel, block, object) => {
+    blockOwner.set(object, `${rel}\t${block}`);
     for (const [key, value] of Object.entries(object)) {
+      if (isProse(key, value)) continue;
       keyRecords.add(`${rel}\t${block}\t${key}\tP`);
       Object.defineProperty(object, key, {
         enumerable: true,
@@ -181,6 +224,32 @@ if (out || keyOut) {
   }
 
   if (keyOut) {
+    // The channel `test/support/assert-key.js` marks through. It is installed on
+    // `globalThis` because the recorder is a CJS `--require` preload and the
+    // runners are ESM; there is no import edge between them.
+    //
+    // `owner()` returning null means the object handed in is not a tracked
+    // assertion block — a nested plain object inside one, or a structuredClone of
+    // one. Marking is then a no-op, and the helper still performs the comparison;
+    // the guard reports the original block's key as read-but-not-asserted, which
+    // is the correct outcome for a runner asserting against a copy.
+    globalThis.__lazilyConformanceKeys = {
+      owner(object) {
+        if (!isPlainObject(object)) return null;
+        return blockOwner.get(object) ?? null;
+      },
+      mark(object, key, tag, reason) {
+        const id = this.owner(object);
+        if (id === null) return false;
+        // Prose keys carry no presence record, so they carry no mark either.
+        if (!keyRecords.has(`${id}\t${key}\tP`)) return false;
+        keyRecords.add(
+          tag === "X" ? `${id}\t${key}\tX\t${reason}` : `${id}\t${key}\t${tag}`,
+        );
+        return true;
+      },
+    };
+
     const originalParse = JSON.parse;
     JSON.parse = function (text, reviver) {
       const value = originalParse.call(this, text, reviver);

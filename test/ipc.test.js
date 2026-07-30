@@ -4,6 +4,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
+import { assertKey, assertKeyWith } from "./support/assert-key.js";
+
 import {
   CrdtOp,
   CrdtSync,
@@ -144,103 +146,107 @@ function assertFixtureAssertions(message, fixture) {
 
   if (message.isSnapshot) {
     const snap = message.snapshot;
-    for (const [key, expected] of Object.entries(a)) {
-      let actual;
-      switch (key) {
-        case "epoch": actual = snap.epoch; break;
-        case "node_count": actual = snap.nodes.length; break;
-        case "edge_count": actual = snap.edges.length; break;
-        case "root_count": actual = snap.roots.length; break;
-        case "first_node_type_tag": actual = snap.nodes[0].typeTag; break;
-        case "first_node_state_kind": actual = nodeStateKind(snap.nodes[0].state); break;
-        case "has_opaque_node":
-          actual = snap.nodes.some((n) => n.state instanceof NodeStateOpaque);
-          break;
-        case "opaque_node_id":
-          actual = snap.nodes.find((n) => n.state instanceof NodeStateOpaque)?.node;
-          break;
-        case "blob_offset": actual = firstSharedBlob(snap)?.offset; break;
-        case "blob_len": actual = firstSharedBlob(snap)?.len; break;
-        case "blob_epoch": actual = firstSharedBlob(snap)?.epoch; break;
-        case "type_tags":
-          actual = snap.nodes.map((n) => n.typeTag);
-          break;
-        case "cycle_phase": {
-          const objs = snap.nodes.map(nodePayloadJson);
-          actual = phaseByMarker(objs, "cycle_id");
-          break;
+    for (const key of Object.keys(a)) {
+      assertKeyWith(a, key, (expected) => {
+        let actual;
+        switch (key) {
+          case "epoch": actual = snap.epoch; break;
+          case "node_count": actual = snap.nodes.length; break;
+          case "edge_count": actual = snap.edges.length; break;
+          case "root_count": actual = snap.roots.length; break;
+          case "first_node_type_tag": actual = snap.nodes[0].typeTag; break;
+          case "first_node_state_kind": actual = nodeStateKind(snap.nodes[0].state); break;
+          case "has_opaque_node":
+            actual = snap.nodes.some((n) => n.state instanceof NodeStateOpaque);
+            break;
+          case "opaque_node_id":
+            actual = snap.nodes.find((n) => n.state instanceof NodeStateOpaque)?.node;
+            break;
+          case "blob_offset": actual = firstSharedBlob(snap)?.offset; break;
+          case "blob_len": actual = firstSharedBlob(snap)?.len; break;
+          case "blob_epoch": actual = firstSharedBlob(snap)?.epoch; break;
+          case "type_tags":
+            actual = snap.nodes.map((n) => n.typeTag);
+            break;
+          case "cycle_phase": {
+            const objs = snap.nodes.map(nodePayloadJson);
+            actual = phaseByMarker(objs, "cycle_id");
+            break;
+          }
+          case "queue_head_phase": {
+            const objs = snap.nodes.map(nodePayloadJson);
+            actual = phaseByMarker(objs, "backlog_id");
+            break;
+          }
+          case "all_type_tags_in_vocabulary": {
+            const vocab = loadAgentDocVocabulary();
+            actual = snap.nodes.map((n) => n.typeTag).every((t) => vocab.has(t));
+            break;
+          }
+          default: throw new Error(`unknown snapshot assertion key: ${key}`);
         }
-        case "queue_head_phase": {
-          const objs = snap.nodes.map(nodePayloadJson);
-          actual = phaseByMarker(objs, "backlog_id");
-          break;
-        }
-        case "all_type_tags_in_vocabulary": {
-          const vocab = loadAgentDocVocabulary();
-          actual = snap.nodes.map((n) => n.typeTag).every((t) => vocab.has(t));
-          break;
-        }
-        default: throw new Error(`unknown snapshot assertion key: ${key}`);
-      }
-      assert.deepEqual(actual, expected, `snapshot assertion "${key}"`);
+        assert.deepEqual(actual, expected, `snapshot assertion "${key}"`);
+          });
     }
   } else if (message.isDelta) {
     const delta = message.delta;
-    for (const [key, expected] of Object.entries(a)) {
-      let actual;
-      switch (key) {
-        case "base_epoch": actual = delta.baseEpoch; break;
-        case "epoch": actual = delta.epoch; break;
-        case "is_sequential": actual = delta.isNextAfter(delta.baseEpoch); break;
-        case "op_count": actual = delta.ops.length; break;
-        case "has_all_op_variants": {
-          const kinds = new Set(delta.ops.map((op) => deltaOpKind(op)));
-          actual = ALL_OP_KINDS.every((k) => kinds.has(k));
-          break;
+    for (const key of Object.keys(a)) {
+      assertKeyWith(a, key, (expected) => {
+        let actual;
+        switch (key) {
+          case "base_epoch": actual = delta.baseEpoch; break;
+          case "epoch": actual = delta.epoch; break;
+          case "is_sequential": actual = delta.isNextAfter(delta.baseEpoch); break;
+          case "op_count": actual = delta.ops.length; break;
+          case "has_all_op_variants": {
+            const kinds = new Set(delta.ops.map((op) => deltaOpKind(op)));
+            actual = ALL_OP_KINDS.every((k) => kinds.has(k));
+            break;
+          }
+          case "resync_after_epoch_10":
+            actual = delta.applyStatus(10).isResyncRequired;
+            break;
+          case "first_op_kind": actual = deltaOpKind(delta.ops[0]); break;
+          case "first_op_payload_kind":
+            actual = Object.keys(delta.ops[0].payload.toWire())[0];
+            break;
+          // The zero-copy backend discriminator. Read here, not only in the
+          // focused transport test, so the fixture's whole `assertions` block goes
+          // through this fail-closed path instead of one hand-picked key.
+          case "first_op_payload_backend":
+            actual = delta.ops[0].payload.blob?.backend;
+            break;
+          case "added_type_tags":
+            actual = delta.ops
+              .filter((op) => op instanceof DeltaOpNodeAdd)
+              .map((op) => op.typeTag);
+            break;
+          case "cycle_phase_after": {
+            const objs = delta.ops
+              .filter((op) => op instanceof DeltaOpCellSet || op instanceof DeltaOpSlotValue)
+              .map(valueOpPayloadJson);
+            actual = phaseByMarker(objs, "cycle_id");
+            break;
+          }
+          case "queue_head_phase_after": {
+            const objs = delta.ops
+              .filter((op) => op instanceof DeltaOpCellSet || op instanceof DeltaOpSlotValue)
+              .map(valueOpPayloadJson);
+            actual = phaseByMarker(objs, "backlog_id");
+            break;
+          }
+          case "all_type_tags_in_vocabulary": {
+            const vocab = loadAgentDocVocabulary();
+            actual = delta.ops
+              .filter((op) => op instanceof DeltaOpNodeAdd)
+              .map((op) => op.typeTag)
+              .every((t) => vocab.has(t));
+            break;
+          }
+          default: throw new Error(`unknown delta assertion key: ${key}`);
         }
-        case "resync_after_epoch_10":
-          actual = delta.applyStatus(10).isResyncRequired;
-          break;
-        case "first_op_kind": actual = deltaOpKind(delta.ops[0]); break;
-        case "first_op_payload_kind":
-          actual = Object.keys(delta.ops[0].payload.toWire())[0];
-          break;
-        // The zero-copy backend discriminator. Read here, not only in the
-        // focused transport test, so the fixture's whole `assertions` block goes
-        // through this fail-closed path instead of one hand-picked key.
-        case "first_op_payload_backend":
-          actual = delta.ops[0].payload.blob?.backend;
-          break;
-        case "added_type_tags":
-          actual = delta.ops
-            .filter((op) => op instanceof DeltaOpNodeAdd)
-            .map((op) => op.typeTag);
-          break;
-        case "cycle_phase_after": {
-          const objs = delta.ops
-            .filter((op) => op instanceof DeltaOpCellSet || op instanceof DeltaOpSlotValue)
-            .map(valueOpPayloadJson);
-          actual = phaseByMarker(objs, "cycle_id");
-          break;
-        }
-        case "queue_head_phase_after": {
-          const objs = delta.ops
-            .filter((op) => op instanceof DeltaOpCellSet || op instanceof DeltaOpSlotValue)
-            .map(valueOpPayloadJson);
-          actual = phaseByMarker(objs, "backlog_id");
-          break;
-        }
-        case "all_type_tags_in_vocabulary": {
-          const vocab = loadAgentDocVocabulary();
-          actual = delta.ops
-            .filter((op) => op instanceof DeltaOpNodeAdd)
-            .map((op) => op.typeTag)
-            .every((t) => vocab.has(t));
-          break;
-        }
-        default: throw new Error(`unknown delta assertion key: ${key}`);
-      }
-      assert.deepEqual(actual, expected, `delta assertion "${key}"`);
+        assert.deepEqual(actual, expected, `delta assertion "${key}"`);
+          });
     }
   } else {
     assert.fail(`unknown message kind for fixture ${fixture.description ?? ""}`);
@@ -633,31 +639,54 @@ test("conformance causal receipts fixture replays", () => {
   const message = ReceiptMessage.fromWire(fixture.wire);
   const receipts = message.causalReceipts.receipts;
   const projection = new ReceiptProjection();
-  const currentGeneration = fixture.assertions.current_generation;
+  const a = fixture.assertions;
+  const currentGeneration = a.current_generation;
 
   for (const receipt of receipts) {
     projection.observe(currentGeneration, receipt);
   }
 
-  assert.equal(receipts.length, fixture.assertions.receipt_count);
-  assert.equal(
-    projection.terminalFor(fixture.assertions.causation_id).outcome,
-    fixture.assertions.terminal_outcome,
-  );
-  assert.deepEqual(projection.staleReceiptIds(), fixture.assertions.stale_receipt_ids);
+  assertKey(a, "receipt_count", receipts.length);
+
+  // `causation_id` and `current_generation` drive the fold, so they could have
+  // been read as bare inputs and proved nothing. Both are asserted against the
+  // DECODED frame instead: every receipt on the wire belongs to the pinned
+  // causation chain, and the projection's staleness verdict is exactly
+  // "generation below the pinned one".
+  assertKeyWith(a, "causation_id", (want) => {
+    assert.deepEqual(
+      [...new Set(receipts.map((r) => r.causationId))],
+      [want],
+      "every receipt on the wire belongs to the pinned causation chain",
+    );
+  });
+  assertKeyWith(a, "current_generation", (want) => {
+    const staleIds = new Set(projection.staleReceiptIds());
+    for (const r of receipts) {
+      assert.equal(
+        staleIds.has(r.receiptId),
+        r.generation < want,
+        `receipt ${r.receiptId} staleness against generation ${want}`,
+      );
+    }
+  });
+
+  assertKey(a, "terminal_outcome", projection.terminalFor(a.causation_id).outcome);
+  assertKey(a, "stale_receipt_ids", projection.staleReceiptIds());
 
   // The fixture also pins which outcomes are NON-terminal. That is the half of
   // the fold the terminal assertion cannot reach: a binding that classified
   // `accepted` as terminal would still report `applied` as the terminal outcome
   // here (first terminal wins) and pass every other key in this block.
-  const stale = new Set(fixture.assertions.stale_receipt_ids);
-  assert.deepEqual(
+  const stale = new Set(a.stale_receipt_ids);
+  assertKey(
+    a,
+    "nonterminal_outcomes",
     receipts
-      .filter((r) => r.causationId === fixture.assertions.causation_id)
+      .filter((r) => r.causationId === a.causation_id)
       .filter((r) => !stale.has(r.receiptId))
       .filter((r) => !r.isTerminal)
       .map((r) => r.outcome),
-    fixture.assertions.nonterminal_outcomes,
   );
 });
 

@@ -47,6 +47,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
+import { assertKeyWith } from "./support/assert-key.js";
 import { Context } from "../src/reactive.js";
 import { ThreadSafeContext } from "../src/thread-safe.js";
 import { AsyncContext } from "../src/reactive-async.js";
@@ -472,7 +473,8 @@ async function materialize(model, keys) {
 
 async function assertState(model, step, where) {
   const expected = step.expected;
-  for (const [key, want] of Object.entries(expected.scopes)) {
+  await assertKeyWith(expected, "scopes", async (scopes) => {
+  for (const [key, want] of Object.entries(scopes)) {
     const view = model.view(key);
     assert.ok(view !== null, `${where}: scope ${key} absent`);
     assert.equal(
@@ -530,11 +532,13 @@ async function assertState(model, step, where) {
       );
     }
   }
+  });
 
-  const receipts = expected.receipts;
-  assert.equal(await model.acceptedLen(), receipts.accepted, `${where}: accepted receipts`);
-  assert.equal(await model.droppedLen(), receipts.dropped, `${where}: dropped receipts`);
-  assert.equal(await model.errorsLen(), receipts.error, `${where}: error receipts`);
+  await assertKeyWith(expected, "receipts", async (receipts) => {
+    assert.equal(await model.acceptedLen(), receipts.accepted, `${where}: accepted receipts`);
+    assert.equal(await model.droppedLen(), receipts.dropped, `${where}: dropped receipts`);
+    assert.equal(await model.errorsLen(), receipts.error, `${where}: error receipts`);
+  });
 }
 
 /**
@@ -542,7 +546,7 @@ async function assertState(model, step, where) {
  * from valid to invalid across the op; `false` means it stayed valid.
  */
 function assertInvalidation(step, before, after, where) {
-  const want = step.expected.invalidates;
+  assertKeyWith(step.expected, "invalidates", (want) => {
   assert.ok(want, `${where}: expected.invalidates is missing — the matrix IS the contract`);
   assert.equal(
     step.invalidates,
@@ -585,6 +589,7 @@ function assertInvalidation(step, before, after, where) {
         "receipt COUNT: a stale cache recomputes to the right count",
     );
   }
+  });
 }
 
 /**

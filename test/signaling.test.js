@@ -4,6 +4,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
+import { assertKey, assertKeyWith } from "./support/assert-key.js";
+
 import {
   ClientJoin,
   ClientMessage,
@@ -139,9 +141,11 @@ test("assertions metadata on each frame matches the decoded message", () => {
   for (const frame of fixture.frames) {
     const a = frame.assertions ?? {};
     const message = decodeFrame(frame.direction, frame.wire);
-    for (const [key, expected] of Object.entries(a)) {
-      assertFrameAssertion(message, frame, key, expected);
-      checked += 1;
+    for (const key of Object.keys(a)) {
+      assertKeyWith(a, key, (expected) => {
+        assertFrameAssertion(message, frame, key, expected);
+        checked += 1;
+          });
     }
     assert.ok(
       frame.direction !== "client" || CLIENT_VARIANTS.has(frame.variant),
@@ -216,9 +220,11 @@ test("anti_spoof_session.json replays through SignalingRoom", () => {
     roster_sorted_ascending: rosterSortedAscending,
     forwarded_from_is_server_registered: forwardedFromIsServerRegistered,
   };
-  for (const [key, expected] of Object.entries(a)) {
-    assert.ok(key in observed, `unknown session assertion key \`${key}\``);
-    assert.equal(observed[key], expected, `anti_spoof_session assertion "${key}"`);
+  for (const key of Object.keys(a)) {
+    assertKeyWith(a, key, (expected) => {
+      assert.ok(key in observed, `unknown session assertion key \`${key}\``);
+      assert.equal(observed[key], expected, `anti_spoof_session assertion "${key}"`);
+      });
   }
 });
 

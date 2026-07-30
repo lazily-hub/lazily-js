@@ -4,6 +4,8 @@ import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
+import { assertKey } from "./support/assert-key.js";
+
 import { Context } from "../src/reactive.js";
 import {
   KeepLatest,
@@ -159,8 +161,8 @@ test("mergecell_algebra.json fixture: cross-language converged determinism", (t)
       const before = runs;
       mc.merge(step.merge);
       const fired = runs > before;
-      assert.equal(mc.get(), step.expected.value, `${policy.name} value`);
-      assert.equal(fired, step.expected.invalidates, `${policy.name} invalidates`);
+      assertKey(step.expected, "value", mc.get(), `${policy.name} value`);
+      assertKey(step.expected, "invalidates", fired, `${policy.name} invalidates`);
       prev = runs;
     }
     void prev;

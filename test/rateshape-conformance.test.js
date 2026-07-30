@@ -4,6 +4,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
+import { assertKey, assertKeyWith } from "./support/assert-key.js";
+
 import { Context } from "../src/reactive.js";
 import {
   DebounceCell,
@@ -32,10 +34,12 @@ function replay(ctx, fx, cell, drive) {
   for (const step of fx.steps) {
     const emitted = drive(step);
     assert.equal(emitted, step.returns, "emit");
-    assert.equal(cell.output(), step.expected.output, "output");
+    assertKey(step.expected, "output", cell.output(), "output");
     const wasCached = ctx.isSet(observed);
     ctx.get(observed);
-    assert.equal(!wasCached, step.expected.invalidates.output, "invalidation");
+    assertKeyWith(step.expected, "invalidates", (want) => {
+      assert.equal(!wasCached, want.output, "invalidation");
+    });
   }
 }
 

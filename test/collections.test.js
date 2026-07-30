@@ -4,6 +4,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
+import { assertKey, assertKeyWith } from "./support/assert-key.js";
+
 import { SourceMap, SourceTree, reconcileCollections } from "../src/collections.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -34,28 +36,35 @@ test("collection conformance: cellmap_atomic_move.json", () => {
     }
 
     const report = map.apply(step.op);
-    const { order, values, membership, invalidates, handle_stable } =
-      step.expected;
+    const expected = step.expected;
 
-    assert.deepEqual(map.order, order, `${step.op.type}: order`);
-    if (membership) {
-      assertSameSet(map.keys(), membership, step.op.type);
+    assertKey(expected, "order", map.order, `${step.op.type}: order`);
+    if ("membership" in expected) {
+      assertKeyWith(expected, "membership", (membership) =>
+        assertSameSet(map.keys(), membership, step.op.type));
     }
-    if (values) {
-      for (const [key, value] of Object.entries(values)) {
-        assert.equal(map.get(key), value, `${step.op.type}: value[${key}]`);
-      }
+    if ("values" in expected) {
+      assertKeyWith(expected, "values", (values) => {
+        for (const [key, value] of Object.entries(values)) {
+          assert.equal(map.get(key), value, `${step.op.type}: value[${key}]`);
+        }
+      });
     }
-    assert.deepEqual(report, invalidates, `${step.op.type}: invalidates`);
-    if (handle_stable) {
-      for (const [key, stable] of Object.entries(handle_stable)) {
-        assert.equal(
-          map.handle(key),
-          handlesBefore[key],
-          `${step.op.type}: handle[${key}] must be stable`,
-        );
-        assert.equal(stable, true);
-      }
+    assertKey(expected, "invalidates", report, `${step.op.type}: invalidates`);
+    if ("handle_stable" in expected) {
+      // Both directions. The old arm asserted the handle survived and then
+      // asserted the FIXTURE said `true` — so a fixture claiming a handle must
+      // NOT survive would have failed on its own value rather than on the
+      // library's behaviour.
+      assertKeyWith(expected, "handle_stable", (stability) => {
+        for (const [key, stable] of Object.entries(stability)) {
+          assert.equal(
+            map.handle(key) === handlesBefore[key],
+            stable,
+            `${step.op.type}: handle[${key}] stability`,
+          );
+        }
+      });
     }
   }
 });
@@ -66,16 +75,19 @@ test("collection conformance: cellmap_independence.json", () => {
 
   for (const step of fixture.steps) {
     const report = map.apply(step.op);
-    const { order, values, membership, invalidates } = step.expected;
+    const expected = step.expected;
 
-    assert.deepEqual(map.order, order, `${step.op.type}: order`);
-    assertSameSet(map.keys(), membership, step.op.type);
-    if (values) {
-      for (const [key, value] of Object.entries(values)) {
-        assert.equal(map.get(key), value, `${step.op.type}: value[${key}]`);
-      }
+    assertKey(expected, "order", map.order, `${step.op.type}: order`);
+    assertKeyWith(expected, "membership", (membership) =>
+      assertSameSet(map.keys(), membership, step.op.type));
+    if ("values" in expected) {
+      assertKeyWith(expected, "values", (values) => {
+        for (const [key, value] of Object.entries(values)) {
+          assert.equal(map.get(key), value, `${step.op.type}: value[${key}]`);
+        }
+      });
     }
-    assert.deepEqual(report, invalidates, `${step.op.type}: invalidates`);
+    assertKey(expected, "invalidates", report, `${step.op.type}: invalidates`);
   }
 });
 
@@ -86,11 +98,12 @@ test("collection conformance: keyed_reconciliation_lis.json", () => {
     fixture.reconcile.target,
   );
 
-  assert.deepEqual(result.ops, fixture.expected.ops);
-  assert.deepEqual(result.result_order, fixture.expected.result_order);
-  assert.deepEqual(
+  assertKey(fixture.expected, "ops", result.ops);
+  assertKey(fixture.expected, "result_order", result.result_order);
+  assertKey(
+    fixture.expected,
+    "stable_keys_not_invalidated",
     result.stable_keys_not_invalidated,
-    fixture.expected.stable_keys_not_invalidated,
   );
 });
 

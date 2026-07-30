@@ -4,6 +4,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
+import { assertKey, assertKeyWith } from "./support/assert-key.js";
+
 import { QueueCell, QueuePopError, QueuePushError, VecDequeStorage } from "../src/queue.js";
 import { Context } from "../src/reactive.js";
 
@@ -30,23 +32,23 @@ function buildInitial(ctx, initial) {
 }
 
 function assertState(q, expected) {
-  if (Array.isArray(expected.elements)) {
-    assert.deepEqual(q.elements(), expected.elements, "elements mismatch");
+  if ("elements" in expected) {
+    assertKey(expected, "elements", q.elements(), "elements mismatch");
   }
   if ("head" in expected) {
-    assert.equal(q.head(), expected.head, "head mismatch");
+    assertKey(expected, "head", q.head(), "head mismatch");
   }
   if ("len" in expected) {
-    assert.equal(q.len(), expected.len, "len mismatch");
+    assertKey(expected, "len", q.len(), "len mismatch");
   }
   if ("is_empty" in expected) {
-    assert.equal(q.isEmpty(), expected.is_empty, "is_empty mismatch");
+    assertKey(expected, "is_empty", q.isEmpty(), "is_empty mismatch");
   }
   if ("is_full" in expected) {
-    assert.equal(q.isFull(), expected.is_full, "is_full mismatch");
+    assertKey(expected, "is_full", q.isFull(), "is_full mismatch");
   }
   if ("closed" in expected) {
-    assert.equal(q.isClosed(), expected.closed, "closed mismatch");
+    assertKey(expected, "closed", q.isClosed(), "closed mismatch");
   }
 }
 
@@ -128,19 +130,22 @@ function runFixture(fixture) {
     // Assert the per-reader-kind invalidation matrix. A reader kind explicitly
     // present in the fixture's `invalidates` is asserted; absent kinds are not
     // asserted (fixtures that focus on one reader kind only declare that one).
-    const invalidates = step.expected.invalidates ?? {};
     for (const probe of Object.values(probes)) ctx.get(probe.node);
-    for (const kind of Object.keys(invalidates)) {
-      assert.equal(
-        result.invalidates[kind],
-        invalidates[kind],
-        `step ${i}: invalidates.${kind}`,
-      );
-      assert.equal(
-        probes[kind].count > countsBefore[kind],
-        invalidates[kind],
-        `step ${i}: reactive reader ${kind} recomputation`,
-      );
+    if ("invalidates" in step.expected) {
+      assertKeyWith(step.expected, "invalidates", (invalidates) => {
+        for (const kind of Object.keys(invalidates)) {
+          assert.equal(
+            result.invalidates[kind],
+            invalidates[kind],
+            `step ${i}: invalidates.${kind}`,
+          );
+          assert.equal(
+            probes[kind].count > countsBefore[kind],
+            invalidates[kind],
+            `step ${i}: reactive reader ${kind} recomputation`,
+          );
+        }
+      });
     }
   }
 }

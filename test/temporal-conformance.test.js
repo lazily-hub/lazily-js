@@ -4,6 +4,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
+import { assertKey, assertKeyWith } from "./support/assert-key.js";
+
 import { Context } from "../src/reactive.js";
 import { CronCell, DeadlineCell, IntervalCell, TimerCell } from "../src/temporal.js";
 
@@ -33,13 +35,24 @@ test("TimerCell single-shot", () => {
 
   for (const step of fx.steps) {
     assert.equal(timer.tick(step.op.now), step.returns, "fire edge");
-    assert.equal(timer.hasFired(), step.expected.fired);
-    assert.equal(timer.value(), step.expected.value === "()" ? true : null);
-    assert.equal(timer.nextFire(), step.expected.next_fire);
+    assertKey(step.expected, "fired", timer.hasFired());
+    assertKeyWith(step.expected, "value", (want) => {
+      // The corpus spells the fired unit payload `"()"`; this binding materialises
+      // it as `true`, and an unfired timer as `null`. Refuse any other encoding
+      // rather than silently mapping it to `null`.
+      assert.ok(
+        want === "()" || want === null,
+        `unmodelled timer payload ${JSON.stringify(want)}`,
+      );
+      assert.equal(timer.value(), want === "()" ? true : null);
+    });
+    assertKey(step.expected, "next_fire", timer.nextFire());
 
     const wasCached = ctx.isSet(observed);
     ctx.get(observed);
-    assert.equal(!wasCached, step.expected.invalidates.fired, "invalidation");
+    assertKeyWith(step.expected, "invalidates", (want) => {
+      assert.equal(!wasCached, want.fired, "invalidation");
+    });
   }
 });
 
@@ -51,12 +64,14 @@ test("IntervalCell periodic", () => {
 
   for (const step of fx.steps) {
     assert.equal(iv.tick(step.op.now), step.returns, "fire edge");
-    assert.equal(iv.count(), step.expected.count);
-    assert.equal(iv.nextFire(), step.expected.next_fire);
+    assertKey(step.expected, "count", iv.count());
+    assertKey(step.expected, "next_fire", iv.nextFire());
 
     const wasCached = ctx.isSet(observed);
     ctx.get(observed);
-    assert.equal(!wasCached, step.expected.invalidates.count, "invalidation");
+    assertKeyWith(step.expected, "invalidates", (want) => {
+      assert.equal(!wasCached, want.count, "invalidation");
+    });
   }
 });
 
@@ -68,12 +83,14 @@ test("CronCell pattern", () => {
 
   for (const step of fx.steps) {
     assert.equal(cron.tick(step.op.now), step.returns, "fire edge");
-    assert.equal(cron.count(), step.expected.count);
-    assert.equal(cron.nextFire(), step.expected.next_fire);
+    assertKey(step.expected, "count", cron.count());
+    assertKey(step.expected, "next_fire", cron.nextFire());
 
     const wasCached = ctx.isSet(observed);
     ctx.get(observed);
-    assert.equal(!wasCached, step.expected.invalidates.count, "invalidation");
+    assertKeyWith(step.expected, "invalidates", (want) => {
+      assert.equal(!wasCached, want.count, "invalidation");
+    });
   }
 });
 
@@ -86,11 +103,13 @@ test("DeadlineCell expiry", () => {
   for (const step of fx.steps) {
     assert.equal(d.tick(step.op.now), step.returns, "expiry edge");
     const state = d.state();
-    assert.equal(state.state, step.expected.state);
-    assert.equal(state.value, step.expected.value); // value preserved
+    assertKey(step.expected, "state", state.state);
+    assertKey(step.expected, "value", state.value, "value preserved");
 
     const wasCached = ctx.isSet(observed);
     ctx.get(observed);
-    assert.equal(!wasCached, step.expected.invalidates.state, "invalidation");
+    assertKeyWith(step.expected, "invalidates", (want) => {
+      assert.equal(!wasCached, want.state, "invalidation");
+    });
   }
 });

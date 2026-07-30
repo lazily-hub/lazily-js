@@ -4,6 +4,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
+import { assertKey, assertKeyWith } from "./support/assert-key.js";
+
 import {
   Block,
   align,
@@ -108,47 +110,64 @@ test("conformance: stableid_alignment.json", () => {
   for (const scenario of fixture.scenarios) {
     if (scenario.name.includes("content key survives")) {
       const blocks = toBlocks(scenario.blocks);
-      for (const [i, j] of scenario.expect.key_equal) {
-        assert.ok(blockKey(blocks[i]).equals(blockKey(blocks[j])), `${scenario.name}: ${i}==${j}`);
-      }
-      for (const [i, j] of scenario.expect.key_not_equal ?? []) {
-        assert.ok(!blockKey(blocks[i]).equals(blockKey(blocks[j])), `${scenario.name}: ${i}!=${j}`);
+      assertKeyWith(scenario.expect, "key_equal", (pairs) => {
+        for (const [i, j] of pairs) {
+          assert.ok(
+            blockKey(blocks[i]).equals(blockKey(blocks[j])),
+            `${scenario.name}: ${i}==${j}`,
+          );
+        }
+      });
+      if ("key_not_equal" in scenario.expect) {
+        assertKeyWith(scenario.expect, "key_not_equal", (pairs) => {
+          for (const [i, j] of pairs) {
+            assert.ok(
+              !blockKey(blocks[i]).equals(blockKey(blocks[j])),
+              `${scenario.name}: ${i}!=${j}`,
+            );
+          }
+        });
       }
     } else if (scenario.old) {
       const oldB = toBlocks(scenario.old);
       const newB = toBlocks(scenario.new);
       const a = align(oldB, newB);
-      if (scenario.expect.matches) {
-        assert.deepEqual(
+      if ("matches" in scenario.expect) {
+        assertKey(
+          scenario.expect,
+          "matches",
           a.newMatches.map((m) =>
             m.kind === "inserted" ? "Inserted" : `${m.kind === "same" ? "Same" : "Edited"}:${m.oldIndex}`,
           ),
-          scenario.expect.matches,
           scenario.name,
         );
       }
-      if (scenario.expect.removed) {
-        assert.deepEqual(a.removed, scenario.expect.removed, scenario.name);
+      if ("removed" in scenario.expect) {
+        assertKey(scenario.expect, "removed", a.removed, scenario.name);
       }
       // The threshold the "Edited, not Insert+Remove" classification rests on.
       // `matches` records the verdict; only this pins that the verdict came from
       // a similarity at or above the floor rather than from a lucky tie-break.
-      if (scenario.expect.similarity_min !== undefined) {
-        const edited = a.newMatches.filter((m) => m.kind === "edited");
-        assert.ok(edited.length > 0, `${scenario.name}: no edited match to score`);
-        for (const m of edited) {
-          assert.ok(
-            m.similarity >= scenario.expect.similarity_min,
-            `${scenario.name}: similarity ${m.similarity} < ${scenario.expect.similarity_min}`,
-          );
-        }
+      if ("similarity_min" in scenario.expect) {
+        assertKeyWith(scenario.expect, "similarity_min", (floor) => {
+          const edited = a.newMatches.filter((m) => m.kind === "edited");
+          assert.ok(edited.length > 0, `${scenario.name}: no edited match to score`);
+          for (const m of edited) {
+            assert.ok(
+              m.similarity >= floor,
+              `${scenario.name}: similarity ${m.similarity} < ${floor}`,
+            );
+          }
+        });
       }
-      if (scenario.expect.new_key_equals_old_key) {
-        const keys = assignStableKeys(oldB, newB);
-        const oldKeys = oldB.map((b) => blockKey(b).asString());
-        for (const [ni, oi] of scenario.expect.new_key_equals_old_key) {
-          assert.equal(keys[ni], oldKeys[oi], scenario.name);
-        }
+      if ("new_key_equals_old_key" in scenario.expect) {
+        assertKeyWith(scenario.expect, "new_key_equals_old_key", (pairs) => {
+          const keys = assignStableKeys(oldB, newB);
+          const oldKeys = oldB.map((b) => blockKey(b).asString());
+          for (const [ni, oi] of pairs) {
+            assert.equal(keys[ni], oldKeys[oi], scenario.name);
+          }
+        });
       }
     }
   }

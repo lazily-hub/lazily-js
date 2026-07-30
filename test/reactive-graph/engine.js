@@ -45,6 +45,7 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { assertKeyWith } from "../support/assert-key.js";
 import { ComputeFailedError, DisposedNodeError } from "./models.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -334,8 +335,13 @@ async function replaySteps(model, steps, label, assertFn, divergences, tail) {
       const expect = step.expect ?? {};
       // Sorted: see the header note. `dependents_of` must be read before the
       // reads in the same step re-register the edges it counts.
+      //
+      // Every arm's comparison runs INSIDE `assertKeyWith`, which is what marks the
+      // key asserted (#lzconsumednotasserted). Binding `expect[key]` by hand would
+      // mark it read and prove nothing, which is exactly the shape this routes
+      // around.
       for (const key of Object.keys(expect).sort()) {
-        const want = expect[key];
+        await assertKeyWith(expect, key, async (want) => {
         switch (key) {
           case "note":
             // Prose. Carries no assertion, and is not counted as a check.
@@ -465,6 +471,7 @@ async function replaySteps(model, steps, label, assertFn, divergences, tail) {
           default:
             throw new Error(`${where}: unknown expectation ${key}`);
         }
+        });
       }
     }
 
@@ -492,7 +499,8 @@ async function replaySteps(model, steps, label, assertFn, divergences, tail) {
         }
       }
 
-      const finalState = tail.final_state ?? {};
+      if ("final_state" in tail) {
+        await assertKeyWith(tail, "final_state", async (finalState) => {
       for (const id of Object.keys(finalState.dependents_of ?? {}).sort()) {
         const got = instance.dependentsOf(id);
         observation.degrees[id] = got;
@@ -514,8 +522,11 @@ async function replaySteps(model, steps, label, assertFn, divergences, tail) {
           assertFn.equal(got, finalState.read[id], `${where}: read ${id}`),
         );
       }
+        });
+      }
 
-      const publish = tail.after_publish;
+      if ("after_publish" in tail) {
+        await assertKeyWith(tail, "after_publish", async (publish) => {
       if (publish?.op) {
         const before = instance.runLog.length;
         await instance.set(publish.op.id, publish.op.value);
@@ -547,6 +558,8 @@ async function replaySteps(model, steps, label, assertFn, divergences, tail) {
             ),
           );
         }
+      }
+        });
       }
     }
   } finally {
@@ -633,30 +646,35 @@ export async function replayFixture(model, name, fixture, assertFn, divergences)
     byName.set(scenario.name, r.observation);
   }
 
-  const equal = tail?.observationally_equal ?? [];
-  if (equal.length > 1) {
+  if (tail === null || !("observationally_equal" in tail)) return { ops, checks };
+  const added = await assertKeyWith(tail, "observationally_equal", (equal) => {
+    assertFn.ok(
+      Array.isArray(equal) && equal.length > 1,
+      `${model.name}/${name}: observationally_equal names fewer than two scenarios, `
+      + "so it relates nothing",
+    );
     const tag = `${model.name}/${name}:observationally_equal`;
     if (divergences.known.has(tag)) {
       divergences.observed.add(tag);
-    } else {
-      for (const scenarioName of equal) {
-        if (!byName.has(scenarioName)) {
-          throw new Error(`${model.name}/${name}: unknown scenario ${scenarioName}`);
-        }
-      }
-      for (let i = 1; i < equal.length; i++) {
-        const a = describeObservation(byName.get(equal[i - 1]));
-        const b = describeObservation(byName.get(equal[i]));
-        assertFn.equal(
-          a,
-          b,
-          `${model.name}/${name}: ${equal[i - 1]} and ${equal[i]} are not `
-          + "observationally equal — ending a scope must equal disposing its members",
-        );
-      }
-      checks += 1;
+      return 0;
     }
-  }
+    for (const scenarioName of equal) {
+      if (!byName.has(scenarioName)) {
+        throw new Error(`${model.name}/${name}: unknown scenario ${scenarioName}`);
+      }
+    }
+    for (let i = 1; i < equal.length; i++) {
+      const a = describeObservation(byName.get(equal[i - 1]));
+      const b = describeObservation(byName.get(equal[i]));
+      assertFn.equal(
+        a,
+        b,
+        `${model.name}/${name}: ${equal[i - 1]} and ${equal[i]} are not `
+        + "observationally equal — ending a scope must equal disposing its members",
+      );
+    }
+    return 1;
+  });
 
-  return { ops, checks };
+  return { ops, checks: checks + added };
 }

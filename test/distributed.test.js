@@ -4,6 +4,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
+import { assertKey, assertKeyWith } from "./support/assert-key.js";
+
 import {
   CrdtOp,
   CrdtSync,
@@ -125,32 +127,34 @@ test("distributed/crdt_sync_frames.json round-trips each CrdtSync envelope", () 
     // Exhaustive, not `in`-guarded: an assertion key this runner does not know
     // must fail rather than fall through, or a frame's metadata can arrive and
     // be skipped while the fixture still reports as replayed.
-    for (const [key, expected] of Object.entries(frame.assertions ?? {})) {
-      const where = `${frame.label}: ${key}`;
-      switch (key) {
-        case "frontier_len":
-          assert.equal(message.crdtSync.frontier.length, expected, where);
-          break;
-        case "frontier_omitted":
-          // Frontier-suppression exemption: an omitted frontier decodes as empty.
-          assert.equal(
-            !("frontier" in frame.wire.CrdtSync) && message.crdtSync.frontier.length === 0,
-            expected,
-            where,
-          );
-          break;
-        case "op_count":
-          assert.equal(message.crdtSync.ops.length, expected, where);
-          break;
-        case "has_keyed_op":
-          assert.equal(message.crdtSync.ops.some((op) => op.key !== null), expected, where);
-          break;
-        case "has_keyless_op":
-          assert.equal(message.crdtSync.ops.some((op) => op.key === null), expected, where);
-          break;
-        default:
-          assert.fail(`${frame.label}: unknown frame assertion key \`${key}\``);
-      }
+    for (const key of Object.keys(frame.assertions ?? {})) {
+      assertKeyWith(frame.assertions ?? {}, key, (expected) => {
+        const where = `${frame.label}: ${key}`;
+        switch (key) {
+          case "frontier_len":
+            assert.equal(message.crdtSync.frontier.length, expected, where);
+            break;
+          case "frontier_omitted":
+            // Frontier-suppression exemption: an omitted frontier decodes as empty.
+            assert.equal(
+              !("frontier" in frame.wire.CrdtSync) && message.crdtSync.frontier.length === 0,
+              expected,
+              where,
+            );
+            break;
+          case "op_count":
+            assert.equal(message.crdtSync.ops.length, expected, where);
+            break;
+          case "has_keyed_op":
+            assert.equal(message.crdtSync.ops.some((op) => op.key !== null), expected, where);
+            break;
+          case "has_keyless_op":
+            assert.equal(message.crdtSync.ops.some((op) => op.key === null), expected, where);
+            break;
+          default:
+            assert.fail(`${frame.label}: unknown frame assertion key \`${key}\``);
+        }
+          });
     }
   }
 });
@@ -172,17 +176,26 @@ test("distributed/anti_entropy_converge.json converges and is idempotent", () =>
 
     const runtime = new CrdtPlaneRuntime(9);
     const applied = ingestOps(runtime, ops);
-    assert.equal(applied, scenario.expect.applied_count, `${scenario.name} applied_count`);
-    assert.deepEqual(
+    assertKey(scenario.expect, "applied_count", applied, `${scenario.name} applied_count`);
+    assertKey(
+      scenario.expect,
+      "converged",
       runtime.converged(),
-      scenario.expect.converged,
       `${scenario.name} converged`,
     );
 
     // Re-ingesting the same frame applies 0 new ops (state-based idempotence).
     const reapplied = ingestOps(runtime, ops, 200);
-    const expectRe = scenario.expect.redeliver_applied_count ?? 0;
-    assert.equal(reapplied, expectRe, `${scenario.name} redeliver`);
+    if ("redeliver_applied_count" in scenario.expect) {
+      assertKey(
+        scenario.expect,
+        "redeliver_applied_count",
+        reapplied,
+        `${scenario.name} redeliver`,
+      );
+    } else {
+      assert.equal(reapplied, 0, `${scenario.name} redeliver`);
+    }
     assert.deepEqual(
       runtime.converged(),
       scenario.expect.converged,
@@ -192,30 +205,41 @@ test("distributed/anti_entropy_converge.json converges and is idempotent", () =>
     // `resolution` names WHICH op is expected to win, which no other key in the
     // block pins: `converged` says what the winning state is, and a runtime that
     // resolved by arrival order would produce the same bytes on a fixture whose
-    // last-delivered op also happens to carry the highest stamp.
-    assert.equal(scenario.expect.resolution, "max_stamp", `${scenario.name} resolution`);
-    for (const entry of scenario.expect.converged) {
-      const candidates = ops.filter((op) => op.node === entry.node && op.key === entry.key);
-      assert.ok(candidates.length > 0, `${scenario.name}: no op for ${entry.node}/${entry.key}`);
-      const winner = candidates.reduce((best, op) =>
-        wireStampGreater(op.stamp, best.stamp) ? op : best,
-      );
-      assert.deepEqual(
-        winner.state.toWire(),
-        entry.state,
-        `${scenario.name}: ${entry.node}/${entry.key} did not converge to the max-stamp op`,
-      );
-    }
+    // last-delivered op also happens to carry the highest stamp. The rule name
+    // selects the check and is compared as a value, so a corpus that grows a
+    // second rule fails here instead of being replayed under this one.
+    assertKeyWith(scenario.expect, "resolution", (rule) => {
+      assert.equal(rule, "max_stamp", `${scenario.name}: unmodelled resolution rule \`${rule}\``);
+      for (const entry of scenario.expect.converged) {
+        const candidates = ops.filter((op) => op.node === entry.node && op.key === entry.key);
+        assert.ok(candidates.length > 0, `${scenario.name}: no op for ${entry.node}/${entry.key}`);
+        const winner = candidates.reduce((best, op) =>
+          wireStampGreater(op.stamp, best.stamp) ? op : best,
+        );
+        assert.deepEqual(
+          winner.state.toWire(),
+          entry.state,
+          `${scenario.name}: ${entry.node}/${entry.key} did not converge to the max-stamp op`,
+        );
+      }
+    });
 
-    // Delivery-order independence: reverse order converges to the same winner.
-    if (scenario.expect.order_independent || scenario.reverse_order_equivalent) {
-      const reversed = new CrdtPlaneRuntime(9);
-      ingestOps(reversed, [...ops].reverse());
-      assert.deepEqual(
-        reversed.converged(),
-        scenario.expect.converged,
+    // Delivery-order independence, asserted in BOTH directions: gating the
+    // reverse-order replay on the fixture's own flag and asserting only when it
+    // is true is the third read-then-discard shape.
+    const reversed = new CrdtPlaneRuntime(9);
+    ingestOps(reversed, [...ops].reverse());
+    const sameUnderReversal =
+      JSON.stringify(reversed.converged()) === JSON.stringify(runtime.converged());
+    if ("order_independent" in scenario.expect) {
+      assertKey(
+        scenario.expect,
+        "order_independent",
+        sameUnderReversal,
         `${scenario.name} reverse-order converged`,
       );
+    } else if (scenario.reverse_order_equivalent) {
+      assert.equal(sameUnderReversal, true, `${scenario.name} reverse-order converged`);
     }
   }
 });

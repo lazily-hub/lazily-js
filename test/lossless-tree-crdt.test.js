@@ -4,6 +4,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
+import { assertKey, assertKeyWith } from "./support/assert-key.js";
+
 import Ajv2020 from "ajv/dist/2020.js";
 
 import {
@@ -104,22 +106,58 @@ function applyOp(world, on, op) {
   }
 }
 
+// Key-exhaustive, not type-guarded. `typeof expect.render === "string"` READS the
+// key and then discards it whenever the type does not match, so a fixture whose
+// `render` grew a different shape was replayed with nothing compared
+// (#lzconsumednotasserted). An unmodelled key now fails the run.
 function assertExpect(world, expect, scenario) {
-  if (typeof expect.render === "string") {
-    assert.equal(world.replicas.get("a").render(), expect.render, `${scenario}: render on a`);
-  }
-  if (expect.render_on) {
-    for (const [name, text] of Object.entries(expect.render_on)) {
-      assert.equal(world.replicas.get(name).render(), text, `${scenario}: render on ${name}`);
-    }
-  }
-  if (typeof expect.live_nodes === "number") {
-    assert.equal(world.replicas.get("a").liveNodeCount(), expect.live_nodes, `${scenario}: live_nodes`);
-  }
-  if (Array.isArray(expect.converged)) {
-    const first = world.replicas.get(expect.converged[0]).render();
-    for (const name of expect.converged.slice(1)) {
-      assert.equal(world.replicas.get(name).render(), first, `${scenario}: ${expect.converged[0]}/${name} converge`);
+  for (const key of Object.keys(expect)) {
+    switch (key) {
+      case "render":
+        assertKey(
+          expect,
+          "render",
+          world.replicas.get("a").render(),
+          `${scenario}: render on a`,
+        );
+        break;
+      case "render_on":
+        assertKeyWith(expect, "render_on", (renders) => {
+          for (const [name, text] of Object.entries(renders)) {
+            assert.equal(
+              world.replicas.get(name).render(),
+              text,
+              `${scenario}: render on ${name}`,
+            );
+          }
+        });
+        break;
+      case "live_nodes":
+        assertKey(
+          expect,
+          "live_nodes",
+          world.replicas.get("a").liveNodeCount(),
+          `${scenario}: live_nodes`,
+        );
+        break;
+      case "converged":
+        assertKeyWith(expect, "converged", (names) => {
+          assert.ok(
+            Array.isArray(names) && names.length > 1,
+            `${scenario}: converged names fewer than two replicas, so it relates nothing`,
+          );
+          const first = world.replicas.get(names[0]).render();
+          for (const name of names.slice(1)) {
+            assert.equal(
+              world.replicas.get(name).render(),
+              first,
+              `${scenario}: ${names[0]}/${name} converge`,
+            );
+          }
+        });
+        break;
+      default:
+        assert.fail(`${scenario}: unknown expectation \`${key}\``);
     }
   }
 }

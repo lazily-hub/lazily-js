@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
+import { assertBlock } from "./support/assert-key.js";
 import {
   RevisionBarrier,
   Timeout,
@@ -40,7 +41,7 @@ function replayTimer(steps) {
       assert.ok(timer);
       actual = timer.observe(step.now);
     }
-    assert.deepEqual(actual, step.expect);
+    assertBlock(step.expect, actual);
   }
 }
 
@@ -69,7 +70,7 @@ function replayTimeout(steps) {
       );
       actual = { ...actual, operation_calls: operationCalls, cancellation_calls: cancellationCalls };
     }
-    assert.deepEqual(actual, step.expect);
+    assertBlock(step.expect, actual);
   }
 }
 
@@ -96,7 +97,7 @@ function replayBarrier(steps) {
       actual = barrier.receipt(step.key);
     }
     if (step.op === "observe") actual = { ...actual, cancellation_calls: calls };
-    assert.deepEqual(actual, step.expect);
+    assertBlock(step.expect, actual);
   }
 }
 

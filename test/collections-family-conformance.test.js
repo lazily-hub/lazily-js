@@ -18,6 +18,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
+import { assertKey, assertKeyWith } from "./support/assert-key.js";
+
 import { Context } from "../src/reactive.js";
 import { AsyncContext } from "../src/reactive-async.js";
 import { ThreadSafeContext } from "../src/thread-safe.js";
@@ -218,75 +220,91 @@ async function replay(FlavorCls, fixtureName) {
     }
 
     const gotOrder = ops.keys(flavor);
-    assert.deepEqual(gotOrder, expected.order, `${where(i)}: order diverged`);
+    assertKey(expected, "order", gotOrder, `${where(i)}: order diverged`);
 
-    if (expected.membership) {
-      assert.deepEqual(
-        [...gotOrder].sort(),
-        [...expected.membership].sort(),
-        `${where(i)}: membership set diverged`,
-      );
+    if ("membership" in expected) {
+      assertKeyWith(expected, "membership", (membershipWant) => {
+        assert.deepEqual(
+          [...gotOrder].sort(),
+          [...membershipWant].sort(),
+          `${where(i)}: membership set diverged`,
+        );
+      });
     }
 
-    for (const [key, want] of Object.entries(expected.values ?? {})) {
-      assert.equal(ops.value(flavor, key), want, `${where(i)}: value for ${key} diverged`);
+    if ("values" in expected) {
+      assertKeyWith(expected, "values", (values) => {
+        for (const [key, want] of Object.entries(values)) {
+          assert.equal(ops.value(flavor, key), want, `${where(i)}: value for ${key} diverged`);
+        }
+      });
     }
 
     // The invalidation matrix, read from expected.invalidates - where the
     // fixtures actually nest it. lazily-rs read it off the step instead, so its
     // assertion never ran once.
-    const invalidates = expected.invalidates;
     assert.ok(
-      invalidates,
+      expected.invalidates,
       `${where(i)}: expected.invalidates is missing - the matrix is the contract`,
     );
     matrices += 1;
 
-    const dirty = new Set(invalidates.value ?? []);
-    const survivors = new Set(gotOrder);
-    for (const [key, drive] of valueReaders) {
-      if (!survivors.has(key)) {
-        continue; // removed by this op: no entry left to read
+    // Every comparison the matrix drives happens INSIDE the callback, so the
+    // fixture's own value reaches all three (#lzconsumednotasserted).
+    await assertKeyWith(expected, "invalidates", async (invalidates) => {
+      const dirty = new Set(invalidates.value ?? []);
+      const survivors = new Set(gotOrder);
+      for (const [key, drive] of valueReaders) {
+        if (!survivors.has(key)) {
+          continue; // removed by this op: no entry left to read
+        }
+        const recomputed = (await drive()) !== baseline.get(key);
+        if (dirty.has(key)) {
+          assert.ok(
+            recomputed,
+            `${where(i)}: value reader for ${key} should have been invalidated`,
+          );
+        } else {
+          assert.ok(
+            !recomputed,
+            `${where(i)}: value reader for ${key} should have stayed cached - ` +
+              "per-entry independence is the whole point",
+          );
+        }
       }
-      const recomputed = (await drive()) !== baseline.get(key);
-      if (dirty.has(key)) {
-        assert.ok(recomputed, `${where(i)}: value reader for ${key} should have been invalidated`);
-      } else {
-        assert.ok(
-          !recomputed,
-          `${where(i)}: value reader for ${key} should have stayed cached - ` +
-            "per-entry independence is the whole point",
-        );
-      }
-    }
 
-    assert.equal(
-      (await membership()) !== membershipBase,
-      Boolean(invalidates.membership),
-      `${where(i)}: membership reader invalidation mismatch - ` +
-        "a pure reorder must NOT invalidate set-identity readers",
-    );
-    assert.equal(
-      (await order()) !== orderBase,
-      Boolean(invalidates.order),
-      `${where(i)}: order reader invalidation mismatch`,
-    );
+      assert.equal(
+        (await membership()) !== membershipBase,
+        Boolean(invalidates.membership),
+        `${where(i)}: membership reader invalidation mismatch - ` +
+          "a pure reorder must NOT invalidate set-identity readers",
+      );
+      assert.equal(
+        (await order()) !== orderBase,
+        Boolean(invalidates.order),
+        `${where(i)}: order reader invalidation mismatch`,
+      );
+    });
 
     // Handle stability: the law separating an atomic move from a remove +
     // re-mint. A reorder keeps the entry's node, so dependents and lineage
     // survive.
-    for (const [key, wantStable] of Object.entries(expected.handle_stable ?? {})) {
-      const after = ops.handle(flavor, key);
-      const before = handlesBefore.get(key);
-      if (wantStable) {
-        assert.ok(
-          before !== undefined && after === before,
-          `${where(i)}: handle for ${key} must survive the move - ` +
-            "a reorder that re-mints is a remove + insert, not a move",
-        );
-      } else {
-        assert.ok(after !== before, `${where(i)}: handle for ${key} should have changed`);
-      }
+    if ("handle_stable" in expected) {
+      assertKeyWith(expected, "handle_stable", (stability) => {
+        for (const [key, wantStable] of Object.entries(stability)) {
+          const after = ops.handle(flavor, key);
+          const before = handlesBefore.get(key);
+          if (wantStable) {
+            assert.ok(
+              before !== undefined && after === before,
+              `${where(i)}: handle for ${key} must survive the move - ` +
+                "a reorder that re-mints is a remove + insert, not a move",
+            );
+          } else {
+            assert.ok(after !== before, `${where(i)}: handle for ${key} should have changed`);
+          }
+        }
+      });
     }
   }
 

@@ -26,6 +26,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
+import { assertKey, assertKeyWith } from "./support/assert-key.js";
+
 import { Context } from "../src/reactive.js";
 import { AsyncContext } from "../src/reactive-async.js";
 import { ThreadSafeContext } from "../src/thread-safe.js";
@@ -312,35 +314,42 @@ async function replayQueue(flavor, name) {
     }
 
     const expected = step.expected;
-    if (Array.isArray(expected.elements)) {
-      assert.deepEqual(q.elements(), expected.elements, `${where(i)}: elements`);
+    if ("elements" in expected) {
+      assertKey(expected, "elements", q.elements(), `${where(i)}: elements`);
     }
-    if ("head" in expected) assert.equal(await q.head(), expected.head, `${where(i)}: head`);
-    if ("len" in expected) assert.equal(await q.len(), expected.len, `${where(i)}: len`);
+    if ("head" in expected) assertKey(expected, "head", await q.head(), `${where(i)}: head`);
+    if ("len" in expected) assertKey(expected, "len", await q.len(), `${where(i)}: len`);
     if ("is_empty" in expected) {
-      assert.equal(await q.isEmpty(), expected.is_empty, `${where(i)}: is_empty`);
+      assertKey(expected, "is_empty", await q.isEmpty(), `${where(i)}: is_empty`);
     }
     if ("is_full" in expected) {
-      assert.equal(await q.isFull(), expected.is_full, `${where(i)}: is_full`);
+      assertKey(expected, "is_full", await q.isFull(), `${where(i)}: is_full`);
     }
     if ("closed" in expected) {
-      assert.equal(await q.isClosed(), expected.closed, `${where(i)}: closed`);
+      assertKey(expected, "closed", await q.isClosed(), `${where(i)}: closed`);
     }
     if ("returns" in step) {
       assert.equal(result.returns, step.returns, `${where(i)}: returns`);
     }
 
     // Per reader kind, in BOTH directions: the reported matrix AND the graph.
-    const invalidates = expected.invalidates ?? {};
     const after = {};
     for (const [kind, drive] of Object.entries(drivers)) after[kind] = await drive();
-    for (const kind of Object.keys(invalidates)) {
-      assert.equal(result.invalidates[kind], invalidates[kind], `${where(i)}: invalidates.${kind}`);
-      assert.equal(
-        after[kind] > before[kind],
-        invalidates[kind],
-        `${where(i)}: reader ${kind} recomputation (want ${invalidates[kind]})`,
-      );
+    if ("invalidates" in expected) {
+      assertKeyWith(expected, "invalidates", (invalidates) => {
+        for (const kind of Object.keys(invalidates)) {
+          assert.equal(
+            result.invalidates[kind],
+            invalidates[kind],
+            `${where(i)}: invalidates.${kind}`,
+          );
+          assert.equal(
+            after[kind] > before[kind],
+            invalidates[kind],
+            `${where(i)}: reader ${kind} recomputation (want ${invalidates[kind]})`,
+          );
+        }
+      });
     }
   }
   return steps.length;
@@ -399,13 +408,17 @@ async function replayTopic(flavor, name) {
     }
 
     const expected = step.expected;
-    assert.equal(topic.baseOffset(), expected.base_offset, `${where(i)}: base_offset`);
-    assert.deepEqual(topic.elements(), expected.elements, `${where(i)}: elements`);
-    assert.deepEqual(topic.subscriptions(), expected.subscriptions, `${where(i)}: subscriptions`);
-    for (const [id, stream] of Object.entries(expected.reads ?? {})) {
-      assert.deepEqual(await topic.readStream(id), stream, `${where(i)}: reads.${id}`);
+    assertKey(expected, "base_offset", topic.baseOffset(), `${where(i)}: base_offset`);
+    assertKey(expected, "elements", topic.elements(), `${where(i)}: elements`);
+    assertKey(expected, "subscriptions", topic.subscriptions(), `${where(i)}: subscriptions`);
+    if ("reads" in expected) {
+      await assertKeyWith(expected, "reads", async (reads) => {
+        for (const [id, stream] of Object.entries(reads)) {
+          assert.deepEqual(await topic.readStream(id), stream, `${where(i)}: reads.${id}`);
+        }
+      });
     }
-    assert.deepEqual(result.invalidates, expected.invalidates, `${where(i)}: invalidates`);
+    assertKey(expected, "invalidates", result.invalidates, `${where(i)}: invalidates`);
     if ("returns" in step) assert.equal(result.returns, step.returns, `${where(i)}: returns`);
 
     const after = new Map();
@@ -473,18 +486,19 @@ async function replayWorkQueue(flavor, name) {
 
     const expected = step.expected;
     assert.deepEqual(result.returns, step.returns, `${where(i)}: returns`);
-    assert.deepEqual(result.invalidates, expected.invalidates, `${where(i)}: invalidates`);
-    assert.deepEqual(queue.pendingItems(), expected.pending, `${where(i)}: pending`);
-    assert.deepEqual(queue.inFlightDeliveries(), expected.in_flight, `${where(i)}: in_flight`);
-    assert.deepEqual(queue.deadLetterItems(), expected.dead_letters, `${where(i)}: dead_letters`);
-    assert.deepEqual(
+    assertKey(expected, "invalidates", result.invalidates, `${where(i)}: invalidates`);
+    assertKey(expected, "pending", queue.pendingItems(), `${where(i)}: pending`);
+    assertKey(expected, "in_flight", queue.inFlightDeliveries(), `${where(i)}: in_flight`);
+    assertKey(expected, "dead_letters", queue.deadLetterItems(), `${where(i)}: dead_letters`);
+    assertKey(
+      expected,
+      "reads",
       {
         pending_len: await queue.pendingLen(),
         is_empty: await queue.isEmpty(),
         in_flight_len: await queue.inFlightLen(),
         dead_letter_len: await queue.deadLetterLen(),
       },
-      expected.reads,
       `${where(i)}: reads`,
     );
 

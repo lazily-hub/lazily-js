@@ -4,6 +4,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
+import { assertKey, assertKeyWith, excuseKey } from "./support/assert-key.js";
+
 import { TextCrdt } from "../src/text-crdt.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -102,16 +104,18 @@ test("CrdtTree: algebra.json canonical fixture", () => {
   // Compared against the fixture's own booleans rather than asserted flat: the
   // scenario declares WHICH of the two relations it claims, and a runner that
   // hardcodes both would replay a fixture claiming otherwise and still pass.
-  assert.equal(
+  assertKey(
+    mergeScenario.expect,
+    "texts_equal",
     folds.slice(1).every((folded) => folded.value() === folds[0].value()),
-    mergeScenario.expect.texts_equal,
     "merge order independence: texts_equal",
   );
-  assert.equal(
+  assertKey(
+    mergeScenario.expect,
+    "version_vectors_equal",
     folds.slice(1).every((folded) =>
       JSON.stringify(folded.versionVector()) === JSON.stringify(folds[0].versionVector()),
     ),
-    mergeScenario.expect.version_vectors_equal,
     "merge order independence: version_vectors_equal",
   );
 
@@ -120,14 +124,16 @@ test("CrdtTree: algebra.json canonical fixture", () => {
   const snapshot = canonical.deltaSince({});
   const restored = new TextCrdt(snapshotScenario.restore_peer);
   assert.equal(restored.applyDelta(snapshot), true);
-  assert.equal(
+  assertKey(
+    snapshotScenario.expect,
+    "restored_text_equal",
     restored.value() === canonical.value(),
-    snapshotScenario.expect.restored_text_equal,
     "snapshot: restored_text_equal",
   );
-  assert.equal(
+  assertKey(
+    snapshotScenario.expect,
+    "op_ids_equal",
     JSON.stringify(restored.deltaSince({})) === JSON.stringify(snapshot),
-    snapshotScenario.expect.op_ids_equal,
     "snapshot preserves operation identity (op_ids_equal)",
   );
   canonical.insertStr(canonical.len(), "A");
@@ -141,9 +147,10 @@ test("CrdtTree: algebra.json canonical fixture", () => {
   // nothing else in the scenario can see it.
   for (const [name, replica] of [["canonical", canonical], ["restored", restored]]) {
     const ids = replica.deltaSince({}).map((op) => `${op.id.peer}:${op.id.counter}`);
-    assert.equal(
+    assertKey(
+      snapshotScenario.expect,
+      "later_merge_duplicates",
       ids.length - new Set(ids).size,
-      snapshotScenario.expect.later_merge_duplicates,
       `snapshot: later_merge_duplicates on ${name}`,
     );
   }
@@ -151,8 +158,8 @@ test("CrdtTree: algebra.json canonical fixture", () => {
   const steadyScenario = fixture.scenarios[2];
   const steady = TextCrdt.fromStr(steadyScenario.seed.peer, steadyScenario.seed.text);
   const empty = steady.deltaSince(steady.versionVector());
-  assert.deepEqual(empty, steadyScenario.expect.delta);
-  assert.equal(steady.applyDelta(empty), steadyScenario.expect.apply_changed);
+  assertKey(steadyScenario.expect, "delta", empty);
+  assertKey(steadyScenario.expect, "apply_changed", steady.applyDelta(empty));
 });
 
 test("concurrent inserts at same spot converge deterministically", () => {
@@ -289,11 +296,20 @@ function runTextCrdtScenario(scenario) {
   const expect = scenario.expect;
   const main_ = () => replicas.get(expect.on ?? "a");
   for (const key of Object.keys(expect ?? {})) {
-    const want = expect[key];
+    if (key === "on") {
+      // A selector, not an observation: it names WHICH replica the single-replica
+      // assertions read from. Reading it and moving on is a read-then-discard, so
+      // the exception is declared rather than left silent (#lzconsumednotasserted).
+      excuseKey(
+        expect,
+        "on",
+        "selector, not an observation: names which replica text/len/tombstone_count "
+        + "are read from, and those reads are asserted against their own keys",
+      );
+      continue;
+    }
+    assertKeyWith(expect, key, (want) => {
     switch (key) {
-      case "on":
-        // Selector for the single-replica assertions above, not an assertion.
-        break;
       case "text":
         assert.equal(main_().text(), want, label);
         break;
@@ -343,6 +359,7 @@ function runTextCrdtScenario(scenario) {
       default:
         assert.fail(`${label}: unknown textcrdt expectation \`${key}\``);
     }
+    });
   }
 }
 

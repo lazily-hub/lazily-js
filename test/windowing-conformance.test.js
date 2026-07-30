@@ -4,6 +4,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
+import { assertKey, assertKeyWith } from "./support/assert-key.js";
+
 import { Context } from "../src/reactive.js";
 import { SessionWindow, SlidingWindow, TumblingCountWindow, TumblingTimeWindow } from "../src/windowing.js";
 
@@ -23,10 +25,12 @@ function observe(ctx, cell) {
   return obs;
 }
 function check(ctx, obs, step, out) {
-  assert.equal(out, step.expected.output, "output");
+  assertKey(step.expected, "output", out, "output");
   const wasCached = ctx.isSet(obs);
   ctx.get(obs);
-  assert.equal(!wasCached, step.expected.invalidates.output, "invalidation");
+  assertKeyWith(step.expected, "invalidates", (want) => {
+    assert.equal(!wasCached, want.output, "invalidation");
+  });
 }
 
 test("TumblingCountWindow", () => {

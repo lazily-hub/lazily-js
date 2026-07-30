@@ -4,6 +4,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
+import { assertKey, assertKeyWith, excuseKey } from "./support/assert-key.js";
+
 import { SeqCrdt } from "../src/seq-crdt.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -155,41 +157,80 @@ function runSeqCrdtScenario(scenario) {
   // merged result), else the main replica "a".
   const defaultTarget =
     expect.on ?? (expect.orders_equal ? expect.orders_equal[0][0] : "a");
-  if (expect.order) {
-    assert.deepEqual(replicas.get(defaultTarget).order(), expect.order, scenario.name);
-  }
-  if (expect.len !== undefined) {
-    assert.equal(replicas.get(defaultTarget).order().length, expect.len, scenario.name);
-  }
-  if (expect.get) {
-    for (const [id, v] of Object.entries(expect.get)) {
-      assert.equal(replicas.get(defaultTarget).get(id), v, scenario.name);
-    }
-  }
-  if (expect.orders_equal) {
-    for (const [x, y] of expect.orders_equal) {
-      assert.deepEqual(replicas.get(x).order(), replicas.get(y).order(), scenario.name);
-    }
-  }
-  if (expect.contains_all) {
-    const target = replicas.get(defaultTarget);
-    for (const id of expect.contains_all) assert.ok(target.contains(id), scenario.name);
-  }
-  if (expect.order_on) {
-    for (const [r, ord] of Object.entries(expect.order_on)) {
-      assert.deepEqual(replicas.get(r).order(), ord, scenario.name);
-    }
-  }
-  if (expect.get_on) {
-    for (const [r, kv] of Object.entries(expect.get_on)) {
-      for (const [id, v] of Object.entries(kv)) {
-        assert.equal(replicas.get(r).get(id), v, scenario.name);
-      }
-    }
-  }
-  if (expect.not_contains_on) {
-    for (const [r, ids] of Object.entries(expect.not_contains_on)) {
-      for (const id of ids) assert.equal(replicas.get(r).contains(id), false, scenario.name);
+
+  // Key-exhaustive rather than a chain of `if (expect.x)` guards: a guard READS
+  // the key and then drops it whenever the value is falsy or the shape moves, so
+  // a fixture carrying `len: 0` or an empty `contains_all` was replayed with
+  // nothing compared (#lzconsumednotasserted).
+  for (const key of Object.keys(expect)) {
+    switch (key) {
+      case "on":
+        excuseKey(
+          expect,
+          "on",
+          "selector, not an observation: it names which replica order/len/get are "
+          + "read from, and those reads are asserted against their own keys",
+        );
+        break;
+      case "order":
+        assertKey(expect, "order", replicas.get(defaultTarget).order(), scenario.name);
+        break;
+      case "len":
+        assertKey(
+          expect,
+          "len",
+          replicas.get(defaultTarget).order().length,
+          scenario.name,
+        );
+        break;
+      case "get":
+        assertKeyWith(expect, "get", (want) => {
+          for (const [id, v] of Object.entries(want)) {
+            assert.equal(replicas.get(defaultTarget).get(id), v, scenario.name);
+          }
+        });
+        break;
+      case "orders_equal":
+        assertKeyWith(expect, "orders_equal", (pairs) => {
+          assert.ok(pairs.length > 0, `${scenario.name}: orders_equal relates nothing`);
+          for (const [x, y] of pairs) {
+            assert.deepEqual(replicas.get(x).order(), replicas.get(y).order(), scenario.name);
+          }
+        });
+        break;
+      case "contains_all":
+        assertKeyWith(expect, "contains_all", (ids) => {
+          const target = replicas.get(defaultTarget);
+          for (const id of ids) assert.ok(target.contains(id), scenario.name);
+        });
+        break;
+      case "order_on":
+        assertKeyWith(expect, "order_on", (want) => {
+          for (const [r, ord] of Object.entries(want)) {
+            assert.deepEqual(replicas.get(r).order(), ord, scenario.name);
+          }
+        });
+        break;
+      case "get_on":
+        assertKeyWith(expect, "get_on", (want) => {
+          for (const [r, kv] of Object.entries(want)) {
+            for (const [id, v] of Object.entries(kv)) {
+              assert.equal(replicas.get(r).get(id), v, scenario.name);
+            }
+          }
+        });
+        break;
+      case "not_contains_on":
+        assertKeyWith(expect, "not_contains_on", (want) => {
+          for (const [r, ids] of Object.entries(want)) {
+            for (const id of ids) {
+              assert.equal(replicas.get(r).contains(id), false, scenario.name);
+            }
+          }
+        });
+        break;
+      default:
+        assert.fail(`${scenario.name}: unknown seqcrdt expectation \`${key}\``);
     }
   }
 }

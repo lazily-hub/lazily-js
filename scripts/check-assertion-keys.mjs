@@ -1,19 +1,34 @@
 #!/usr/bin/env node
-// Assertion-key consumption guard (#lzassertunknownkeys).
+// Assertion-key consumption guard (#lzassertunknownkeys, #lzconsumednotasserted).
 //
-// `check-conformance-coverage.sh` proves a canonical fixture was OPENED. This
-// guard is the level below it: having opened the fixture, did the runner
-// actually consume the assertion the fixture exists for?
+// Three rungs of the same ladder, each proving what the one above it assumes:
 //
-// The failure it exists for is silent by construction. A runner reads named keys
-// out of a fixture's `assertions` / `expect` / `expected` block and lets anything
-// it does not recognise fall through. The fixture round-trips, the suite goes
-// green, and the assertion proves nothing. JavaScript makes that path invisible
-// twice over: `const {a, b} = fx.expect` and `if ("x" in a)` both read an absent
-// or misspelled key as "not mine", so an assertion key no binding implements is
+//   1. `check-conformance-coverage.sh`  — the fixture was OPENED.
+//   2. this guard, unconsumed-key half  — every assertion key was READ.
+//   3. this guard, unasserted-key half  — every read key reached a COMPARISON
+//                                         against the fixture's own value.
+//
+// Rung 3 exists because a read is not an assertion. A runner can iterate the
+// block (marking every key read) and `continue` past one; bind a value and never
+// compare it; or read the key and then assert against a hardcoded literal so that
+// editing the fixture changes nothing. All three report green at rung 2.
+//
+// Evidence for rung 3 cannot come from watching property access, so it comes from
+// the runner: `test/support/assert-key.js` is the only path that marks a key
+// asserted, and `excuseKey(block, key, reason)` is the only way to declare a key
+// unassertable at its call site. Runner excuses go stale in BOTH directions, as
+// the static allowlist below does — an excuse for a key the same run also asserts
+// fails the build, because it is hiding nothing.
+//
+// Rung 2's failure is silent by construction. A runner reads named keys out of a
+// fixture's `assertions` / `expect` / `expected` block and lets anything it does
+// not recognise fall through. The fixture round-trips, the suite goes green, and
+// the assertion proves nothing. JavaScript makes that path invisible twice over:
+// `const {a, b} = fx.expect` and `if ("x" in a)` both read an absent or
+// misspelled key as "not mine", so an assertion key no binding implements is
 // skipped in silence in every runner at once.
 //
-// Evidence comes from the runtime recorder in `test/support/conformance-manifest.cjs`,
+// Evidence for rung 2 comes from the runtime recorder in `test/support/conformance-manifest.cjs`,
 // which turns every key of a tracked block into an accessor and records the read.
 // Like the coverage guard, this observes what the suite REALLY did rather than
 // what its source claims: a runner that stops consuming a key is caught even if
@@ -66,7 +81,13 @@ const DECLARED_UNCONSUMED = [
   })),
 ];
 
-const TRACKED = new Set(["assertions", "expect", "expected"]);
+const TRACKED = new Set([
+  "assertions",
+  "expect",
+  "expected",
+  "expect_initial",
+  "expect_after",
+]);
 
 function fail(lines) {
   for (const line of lines) console.error(line);
@@ -89,10 +110,16 @@ if (!existsSync(KEY_MANIFEST) || statSync(KEY_MANIFEST).size === 0) {
 
 const present = new Set();
 const read = new Set();
+const asserted = new Set();
+const excusedInRunner = new Map();
 for (const line of readFileSync(KEY_MANIFEST, "utf8").split("\n")) {
   if (line.trim() === "") continue;
-  const [fixture, block, key, tag] = line.split("\t");
-  (tag === "R" ? read : present).add(`${fixture}\t${block}\t${key}`);
+  const [fixture, block, key, tag, reason] = line.split("\t");
+  const id = `${fixture}\t${block}\t${key}`;
+  if (tag === "R") read.add(id);
+  else if (tag === "A") asserted.add(id);
+  else if (tag === "X") excusedInRunner.set(id, reason ?? "");
+  else present.add(id);
 }
 
 // Does a corpus fixture carry any tracked assertion block at all?
@@ -149,13 +176,54 @@ for (const entry of DECLARED_UNCONSUMED) {
 
 const excused = new Set();
 let unread = 0;
+let unasserted = 0;
+let stale = 0;
 let consumed = 0;
+let declaredHere = 0;
 for (const entry of [...present].sort()) {
   const [fixture, block, key] = entry.split("\t");
-  if (read.has(entry)) {
+  const runnerExcuse = excusedInRunner.get(entry);
+
+  // A runner excuse is stale in both directions, exactly as the static allowlist
+  // is. An excuse for a key the same run also asserts is hiding nothing, and
+  // leaving it behind understates what this binding checks.
+  if (runnerExcuse !== undefined && asserted.has(entry)) {
+    fail([
+      `ERROR: assertion key '${key}' in ${block} of '${fixture}' is EXCUSED and ASSERTED`,
+      "       in the same run.",
+      `       Reason on file: ${runnerExcuse}`,
+      "       The excuse is stale — the gap it named is already closed. Delete the",
+      "       excuseKey() call; an excuse that hides nothing understates coverage.",
+    ]);
+    stale += 1;
+    problems += 1;
+    continue;
+  }
+  if (runnerExcuse !== undefined) {
+    declaredHere += 1;
+    continue;
+  }
+
+  if (asserted.has(entry)) {
     consumed += 1;
     continue;
   }
+
+  // Read but never asserted — the defect this rung exists for. The key reached a
+  // runner and the runner did nothing with the value.
+  if (read.has(entry)) {
+    fail([
+      `ERROR: assertion key '${key}' in ${block} of '${fixture}' was READ BUT NEVER ASSERTED.`,
+      "       Something fetched this value and no comparison against it followed, so",
+      "       editing the fixture here changes no outcome. Route it through",
+      "       assertKey/assertKeyWith in test/support/assert-key.js, or declare the",
+      "       exception with excuseKey(block, key, reason).",
+    ]);
+    unasserted += 1;
+    problems += 1;
+    continue;
+  }
+
   const whole = declaredWhole.get(fixture);
   const exact = declaredExact.get(`${fixture}\t${key}`);
   if (whole || exact) {
@@ -170,6 +238,21 @@ for (const entry of [...present].sort()) {
     "       capability that is genuinely missing.",
   ]);
   unread += 1;
+  problems += 1;
+}
+
+// An excuse naming a key the corpus no longer carries is the other half of the
+// staleness rule: the manifest has no presence record for it at all.
+for (const [entry, reason] of [...excusedInRunner].sort()) {
+  if (present.has(entry)) continue;
+  const [fixture, block, key] = entry.split("\t");
+  fail([
+    `ERROR: excuseKey names '${key}' in ${block} of '${fixture}', which the corpus`,
+    "       no longer carries as a tracked assertion key.",
+    `       Reason on file: ${reason}`,
+    "       Delete the call — the fixture moved and the excuse outlived it.",
+  ]);
+  stale += 1;
   problems += 1;
 }
 
@@ -202,11 +285,15 @@ for (const entry of DECLARED_UNCONSUMED) {
 }
 
 if (problems > 0) {
-  console.error(`assertion-key consumption FAILED: ${problems} problem(s), ${unread} unread key(s)`);
+  console.error(
+    `assertion-key consumption FAILED: ${problems} problem(s), ${unread} unread key(s),`
+    + ` ${unasserted} read-but-unasserted key(s), ${stale} stale excuse(s)`,
+  );
   process.exit(1);
 }
 
 console.error(
-  `assertion-key consumption OK: ${consumed}/${present.size} fixture assertion keys CONSUMED by the`
-  + ` suite (${excused.size} declared unconsumed; runtime manifest — these values were really read)`,
+  `assertion-key consumption OK: ${consumed}/${present.size} fixture assertion keys ASSERTED against`
+  + ` their own fixture value by the suite (${declaredHere} excused in-runner,`
+  + ` ${excused.size} declared unconsumed; runtime manifest — these values were really compared)`,
 );

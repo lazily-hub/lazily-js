@@ -4,6 +4,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
+import { assertKey, assertKeyWith } from "./support/assert-key.js";
+
 import { Context } from "../src/reactive.js";
 import { BulkheadCell, CircuitBreakerCell, RetryPolicyCell, TimeoutCell } from "../src/resilience.js";
 
@@ -24,7 +26,9 @@ function observe(ctx, cell) {
 function checkInval(ctx, obs, step, reader) {
   const wasCached = ctx.isSet(obs);
   ctx.get(obs);
-  assert.equal(!wasCached, step.expected.invalidates[reader], `${reader} invalidation`);
+  assertKeyWith(step.expected, "invalidates", (want) => {
+    assert.equal(!wasCached, want[reader], `${reader} invalidation`);
+  });
 }
 
 test("CircuitBreakerCell", () => {
@@ -37,7 +41,7 @@ test("CircuitBreakerCell", () => {
     const op = step.op;
     if (op.type === "record") cb.record(op.success, op.now);
     else if (op.type === "allow") assert.equal(cb.allow(op.now), step.returns, "allow");
-    assert.equal(cb.state(), step.expected.state, "state");
+    assertKey(step.expected, "state", cb.state());
     checkInval(ctx, obs, step, "state");
   }
 });
@@ -49,7 +53,7 @@ test("RetryPolicyCell", () => {
   const obs = observe(ctx, r.delayCell);
   for (const step of fx.steps) {
     assert.equal(r.nextDelay(), step.returns, "delay");
-    assert.equal(r.delay(), step.expected.delay);
+    assertKey(step.expected, "delay", r.delay());
     checkInval(ctx, obs, step, "delay");
   }
 });
@@ -62,7 +66,7 @@ test("BulkheadCell", () => {
   for (const step of fx.steps) {
     if (step.op.type === "acquire") assert.equal(b.acquire(), step.returns);
     else b.release();
-    assert.equal(b.permitsInUse(), step.expected.in_use);
+    assertKey(step.expected, "in_use", b.permitsInUse());
     checkInval(ctx, obs, step, "in_use");
   }
 });
@@ -80,7 +84,7 @@ test("TimeoutCell", () => {
       e = false;
     } else e = t.tick(op.now);
     assert.equal(e, step.returns, "edge");
-    assert.equal(t.isTimedOut(), step.expected.is_timed_out);
+    assertKey(step.expected, "is_timed_out", t.isTimedOut());
     checkInval(ctx, obs, step, "is_timed_out");
   }
 });

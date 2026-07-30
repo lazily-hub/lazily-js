@@ -4,6 +4,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
+import { assertKey, assertKeyWith } from "./support/assert-key.js";
+
 import { Context } from "../src/reactive.js";
 import { MembershipCell } from "../src/membership.js";
 
@@ -39,13 +41,15 @@ test("MembershipCell lifecycle", () => {
     else throw new Error(`unknown op ${op.type}`);
 
     const exp = step.expected;
-    for (const [peer, want] of Object.entries(exp.states)) {
-      assert.equal(m.state(Number(peer)), want, `state of peer ${peer}`);
-    }
-    assert.deepEqual(m.peerSet(), exp.alive_set, "alive_set");
+    assertKeyWith(exp, "states", (states) => {
+      for (const [peer, want] of Object.entries(states)) {
+        assert.equal(m.state(Number(peer)), want, `state of peer ${peer}`);
+      }
+    });
+    assertKey(exp, "alive_set", m.peerSet(), "alive_set");
 
     const wasCached = ctx.isSet(observed);
     ctx.get(observed);
-    assert.equal(!wasCached, exp.invalidates, "invalidation");
+    assertKey(exp, "invalidates", !wasCached, "invalidation");
   }
 });

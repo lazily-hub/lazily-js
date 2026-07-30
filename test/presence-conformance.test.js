@@ -4,6 +4,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
+import { assertKey, assertKeyWith } from "./support/assert-key.js";
+
 import { Context } from "../src/reactive.js";
 import { AwarenessCell, EphemeralCell, PresenceCell } from "../src/presence.js";
 
@@ -24,7 +26,9 @@ function observe(ctx, cell) {
 function checkInval(ctx, obs, step, reader) {
   const wasCached = ctx.isSet(obs);
   ctx.get(obs);
-  assert.equal(!wasCached, step.expected.invalidates[reader], `${reader} invalidation`);
+  assertKeyWith(step.expected, "invalidates", (want) => {
+    assert.equal(!wasCached, want[reader], `${reader} invalidation`);
+  });
 }
 
 test("PresenceCell", () => {
@@ -37,7 +41,7 @@ test("PresenceCell", () => {
     if (op.type === "heartbeat") cell.heartbeat(op.peer, op.value, op.now);
     else if (op.type === "evict") cell.evict(op.peer, op.now);
     else if (op.type === "tick") cell.tick(op.now);
-    assert.deepEqual(cell.present(), step.expected.present);
+    assertKey(step.expected, "present", cell.present());
     checkInval(ctx, obs, step, "present");
   }
 });
@@ -51,7 +55,7 @@ test("AwarenessCell", () => {
     const op = step.op;
     if (op.type === "set") cell.set(op.peer, op.value, op.now);
     else if (op.type === "tick") cell.tick(op.now);
-    assert.deepEqual(cell.present(), step.expected.present);
+    assertKey(step.expected, "present", cell.present());
     checkInval(ctx, obs, step, "present");
   }
 });
@@ -65,7 +69,7 @@ test("EphemeralCell", () => {
     const op = step.op;
     if (op.type === "set") cell.set(op.value, op.now, op.ttl);
     else if (op.type === "tick") cell.tick(op.now);
-    assert.equal(cell.value(), step.expected.value);
+    assertKey(step.expected, "value", cell.value());
     checkInval(ctx, obs, step, "value");
   }
 });

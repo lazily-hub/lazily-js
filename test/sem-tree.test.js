@@ -4,6 +4,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
+import { assertKey, assertKeyWith } from "./support/assert-key.js";
+
 import { Context } from "../src/reactive.js";
 import { SemTree } from "../src/sem-tree.js";
 
@@ -106,12 +108,14 @@ test("conformance: semtree_incremental.json", () => {
     assert.ok(fold, `unknown fold ${scenario.fold}`);
     const t = new SemTree(ctx, scenario.tree, fold);
 
-    for (const [id, v] of Object.entries(scenario.expect_initial)) {
-      if (id === "root") {
-        assert.equal(t.value(), v, `${scenario.name}: initial root`);
-      } else {
-        assert.equal(t.nodeValue(id), v, `${scenario.name}: initial ${id}`);
-      }
+    for (const id of Object.keys(scenario.expect_initial)) {
+      assertKeyWith(scenario.expect_initial, id, (v) => {
+        if (id === "root") {
+          assert.equal(t.value(), v, `${scenario.name}: initial root`);
+        } else {
+          assert.equal(t.nodeValue(id), v, `${scenario.name}: initial ${id}`);
+        }
+      });
     }
 
     // Attach a downstream consumer if the scenario checks the memo guard.
@@ -131,19 +135,30 @@ test("conformance: semtree_incremental.json", () => {
       t.removeChild(scenario.remove_child.parent, scenario.remove_child.child);
     }
 
+    // Key-exhaustive. `sibling_a_cached` and `downstream_consumer_reran` are real
+    // observable facts about the library, so they are asserted against the
+    // fixture's own value rather than skipped past inside the loop that reads
+    // them — the first read-then-discard shape (#lzconsumednotasserted).
     const after = scenario.expect_after;
-    if (after.root !== undefined) assert.equal(t.value(), after.root, scenario.name);
     for (const key of Object.keys(after)) {
-      if (key.startsWith("node_")) {
-        const id = key.slice(5);
-        assert.equal(t.nodeValue(id), after[key], `${scenario.name}: ${id}`);
+      switch (key) {
+        case "root":
+          assertKey(after, "root", t.value(), scenario.name);
+          break;
+        case "sibling_a_cached":
+          assertKey(after, "sibling_a_cached", t.isCached("a"), scenario.name);
+          break;
+        case "downstream_consumer_reran":
+          assertKey(after, "downstream_consumer_reran", downstreamRuns > 1, scenario.name);
+          break;
+        default:
+          assertKey(
+            after,
+            key,
+            t.nodeValue(key.startsWith("node_") ? key.slice(5) : key),
+            `${scenario.name}: ${key}`,
+          );
       }
-    }
-    if (after.sibling_a_cached !== undefined) {
-      assert.equal(t.isCached("a"), after.sibling_a_cached, scenario.name);
-    }
-    if (after.downstream_consumer_reran !== undefined) {
-      assert.equal(downstreamRuns > 1, after.downstream_consumer_reran, scenario.name);
     }
   }
 });
