@@ -83,11 +83,29 @@ while IFS= read -r fixture; do
   fi
 done < <(cd "$SPEC_DIR" && find . -name '*.json' | sed 's|^\./||' | sort)
 
-# A stale allowlist is its own drift: an entry naming a fixture that no longer
-# exists means the corpus moved and nobody updated the excuse.
+# A stale allowlist is its own drift, in two directions (#lzcovallowlistrot):
+#
+#   1. An entry naming a fixture that no longer exists means the corpus moved and
+#      nobody updated the excuse.
+#   2. An entry naming a fixture the suite DOES open means the excuse outlived the
+#      gap it described. That rot understates coverage — the guard keeps reporting
+#      a fixture as known-uncovered while the suite is in fact replaying it, and
+#      nothing here would ever notice.
+#
+# The covered-check above and the stale-check below use the same `grep -qxF`
+# against the same `$OPENED` set on purpose: an entry can never be counted as
+# covered by one and excused by the other.
 for known in "${KNOWN_UNCOVERED[@]:-}"; do
   if [ ! -f "$SPEC_DIR/$known" ]; then
     echo "ERROR: KNOWN_UNCOVERED lists '$known', which is not in the canonical corpus." >&2
+    missing=$((missing + 1))
+    continue
+  fi
+  if grep -qxF "$known" <<< "$OPENED"; then
+    echo "ERROR: KNOWN_UNCOVERED lists '$known', but the suite DID open it." >&2
+    echo "       The excuse is stale: this fixture is covered. Delete the entry from" >&2
+    echo "       KNOWN_UNCOVERED in $0 — an excuse left behind understates coverage" >&2
+    echo "       and hides the fact that the gap it named is already closed." >&2
     missing=$((missing + 1))
   fi
 done
