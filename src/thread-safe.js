@@ -221,6 +221,19 @@ export class ThreadSafeContext {
     return this.#mutex.runExclusive(() => this.#ctx.batch(run));
   }
 
+  /**
+   * Force a set of dependency-free derived nodes stale in ONE frontier walk.
+   *
+   * The core/shell families (queue, ingress) use this after their graph-agnostic
+   * transition has proved exactly which reader kinds changed. The whole walk —
+   * including the effect flush it triggers — runs as one critical section, so no
+   * other realm observes a partially fanned-out transition: an ingress generation
+   * handoff must never be visible as "new value, old authority".
+   */
+  clearComputeds(handles) {
+    return this.#mutex.runExclusive(() => this.#ctx.clearComputeds(handles));
+  }
+
   // -- Lifecycle ---------------------------------------------------------
 
   disposeEffect(handle) {

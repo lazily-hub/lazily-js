@@ -100,9 +100,9 @@ notes and platform carve-outs lives in
 | Portable stdlib caller-driven `Timeout<T>` (`stdlib_timeout_v1`) — distinct from reactive `TimeoutCell` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Portable stdlib `RevisionBarrier` (`stdlib_revision_barrier_v1`) — register/recheck lost-wakeup guard | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Embedded-service plane — `HealthCell` / `ReadinessCell` / `DiscoveryCell` / `ServiceRegistry` (`#lzservice`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Transport-agnostic reactive ingress (`IngressCell`) — keyed lifecycle scopes, generation/sequence/freshness envelopes, reorder buffer, accepted/dropped/error receipt readers (`#designimplementtransport`) | ✅ | — | — | — | — | — | — | — | — |
-| Ingress family — `Send + Sync` flavor (`ThreadSafeIngressCell`): one frontier walk per admission (`#designimplementtransport`) | ✅ | — | — | — | — | — | — | — | — |
-| Ingress family — async flavor (`AsyncIngressCell`): admission is not async-coloured (`#designimplementtransport`) | ✅ | — | — | — | — | — | — | — | — |
+| Transport-agnostic reactive ingress (`IngressCell`) — keyed lifecycle scopes, generation/sequence/freshness envelopes, reorder buffer, accepted/dropped/error receipt readers (`#designimplementtransport`) | ✅ | — | — | ✅ | — | — | — | — | — |
+| Ingress family — `Send + Sync` flavor (`ThreadSafeIngressCell`): one frontier walk per admission (`#designimplementtransport`) | ✅ | — | — | ✅ | — | — | — | — | — |
+| Ingress family — async flavor (`AsyncIngressCell`): admission is not async-coloured (`#designimplementtransport`) | ✅ | — | — | ✅ | — | — | — | — | — |
 <!-- coverage-table:end -->
 
 Two JS ✅ marks are backed by runtime-specific mechanisms while keeping the core isomorphic:
@@ -136,6 +136,10 @@ and JSON Schemas in `lazily-spec` and the Lean models in `lazily-formal`.
 | `@lazily-hub/lazily-js/signaling` | WebSocket signaling protocol: `ClientMessage` / `ServerMessage`, `SignalingClient`, `SignalingRoom` routing (anti-spoof, roster), `SignalingPermissions` |
 | `@lazily-hub/lazily-js/distributed` | Distributed plane: `DataChannel` seam + `InMemoryDataChannel`, `WebRtcSink` / `WebRtcSource`, `CrdtPlaneRuntime` anti-entropy, and the browser `RTCPeerConnection` adapter |
 | `@lazily-hub/lazily-js/state-projection` | koffi FFI consumer for agent-doc `DocumentStateProjection` |
+| `@lazily-hub/lazily-js/ingress-core` | The graph-agnostic ingress admission algebra: `IngressCore`, keyed lifecycle scopes, the normative admission order, the bounded reorder buffer, the coalescing hot window, the three-channel receipt log, and the `InProcIngress` transport seam (`#designimplementtransport`) |
+| `@lazily-hub/lazily-js/ingress` | Single-threaded ingress shell: `IngressCell` over `Context` — four reader kinds per scope (`value` / `readiness` / `authority` / `retry`), three receipt readers, and a derived schedule (`#designimplementtransport`) |
+| `@lazily-hub/lazily-js/thread-safe-ingress` | `Send + Sync` ingress shell: `ThreadSafeIngressCell` — the core guarded by its own mutex, invalidation run with that lock released and fanned out in ONE frontier walk (`#designimplementtransport`) |
+| `@lazily-hub/lazily-js/async-ingress` | Async ingress shell: `AsyncIngressCell` over `AsyncContext` — admission stays synchronous; only reader materialization is async-coloured (`#designimplementtransport`) |
 
 ## Reactive graph
 
@@ -425,6 +429,60 @@ work.ack("worker-a", delivery.delivery_id);
 The instance serializes local claims; distributed/HA assignment still requires
 a leader or consensus-committed assignment log.
 
+## Transport-agnostic reactive ingress
+
+The ingress family replaces the four accidental mechanisms a remote-stream client
+usually grows — a `refresh()` loop, a hand-rolled relevance check, a reconnect
+path that forgets what it applied, and transport-shaped consumer code — with
+derives over one keyed admission plane. The transport is a value the primitive
+never touches: an envelope carries its own provenance (`generation`, `sequence`,
+`stampedAt`), so a WebSocket frame, an RPC response, and a polled page are the
+same input once decoded. Spec: `lazily-spec/docs/transport-ingress.md`.
+
+The admission order is normative — lifecycle, generation fence, freshness,
+generation handoff, dedupe, ordering, backpressure, merge. Two of those orderings
+are load-bearing: the **fence outranks dedupe** (else a zombie producer reads as
+an ordinary duplicate) and **freshness outranks ordering** (else an expired
+envelope takes a reorder slot and a slow zombie starves live data).
+
+`IngressCore` is the graph-agnostic algebra; every mutator returns which reader
+kinds the transition dirtied, and each of the three shells clears exactly that set
+on its own graph in one frontier walk. Readiness, authority, and retry are
+`Computed`s, so a buffered out-of-order envelope, a `tick` inside the freshness
+horizon, and an empty drain each invalidate **nothing**.
+
+| Flavor | Type | Context |
+|--------|------|---------|
+| single-threaded | `IngressCell` | `Context` |
+| `Send + Sync` | `ThreadSafeIngressCell` | `ThreadSafeContext` |
+| async | `AsyncIngressCell` | `AsyncContext` |
+
+```js
+import { Context } from "@lazily-hub/lazily-js/reactive";
+import { IngressCell, ingressEnvelope } from "@lazily-hub/lazily-js/ingress";
+import { Sum } from "@lazily-hub/lazily-js/merge";
+
+const ctx = new Context();
+const ingress = new IngressCell(ctx, {
+  merge: Sum,
+  policy: { reorderWindow: 4, freshnessHorizon: 100 },
+});
+
+ingress.admit(ingressEnvelope("room-7", 1, 0, 0, 5));
+ingress.admit(ingressEnvelope("room-7", 1, 2, 0, 4)); // buffered: invalidates nothing
+ingress.admit(ingressEnvelope("room-7", 1, 1, 0, 2)); // flushes 5 + 2 + 4 as ONE change
+
+ingress.value("room-7"); // 11  (the coalesced hot window)
+ingress.readiness("room-7"); // "ready"
+ingress.drain("room-7"); // 11 — an egress, NOT an ack: the watermark does not move
+```
+
+Admission is **not** async-coloured: `AsyncIngressCell`'s mutators return plain
+values, because an admission decision is a function of the fence, the watermark,
+the reorder buffer, and the observed clock. Only its reads resolve through
+`getAsync`, because `AsyncContext` has no synchronous compute constructor —
+the same single async obligation `AsyncReactiveMap` carries.
+
 ## CRDTs
 
 `SeqCrdt` is the move-aware sequence CRDT: each element has independent LWW
@@ -622,6 +680,19 @@ signaling protocol (`signaling/frames.json`,
 `signaling/anti_spoof_session.json`), and the distributed CRDT plane
 (`distributed/crdt_sync_frames.json`, `distributed/anti_entropy_converge.json`).
 It also validates generated wire values against the canonical JSON Schemas.
+
+The transport-agnostic ingress corpus (`#designimplementtransport`,
+`ingress/ingress_*.json` — all seven named schedules) is replayed against **every
+flavor this binding ships**: `IngressCell`, `ThreadSafeIngressCell`, and
+`AsyncIngressCell`. The flavor axis lives in the runner, not the corpus. Each step's
+`invalidates` matrix is asserted per reader kind and per receipt channel in **both**
+directions through a cache-validity probe (`isSet` / `isResolved`), so
+over-invalidation is as visible as under-; the probe itself is pinned by a test that
+proves it can fail. `test/ingress-family-conformance.test.js` also carries a
+three-row flavor ledger enforced by grepping `src/` in both directions, so a shipped
+flavor cannot sit unreplayed, and every replay returns a step count each flavor
+asserts equals the corpus total — an absence guard proves the fixtures exist, only a
+positive count proves this process opened them.
 
 `npm test` builds the [`lazily-formal`][formal] Lean 4 model when that sibling
 checkout and the `lake` toolchain are present. The script exits successfully

@@ -91,6 +91,12 @@ export class AsyncContext {
   /** @deprecated Signal handles are retired by the Cell kernel. */
   getSignalAsync<T>(handle: AsyncSignalHandle<T>): Promise<T>;
 
+  /**
+   * Force dependency-free derived slots stale in ONE synchronous walk. Every root
+   * is marked before any microtask runs, so an effect reading several of them
+   * observes them together.
+   */
+  clearComputeds(handles: readonly AsyncComputed<unknown>[]): void;
   /** Synchronous batch boundary; async reruns are scheduled at batch exit. */
   batch(run: () => void): void;
   /** Await scheduled reruns and in-flight computes until the graph quiesces. */

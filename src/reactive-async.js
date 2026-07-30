@@ -624,6 +624,32 @@ export class AsyncContext {
     }
   }
 
+  /**
+   * Force a set of dependency-free derived slots stale in ONE synchronous walk.
+   *
+   * The async counterpart of the sync context's `clearComputeds`, and the
+   * primitive the core/shell families (ingress) use after their graph-agnostic
+   * transition has proved exactly which reader kinds changed. Every root is
+   * marked before any microtask runs, and an async effect coalesces its reruns on
+   * its own pending/kicking latch, so a multi-root clear still kicks at most ONE
+   * run per effect and the effect body observes every cleared reader together —
+   * an ingress generation handoff must never be visible as "new value, old
+   * authority".
+   */
+  clearComputeds(handles) {
+    const ids = [];
+    for (const handle of handles) {
+      const node = handle === undefined || handle === null ? undefined : this.#nodes[handle.id];
+      if (!(node instanceof AsyncSlotNode)) {
+        throw new Error("clearComputeds requires live AsyncComputed handles from this context");
+      }
+      ids.push(handle.id);
+    }
+    for (const id of ids) {
+      this.#invalidateSlot(id);
+    }
+  }
+
   // -- Batch -------------------------------------------------------------
 
   batch(run) {

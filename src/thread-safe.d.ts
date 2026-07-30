@@ -66,6 +66,12 @@ export class ThreadSafeContext {
   /** @deprecated use {@link ThreadSafeContext#set} — the unified cell write (#lzcellkernel). */
   setCell<T>(handle: CellHandle<T>, value: T): void;
   batch(run: () => void): void;
+  /**
+   * Force dependency-free derived nodes stale in ONE frontier walk, as a single
+   * critical section. The core/shell families (queue, ingress) use it after their
+   * graph-agnostic transition has proved which reader kinds changed.
+   */
+  clearComputeds(handles: readonly SlotHandle<unknown>[]): void;
 
   disposeEffect(handle: EffectHandle): void;
   isEffectActive(handle: EffectHandle): boolean;
