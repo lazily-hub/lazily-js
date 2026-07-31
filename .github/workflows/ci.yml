@@ -130,6 +130,13 @@ jobs:
       - name: Formal model check
         run: npm run test:formal
 
+      # The cross-binding wire-compatibility gate, which `make check` runs and no
+      # binding's CI did (#lzinteroppeerci). Nine bindings have to agree on a byte
+      # layout; a gate that only ever ran on a laptop is how they stop agreeing
+      # without anyone finding out.
+      - name: Interop peer self-check (#lzinteroppeerci)
+        run: npm run test:interop-peer
+
       # ---------------------------------------------------------------------
       # Conformance ladder, rungs 1-4 (#lzguardsnotinci).
       #
