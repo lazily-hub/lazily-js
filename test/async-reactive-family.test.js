@@ -60,11 +60,11 @@ test("async ComputedMap conformance: observational_transparency.json", async () 
   excuseKey(
     expected,
     "default_mode",
-    "materialization mode is not a value this binding can report: eager is the "
-      + "pre-mint loop (materializeAll) and lazy is mint-on-access, so there is no "
-      + "mode flag to read back. The key selects which construction this runner "
-      + "replays as the default; the behaviour it selects is asserted through "
-      + "eager_present, lazy_present_at_build and lazy_present_after_reads.",
+    "materialization mode is not a value this binding can report: eager is the " +
+      "pre-mint loop (materializeAll) and lazy is mint-on-access, so there is no " +
+      "mode flag to read back. The key selects which construction this runner " +
+      "replays as the default; the behaviour it selects is asserted through " +
+      "eager_present, lazy_present_at_build and lazy_present_after_reads.",
   );
   assert.equal(
     expected.default_mode,
@@ -78,7 +78,9 @@ test("async ComputedMap conformance: observational_transparency.json", async () 
   const lazy = new AsyncComputedMap(ctxL);
 
   // Present-set laws (allocation axis, unchanged by async resolution).
-  assertKeyWith(expected, "eager_present", (want) => assertSameSet(eager.presentKeys(), want, "eager_present"));
+  assertKeyWith(expected, "eager_present", (want) =>
+    assertSameSet(eager.presentKeys(), want, "eager_present"),
+  );
   assert.equal(lazy.presentCount(), 0, "lazy defers all slots at build");
 
   // Eventual transparency: drive each slot; resolved value = canonical.
@@ -92,7 +94,9 @@ test("async ComputedMap conformance: observational_transparency.json", async () 
   const ctx2 = new AsyncContext();
   const lazy2 = new AsyncComputedMap(ctx2);
   for (const key of fixture.reads) lazy2.getOrInsertHandle(key, factory);
-  assertKeyWith(expected, "lazy_present_after_reads", (want) => assertSameSet(lazy2.presentKeys(), want, "lazy_present_after_reads"));
+  assertKeyWith(expected, "lazy_present_after_reads", (want) =>
+    assertSameSet(lazy2.presentKeys(), want, "lazy_present_after_reads"),
+  );
 });
 
 test("async ComputedMap conformance: deferral_not_deallocation.json", async () => {
@@ -102,7 +106,9 @@ test("async ComputedMap conformance: deferral_not_deallocation.json", async () =
 
   const ctx = new AsyncContext();
   const eager = eagerSlotMap(ctx, Object.keys(spec.val), factory);
-  assertKeyWith(expected, "eager_present", (want) => assertSameSet(eager.presentKeys(), want, "eager_present"));
+  assertKeyWith(expected, "eager_present", (want) =>
+    assertSameSet(eager.presentKeys(), want, "eager_present"),
+  );
 
   const lazy = new AsyncComputedMap(ctx);
   const sizes = [];
@@ -114,7 +120,9 @@ test("async ComputedMap conformance: deferral_not_deallocation.json", async () =
   for (let i = 1; i < sizes.length; i++) {
     assert.ok(sizes[i] >= sizes[i - 1], "present count is monotone");
   }
-  assertKeyWith(expected, "lazy_present_after_reads", (want) => assertSameSet(lazy.presentKeys(), want, "lazy_present_after_reads"));
+  assertKeyWith(expected, "lazy_present_after_reads", (want) =>
+    assertSameSet(lazy.presentKeys(), want, "lazy_present_after_reads"),
+  );
 });
 
 test("async conformance: entry_kind_orthogonal_to_mode.json (SourceMap + ComputedMap)", async () => {
@@ -133,10 +141,17 @@ test("async conformance: entry_kind_orthogonal_to_mode.json (SourceMap + Compute
   const eagerSlots = new AsyncComputedMap(ctxE);
   eagerSlots.materializeAll(slotKeys, lookup);
   assertKeyWith(expected, "eager_present", (want) =>
-     assertSameSet([...eagerCells.presentKeys(), ...eagerSlots.presentKeys()], want, "eager_present"));
+    assertSameSet(
+      [...eagerCells.presentKeys(), ...eagerSlots.presentKeys()],
+      want,
+      "eager_present",
+    ),
+  );
   await assertKeyWith(expected, "observe", async (observe) => {
     for (const [key, value] of Object.entries(observe)) {
-      const got = cellKeys.includes(key) ? await eagerCells.resolve(key) : await eagerSlots.resolve(key);
+      const got = cellKeys.includes(key)
+        ? await eagerCells.resolve(key)
+        : await eagerSlots.resolve(key);
       assert.equal(got, value, `eager resolve[${key}]`);
     }
   });
@@ -145,14 +160,21 @@ test("async conformance: entry_kind_orthogonal_to_mode.json (SourceMap + Compute
   const lazyCells = new AsyncSourceMap(ctxL);
   for (const k of cellKeys) lazyCells.set(k, lookup(k));
   const lazySlots = new AsyncComputedMap(ctxL);
-  assertKeyWith(expected, "lazy_present_at_build", (want) => assertSameSet(lazyCells.presentKeys(), want, "lazy_present_at_build"));
+  assertKeyWith(expected, "lazy_present_at_build", (want) =>
+    assertSameSet(lazyCells.presentKeys(), want, "lazy_present_at_build"),
+  );
   assert.equal(lazySlots.presentCount(), 0, "slots deferred at build");
   for (const key of fixture.reads) {
     if (slotKeys.includes(key)) lazySlots.getOrInsertHandle(key, lookup);
     else lazyCells.getOrInsertHandle(key, lookup);
   }
   assertKeyWith(expected, "lazy_present_after_reads", (want) =>
-     assertSameSet([...lazyCells.presentKeys(), ...lazySlots.presentKeys()], want, "lazy_present_after_reads"));
+    assertSameSet(
+      [...lazyCells.presentKeys(), ...lazySlots.presentKeys()],
+      want,
+      "lazy_present_after_reads",
+    ),
+  );
 });
 
 // --- unit ------------------------------------------------------------------

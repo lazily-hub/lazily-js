@@ -6,13 +6,7 @@ import test from "node:test";
 
 import { assertBlock } from "./support/assert-key.js";
 import { scenarios } from "./support/scenario.js";
-import {
-  RevisionBarrier,
-  Timeout,
-  TimeoutOperation,
-  Timer,
-  TimerError,
-} from "../src/stdlib.js";
+import { RevisionBarrier, Timeout, TimeoutOperation, Timer, TimerError } from "../src/stdlib.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "..", "..", "lazily-spec", "conformance", "stdlib");
@@ -69,7 +63,11 @@ function replayTimeout(steps) {
           return step.cancellation;
         },
       );
-      actual = { ...actual, operation_calls: operationCalls, cancellation_calls: cancellationCalls };
+      actual = {
+        ...actual,
+        operation_calls: operationCalls,
+        cancellation_calls: cancellationCalls,
+      };
     }
     assertBlock(step.expect, actual);
   }

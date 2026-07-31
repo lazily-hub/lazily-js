@@ -30,7 +30,12 @@ test("insert back and front orders", () => {
 
 test("move is single reassignment, no duplication", () => {
   const s = new SeqCrdt(1);
-  for (const [id, v, t] of [["a", 0, 1], ["b", 1, 2], ["c", 2, 3], ["d", 3, 4]]) {
+  for (const [id, v, t] of [
+    ["a", 0, 1],
+    ["b", 1, 2],
+    ["c", 2, 3],
+    ["d", 3, 4],
+  ]) {
     s.insertBack(id, v, t);
   }
   assert.equal(s.moveAfter("a", "d", 10), true);
@@ -106,9 +111,15 @@ test("gc collects stable tombstones only", () => {
   s.insertBack("c", 3, 3);
   s.remove("b", 10);
   assert.equal(s.tombstoneCount(), 1);
-  assert.equal(s.gcWith(() => false), 0);
+  assert.equal(
+    s.gcWith(() => false),
+    0,
+  );
   assert.equal(s.entryCount(), 3);
-  assert.equal(s.gcWith(() => true), 1);
+  assert.equal(
+    s.gcWith(() => true),
+    1,
+  );
   assert.equal(s.entryCount(), 2);
   assert.deepEqual(s.order(), ["a", "c"]);
 });
@@ -117,15 +128,32 @@ test("gc collects stable tombstones only", () => {
 
 function applyOp(target, step) {
   switch (step.op) {
-    case "insert_back": target.insertBack(step.id, step.value, step.now); break;
-    case "insert_front": target.insertFront(step.id, step.value, step.now); break;
-    case "insert_between": target.insertBetween(step.id, step.value, step.left ?? null, step.right ?? null, step.now); break;
-    case "set_value": target.setValue(step.id, step.value, step.now); break;
-    case "move_after": target.moveAfter(step.id, step.anchor, step.now); break;
-    case "move_before": target.moveBefore(step.id, step.anchor, step.now); break;
-    case "move_between": target.moveBetween(step.id, step.left ?? null, step.right ?? null, step.now); break;
-    case "remove": target.remove(step.id, step.now); break;
-    default: throw new Error(`unknown seqcrdt op ${step.op}`);
+    case "insert_back":
+      target.insertBack(step.id, step.value, step.now);
+      break;
+    case "insert_front":
+      target.insertFront(step.id, step.value, step.now);
+      break;
+    case "insert_between":
+      target.insertBetween(step.id, step.value, step.left ?? null, step.right ?? null, step.now);
+      break;
+    case "set_value":
+      target.setValue(step.id, step.value, step.now);
+      break;
+    case "move_after":
+      target.moveAfter(step.id, step.anchor, step.now);
+      break;
+    case "move_before":
+      target.moveBefore(step.id, step.anchor, step.now);
+      break;
+    case "move_between":
+      target.moveBetween(step.id, step.left ?? null, step.right ?? null, step.now);
+      break;
+    case "remove":
+      target.remove(step.id, step.now);
+      break;
+    default:
+      throw new Error(`unknown seqcrdt op ${step.op}`);
   }
 }
 
@@ -156,8 +184,7 @@ function runSeqCrdtScenario(scenario) {
   if (!expect) return;
   // Default target: an explicit `on`, else the first orders_equal replica (the
   // merged result), else the main replica "a".
-  const defaultTarget =
-    expect.on ?? (expect.orders_equal ? expect.orders_equal[0][0] : "a");
+  const defaultTarget = expect.on ?? (expect.orders_equal ? expect.orders_equal[0][0] : "a");
 
   // Key-exhaustive rather than a chain of `if (expect.x)` guards: a guard READS
   // the key and then drops it whenever the value is falsy or the shape moves, so
@@ -169,20 +196,15 @@ function runSeqCrdtScenario(scenario) {
         excuseKey(
           expect,
           "on",
-          "selector, not an observation: it names which replica order/len/get are "
-          + "read from, and those reads are asserted against their own keys",
+          "selector, not an observation: it names which replica order/len/get are " +
+            "read from, and those reads are asserted against their own keys",
         );
         break;
       case "order":
         assertKey(expect, "order", replicas.get(defaultTarget).order(), scenario.name);
         break;
       case "len":
-        assertKey(
-          expect,
-          "len",
-          replicas.get(defaultTarget).order().length,
-          scenario.name,
-        );
+        assertKey(expect, "len", replicas.get(defaultTarget).order().length, scenario.name);
         break;
       case "get":
         assertKeyWith(expect, "get", (want) => {

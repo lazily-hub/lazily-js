@@ -58,11 +58,11 @@ test("thread-safe ComputedMap conformance: observational_transparency.json", () 
   excuseKey(
     expected,
     "default_mode",
-    "materialization mode is not a value this binding can report: eager is the "
-      + "pre-mint loop (materializeAll) and lazy is mint-on-access, so there is no "
-      + "mode flag to read back. The key selects which construction this runner "
-      + "replays as the default; the behaviour it selects is asserted through "
-      + "eager_present, lazy_present_at_build and lazy_present_after_reads.",
+    "materialization mode is not a value this binding can report: eager is the " +
+      "pre-mint loop (materializeAll) and lazy is mint-on-access, so there is no " +
+      "mode flag to read back. The key selects which construction this runner " +
+      "replays as the default; the behaviour it selects is asserted through " +
+      "eager_present, lazy_present_at_build and lazy_present_after_reads.",
   );
   assert.equal(
     expected.default_mode,
@@ -74,7 +74,9 @@ test("thread-safe ComputedMap conformance: observational_transparency.json", () 
   const eager = eagerSlotMap(ctx, keys, factory);
   const lazy = new ThreadSafeComputedMap(ctx);
 
-  assertKeyWith(expected, "eager_present", (want) => assertSameSet(eager.presentKeys(), want, "eager_present"));
+  assertKeyWith(expected, "eager_present", (want) =>
+    assertSameSet(eager.presentKeys(), want, "eager_present"),
+  );
   assert.equal(lazy.presentCount(), 0);
 
   assertKeyWith(expected, "observe", (observe) => {
@@ -87,7 +89,9 @@ test("thread-safe ComputedMap conformance: observational_transparency.json", () 
   const ctx2 = new ThreadSafeContext();
   const lazy2 = new ThreadSafeComputedMap(ctx2);
   for (const key of fixture.reads) lazy2.getOrInsertWith(key, factory);
-  assertKeyWith(expected, "lazy_present_after_reads", (want) => assertSameSet(lazy2.presentKeys(), want, "lazy_present_after_reads"));
+  assertKeyWith(expected, "lazy_present_after_reads", (want) =>
+    assertSameSet(lazy2.presentKeys(), want, "lazy_present_after_reads"),
+  );
 });
 
 test("thread-safe ComputedMap conformance: deferral_not_deallocation.json", () => {
@@ -98,7 +102,9 @@ test("thread-safe ComputedMap conformance: deferral_not_deallocation.json", () =
 
   const ctx = new ThreadSafeContext();
   const eager = eagerSlotMap(ctx, keys, factory);
-  assertKeyWith(expected, "eager_present", (want) => assertSameSet(eager.presentKeys(), want, "eager_present"));
+  assertKeyWith(expected, "eager_present", (want) =>
+    assertSameSet(eager.presentKeys(), want, "eager_present"),
+  );
 
   const lazy = new ThreadSafeComputedMap(ctx);
   const sizes = [];
@@ -107,7 +113,9 @@ test("thread-safe ComputedMap conformance: deferral_not_deallocation.json", () =
     sizes.push(lazy.presentCount());
   }
   assertKey(expected, "present_after_each_read", sizes, "present_after_each_read");
-  assertKeyWith(expected, "lazy_present_after_reads", (want) => assertSameSet(lazy.presentKeys(), want, "lazy_present_after_reads"));
+  assertKeyWith(expected, "lazy_present_after_reads", (want) =>
+    assertSameSet(lazy.presentKeys(), want, "lazy_present_after_reads"),
+  );
 });
 
 test("thread-safe conformance: entry_kind_orthogonal_to_mode.json (SourceMap + ComputedMap)", () => {
@@ -126,7 +134,12 @@ test("thread-safe conformance: entry_kind_orthogonal_to_mode.json (SourceMap + C
   const eagerSlots = new ThreadSafeComputedMap(ctxE);
   eagerSlots.materializeAll(slotKeys, lookup);
   assertKeyWith(expected, "eager_present", (want) =>
-     assertSameSet([...eagerCells.presentKeys(), ...eagerSlots.presentKeys()], want, "eager_present"));
+    assertSameSet(
+      [...eagerCells.presentKeys(), ...eagerSlots.presentKeys()],
+      want,
+      "eager_present",
+    ),
+  );
   assertKeyWith(expected, "observe", (observe) => {
     for (const [key, value] of Object.entries(observe)) {
       const got = cellKeys.includes(key) ? eagerCells.observe(key) : eagerSlots.observe(key);
@@ -138,14 +151,21 @@ test("thread-safe conformance: entry_kind_orthogonal_to_mode.json (SourceMap + C
   const lazyCells = new ThreadSafeSourceMap(ctxL);
   for (const k of cellKeys) lazyCells.set(k, lookup(k));
   const lazySlots = new ThreadSafeComputedMap(ctxL);
-  assertKeyWith(expected, "lazy_present_at_build", (want) => assertSameSet(lazyCells.presentKeys(), want, "lazy_present_at_build"));
+  assertKeyWith(expected, "lazy_present_at_build", (want) =>
+    assertSameSet(lazyCells.presentKeys(), want, "lazy_present_at_build"),
+  );
   assert.equal(lazySlots.presentCount(), 0, "slots deferred at build");
   for (const key of fixture.reads) {
     if (slotKeys.includes(key)) lazySlots.getOrInsertWith(key, lookup);
     else lazyCells.getOrInsertWith(key, lookup);
   }
   assertKeyWith(expected, "lazy_present_after_reads", (want) =>
-     assertSameSet([...lazyCells.presentKeys(), ...lazySlots.presentKeys()], want, "lazy_present_after_reads"));
+    assertSameSet(
+      [...lazyCells.presentKeys(), ...lazySlots.presentKeys()],
+      want,
+      "lazy_present_after_reads",
+    ),
+  );
 });
 
 // --- materialization confluence (materialize_present_comm / observe_comm) ---

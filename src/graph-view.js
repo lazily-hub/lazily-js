@@ -56,7 +56,11 @@ export class GraphView {
     this.#nodes.clear();
     this.#edges.clear();
     for (const node of snapshot.nodes) {
-      this.#nodes.set(node.node, { id: node.node, typeTag: node.typeTag, payload: payloadOfState(node.state) });
+      this.#nodes.set(node.node, {
+        id: node.node,
+        typeTag: node.typeTag,
+        payload: payloadOfState(node.state),
+      });
     }
     for (const edge of snapshot.edges) {
       this.#edges.add(edgeKey(edge.dependent, edge.dependency));
@@ -72,7 +76,11 @@ export class GraphView {
   applyDelta(delta) {
     for (const op of delta.ops) {
       if (op instanceof DeltaOpNodeAdd) {
-        this.#nodes.set(op.node, { id: op.node, typeTag: op.typeTag, payload: payloadOfState(op.state) });
+        this.#nodes.set(op.node, {
+          id: op.node,
+          typeTag: op.typeTag,
+          payload: payloadOfState(op.state),
+        });
       } else if (op instanceof DeltaOpCellSet || op instanceof DeltaOpSlotValue) {
         const node = this.#nodes.get(op.node);
         if (node) node.payload = payloadOfValue(op.payload);

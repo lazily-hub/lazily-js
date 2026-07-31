@@ -52,11 +52,19 @@ import { ComputeFailedError, DisposedNodeError } from "./models.js";
 const here = dirname(fileURLToPath(import.meta.url));
 
 /** The single sibling-relative path constant. Mirrors `SPEC_DIR` in lazily-rs. */
-export const SPEC_DIR = join(here, "..", "..", "..", "lazily-spec", "conformance", "reactive-graph");
+export const SPEC_DIR = join(
+  here,
+  "..",
+  "..",
+  "..",
+  "lazily-spec",
+  "conformance",
+  "reactive-graph",
+);
 
 export const CLONE_HINT =
-  "clone the canonical sibling: "
-  + "git clone --depth 1 https://github.com/lazily-hub/lazily-spec.git ../lazily-spec";
+  "clone the canonical sibling: " +
+  "git clone --depth 1 https://github.com/lazily-hub/lazily-spec.git ../lazily-spec";
 
 /**
  * The canonical fixture set, asserted against the directory listing so a fixture
@@ -96,7 +104,9 @@ export function specPresent() {
 }
 
 export function fixturesOnDisk() {
-  return readdirSync(SPEC_DIR).filter((n) => n.endsWith(".json")).sort();
+  return readdirSync(SPEC_DIR)
+    .filter((n) => n.endsWith(".json"))
+    .sort();
 }
 
 export function loadFixture(name) {
@@ -343,135 +353,135 @@ async function replaySteps(model, steps, label, assertFn, divergences, tail) {
       // around.
       for (const key of Object.keys(expect).sort()) {
         await assertKeyWith(expect, key, async (want) => {
-        switch (key) {
-          case "note":
-            // Prose. Carries no assertion, and is not counted as a check.
-            break;
+          switch (key) {
+            case "note":
+              // Prose. Carries no assertion, and is not counted as a check.
+              break;
 
-          case "value": {
-            // For a `read` op this is the value the op returned. The signal
-            // fixtures also assert `value` on a `signal` creation op, meaning
-            // "the node's value right now" -- so it is read here, at assertion
-            // time, rather than eagerly at op time. That ordering is load-bearing:
-            // `computes_of` sorts BEFORE `value`, so the compute count is checked
-            // before this read can materialize a lazy binding and mask the
-            // difference the fixture exists to detect.
-            const got = op.type === "read" ? (opError ? DISPOSED : opValue) : await readOr(op.id);
-            check(where, "value", null, () => {
-              assertFn.equal(got, want, `${where}: value`);
-            });
-            break;
-          }
-
-          case "computes_of":
-            // Cumulative invocations of the node's compute since the start of
-            // the scenario, creation included -- the only caller-observable
-            // difference between an eager signal and the lazy memo backing it.
-            for (const id of Object.keys(want).sort()) {
-              const got = instance.computesOf(id);
-              check(where, "computes_of", id, () =>
-                assertFn.equal(got, want[id], `${where}: computes_of ${id}`),
-              );
+            case "value": {
+              // For a `read` op this is the value the op returned. The signal
+              // fixtures also assert `value` on a `signal` creation op, meaning
+              // "the node's value right now" -- so it is read here, at assertion
+              // time, rather than eagerly at op time. That ordering is load-bearing:
+              // `computes_of` sorts BEFORE `value`, so the compute count is checked
+              // before this read can materialize a lazy binding and mask the
+              // difference the fixture exists to detect.
+              const got = op.type === "read" ? (opError ? DISPOSED : opValue) : await readOr(op.id);
+              check(where, "value", null, () => {
+                assertFn.equal(got, want, `${where}: value`);
+              });
+              break;
             }
-            break;
 
-          case "read":
-            // A map of id -> expected value, each read fresh after the op.
-            for (const id of Object.keys(want).sort()) {
-              const got = await readOr(id);
-              check(where, "read", id, () =>
-                assertFn.equal(got, want[id], `${where}: read ${id}`),
-              );
-            }
-            break;
-
-          case "error":
-            check(where, "error", null, () => {
-              if (want === null) {
-                assertFn.equal(
-                  opError,
-                  null,
-                  `${where}: expected no error, got ${opError?.message}`,
-                );
-              } else {
-                // Any non-null error code means "this op must fail". The runner
-                // does not model error identity -- the fixtures carry the code
-                // so the contract is legible, and each binding's own tests pin
-                // which error type it raises.
-                assertFn.ok(
-                  opError !== null,
-                  `${where}: expected a ${want} error, op returned ${opValue}`,
+            case "computes_of":
+              // Cumulative invocations of the node's compute since the start of
+              // the scenario, creation included -- the only caller-observable
+              // difference between an eager signal and the lazy memo backing it.
+              for (const id of Object.keys(want).sort()) {
+                const got = instance.computesOf(id);
+                check(where, "computes_of", id, () =>
+                  assertFn.equal(got, want[id], `${where}: computes_of ${id}`),
                 );
               }
-            });
-            break;
+              break;
 
-          case "readable":
-            // A map of id -> whether the node must still be observable.
-            for (const id of Object.keys(want).sort()) {
-              const got = await alive(id);
-              check(where, "readable", id, () =>
-                assertFn.equal(got, want[id], `${where}: readable ${id}`),
+            case "read":
+              // A map of id -> expected value, each read fresh after the op.
+              for (const id of Object.keys(want).sort()) {
+                const got = await readOr(id);
+                check(where, "read", id, () =>
+                  assertFn.equal(got, want[id], `${where}: read ${id}`),
+                );
+              }
+              break;
+
+            case "error":
+              check(where, "error", null, () => {
+                if (want === null) {
+                  assertFn.equal(
+                    opError,
+                    null,
+                    `${where}: expected no error, got ${opError?.message}`,
+                  );
+                } else {
+                  // Any non-null error code means "this op must fail". The runner
+                  // does not model error identity -- the fixtures carry the code
+                  // so the contract is legible, and each binding's own tests pin
+                  // which error type it raises.
+                  assertFn.ok(
+                    opError !== null,
+                    `${where}: expected a ${want} error, op returned ${opValue}`,
+                  );
+                }
+              });
+              break;
+
+            case "readable":
+              // A map of id -> whether the node must still be observable.
+              for (const id of Object.keys(want).sort()) {
+                const got = await alive(id);
+                check(where, "readable", id, () =>
+                  assertFn.equal(got, want[id], `${where}: readable ${id}`),
+                );
+              }
+              break;
+
+            case "dependents_of":
+              for (const id of Object.keys(want).sort()) {
+                const got = instance.dependentsOf(id);
+                check(where, "dependents_of", id, () =>
+                  assertFn.equal(got, want[id], `${where}: dependents_of ${id}`),
+                );
+              }
+              break;
+
+            case "dependencies_of":
+              for (const id of Object.keys(want).sort()) {
+                const got = instance.dependenciesOf(id);
+                check(where, "dependencies_of", id, () =>
+                  assertFn.equal(got, want[id], `${where}: dependencies_of ${id}`),
+                );
+              }
+              break;
+
+            case "observed_by":
+              check(where, "observed_by", null, () =>
+                assertFn.deepEqual(observed, want, `${where}: observed_by`),
               );
-            }
-            break;
+              break;
 
-          case "dependents_of":
-            for (const id of Object.keys(want).sort()) {
-              const got = instance.dependentsOf(id);
-              check(where, "dependents_of", id, () =>
-                assertFn.equal(got, want[id], `${where}: dependents_of ${id}`),
+            case "observed_count":
+              check(where, "observed_count", null, () =>
+                assertFn.equal(observed.length, want, `${where}: observed_count`),
               );
-            }
-            break;
+              break;
 
-          case "dependencies_of":
-            for (const id of Object.keys(want).sort()) {
-              const got = instance.dependenciesOf(id);
-              check(where, "dependencies_of", id, () =>
-                assertFn.equal(got, want[id], `${where}: dependencies_of ${id}`),
+            case "cleanup_order":
+              // Only effects run a cleanup callback, so the expected order is
+              // projected onto its effect entries. Cumulative for the whole
+              // stream: the individual-disposal scenario spreads three disposals
+              // over three steps and pins the whole order on the last one.
+              check(where, "cleanup_order", null, () =>
+                assertFn.deepEqual(
+                  instance.cleanupLog,
+                  want.filter((id) => instance.kindOf(id) === "effect"),
+                  `${where}: cleanup_order`,
+                ),
               );
-            }
-            break;
+              break;
 
-          case "observed_by":
-            check(where, "observed_by", null, () =>
-              assertFn.deepEqual(observed, want, `${where}: observed_by`),
-            );
-            break;
+            case "scope_owned_count":
+              for (const name of Object.keys(want).sort()) {
+                const got = instance.scopeOwned(name);
+                check(where, "scope_owned_count", name, () =>
+                  assertFn.equal(got, want[name], `${where}: scope_owned_count ${name}`),
+                );
+              }
+              break;
 
-          case "observed_count":
-            check(where, "observed_count", null, () =>
-              assertFn.equal(observed.length, want, `${where}: observed_count`),
-            );
-            break;
-
-          case "cleanup_order":
-            // Only effects run a cleanup callback, so the expected order is
-            // projected onto its effect entries. Cumulative for the whole
-            // stream: the individual-disposal scenario spreads three disposals
-            // over three steps and pins the whole order on the last one.
-            check(where, "cleanup_order", null, () =>
-              assertFn.deepEqual(
-                instance.cleanupLog,
-                want.filter((id) => instance.kindOf(id) === "effect"),
-                `${where}: cleanup_order`,
-              ),
-            );
-            break;
-
-          case "scope_owned_count":
-            for (const name of Object.keys(want).sort()) {
-              const got = instance.scopeOwned(name);
-              check(where, "scope_owned_count", name, () =>
-                assertFn.equal(got, want[name], `${where}: scope_owned_count ${name}`),
-              );
-            }
-            break;
-
-          default:
-            throw new Error(`${where}: unknown expectation ${key}`);
-        }
+            default:
+              throw new Error(`${where}: unknown expectation ${key}`);
+          }
         });
       }
     }
@@ -502,64 +512,64 @@ async function replaySteps(model, steps, label, assertFn, divergences, tail) {
 
       if ("final_state" in tail) {
         await assertKeyWith(tail, "final_state", async (finalState) => {
-      for (const id of Object.keys(finalState.dependents_of ?? {}).sort()) {
-        const got = instance.dependentsOf(id);
-        observation.degrees[id] = got;
-        check(where, "final.dependents_of", id, () =>
-          assertFn.equal(got, finalState.dependents_of[id], `${where}: dependents_of ${id}`),
-        );
-      }
-      for (const id of Object.keys(finalState.readable ?? {}).sort()) {
-        const got = await alive(id);
-        observation.readable[id] = got;
-        check(where, "final.readable", id, () =>
-          assertFn.equal(got, finalState.readable[id], `${where}: readable ${id}`),
-        );
-      }
-      for (const id of Object.keys(finalState.read ?? {}).sort()) {
-        const got = await readOr(id);
-        observation.reads[id] = got;
-        check(where, "final.read", id, () =>
-          assertFn.equal(got, finalState.read[id], `${where}: read ${id}`),
-        );
-      }
+          for (const id of Object.keys(finalState.dependents_of ?? {}).sort()) {
+            const got = instance.dependentsOf(id);
+            observation.degrees[id] = got;
+            check(where, "final.dependents_of", id, () =>
+              assertFn.equal(got, finalState.dependents_of[id], `${where}: dependents_of ${id}`),
+            );
+          }
+          for (const id of Object.keys(finalState.readable ?? {}).sort()) {
+            const got = await alive(id);
+            observation.readable[id] = got;
+            check(where, "final.readable", id, () =>
+              assertFn.equal(got, finalState.readable[id], `${where}: readable ${id}`),
+            );
+          }
+          for (const id of Object.keys(finalState.read ?? {}).sort()) {
+            const got = await readOr(id);
+            observation.reads[id] = got;
+            check(where, "final.read", id, () =>
+              assertFn.equal(got, finalState.read[id], `${where}: read ${id}`),
+            );
+          }
         });
       }
 
       if ("after_publish" in tail) {
         await assertKeyWith(tail, "after_publish", async (publish) => {
-      if (publish?.op) {
-        const before = instance.runLog.length;
-        await instance.set(publish.op.id, publish.op.value);
-        await instance.settle();
-        observation.afterPublishObserved = instance.runLog.slice(before);
-        check(where, "after_publish.observed_by", null, () =>
-          assertFn.deepEqual(
-            observation.afterPublishObserved,
-            publish.observed_by ?? [],
-            `${where}: after_publish observed_by`,
-          ),
-        );
-        // Reads before degrees: a lazy binding re-registers edges when it
-        // recomputes, and the degree assertion below counts them.
-        for (const id of Object.keys(publish.read ?? {}).sort()) {
-          const got = await readOr(id);
-          observation.afterPublishReads[id] = got;
-          check(where, "after_publish.read", id, () =>
-            assertFn.equal(got, publish.read[id], `${where}: after_publish read ${id}`),
-          );
-        }
-        for (const id of Object.keys(publish.dependents_of ?? {}).sort()) {
-          const got = instance.dependentsOf(id);
-          check(where, "after_publish.dependents_of", id, () =>
-            assertFn.equal(
-              got,
-              publish.dependents_of[id],
-              `${where}: after_publish dependents_of ${id}`,
-            ),
-          );
-        }
-      }
+          if (publish?.op) {
+            const before = instance.runLog.length;
+            await instance.set(publish.op.id, publish.op.value);
+            await instance.settle();
+            observation.afterPublishObserved = instance.runLog.slice(before);
+            check(where, "after_publish.observed_by", null, () =>
+              assertFn.deepEqual(
+                observation.afterPublishObserved,
+                publish.observed_by ?? [],
+                `${where}: after_publish observed_by`,
+              ),
+            );
+            // Reads before degrees: a lazy binding re-registers edges when it
+            // recomputes, and the degree assertion below counts them.
+            for (const id of Object.keys(publish.read ?? {}).sort()) {
+              const got = await readOr(id);
+              observation.afterPublishReads[id] = got;
+              check(where, "after_publish.read", id, () =>
+                assertFn.equal(got, publish.read[id], `${where}: after_publish read ${id}`),
+              );
+            }
+            for (const id of Object.keys(publish.dependents_of ?? {}).sort()) {
+              const got = instance.dependentsOf(id);
+              check(where, "after_publish.dependents_of", id, () =>
+                assertFn.equal(
+                  got,
+                  publish.dependents_of[id],
+                  `${where}: after_publish dependents_of ${id}`,
+                ),
+              );
+            }
+          }
         });
       }
     }
@@ -652,8 +662,8 @@ export async function replayFixture(model, name, fixture, assertFn, divergences)
   const added = await assertKeyWith(tail, "observationally_equal", (equal) => {
     assertFn.ok(
       Array.isArray(equal) && equal.length > 1,
-      `${model.name}/${name}: observationally_equal names fewer than two scenarios, `
-      + "so it relates nothing",
+      `${model.name}/${name}: observationally_equal names fewer than two scenarios, ` +
+        "so it relates nothing",
     );
     const tag = `${model.name}/${name}:observationally_equal`;
     if (divergences.known.has(tag)) {
@@ -671,8 +681,8 @@ export async function replayFixture(model, name, fixture, assertFn, divergences)
       assertFn.equal(
         a,
         b,
-        `${model.name}/${name}: ${equal[i - 1]} and ${equal[i]} are not `
-        + "observationally equal — ending a scope must equal disposing its members",
+        `${model.name}/${name}: ${equal[i - 1]} and ${equal[i]} are not ` +
+          "observationally equal — ending a scope must equal disposing its members",
       );
     }
     return 1;

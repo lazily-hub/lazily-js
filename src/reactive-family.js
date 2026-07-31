@@ -133,7 +133,9 @@ export class ReactiveMap {
     // An input cell sets its value directly; a derived slot wraps `compute` as
     // its recomputation — the same node an eager pre-mint would allocate.
     const minted =
-      this._kind === EntryKind.Source ? this._ctx.source(compute()) : this._ctx.computed(() => compute());
+      this._kind === EntryKind.Source
+        ? this._ctx.source(compute())
+        : this._ctx.computed(() => compute());
     const { handle, mutation } = this._keyed.insert(key, minted);
     if (mutationChanged(mutation)) {
       this._bumpMembership();

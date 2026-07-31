@@ -124,11 +124,7 @@ test("semantic 2 [AsyncContext]: an effect reached by a scope teardown is never 
   // `settle()` is the drain: an effect scheduled during the teardown has a run
   // loop kicked on a microtask, and settling awaits it.
   await ctx.settle();
-  assert.equal(
-    runs,
-    1,
-    "teardown must not schedule the effect — disposal is not a publish",
-  );
+  assert.equal(runs, 1, "teardown must not schedule the effect — disposal is not a publish");
 
   await assert.rejects(() => ctx.getAsync(mid), DisposedNodeError);
   await ctx.dispose();
@@ -432,8 +428,8 @@ test("degrees: a subscribe/unsubscribe cycle leaves the source's dependent count
   assert.equal(
     ctx.dependentCount(source),
     baseline,
-    "the leak this whole plane exists to prevent: a constant live width must not "
-    + "grow the source's dependent set",
+    "the leak this whole plane exists to prevent: a constant live width must not " +
+      "grow the source's dependent set",
   );
 });
 

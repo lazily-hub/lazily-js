@@ -66,9 +66,7 @@ function normalizeNodeKey(key) {
     throw new TypeError(`NodeKey must have <= ${NODE_KEY_MAX_SEGMENTS} segments`);
   }
   if (segments.some((segment) => segment === "")) {
-    throw new TypeError(
-      "NodeKey must not contain empty segments (leading/trailing/double '/')",
-    );
+    throw new TypeError("NodeKey must not contain empty segments (leading/trailing/double '/')");
   }
   return key;
 }
@@ -314,10 +312,7 @@ export class EdgeSnapshot {
   }
 
   isReadableBy(permissions, peer) {
-    return (
-      permissions.canRead(peer, this.dependent) &&
-      permissions.canRead(peer, this.dependency)
-    );
+    return permissions.canRead(peer, this.dependent) && permissions.canRead(peer, this.dependency);
   }
 
   static fromWire(value) {
@@ -476,10 +471,7 @@ export class DeltaOpEdgeAdd extends DeltaOpBase {
   }
 
   targetReadable(permissions, peer) {
-    return (
-      permissions.canRead(peer, this.dependent) &&
-      permissions.canRead(peer, this.dependency)
-    );
+    return permissions.canRead(peer, this.dependent) && permissions.canRead(peer, this.dependency);
   }
 }
 
@@ -498,10 +490,7 @@ export class DeltaOpEdgeRemove extends DeltaOpBase {
   }
 
   targetReadable(permissions, peer) {
-    return (
-      permissions.canRead(peer, this.dependent) &&
-      permissions.canRead(peer, this.dependency)
-    );
+    return permissions.canRead(peer, this.dependent) && permissions.canRead(peer, this.dependency);
   }
 }
 
@@ -662,10 +651,7 @@ function frontierEntryOf(entry) {
     if ("peer" in entry) {
       return Object.freeze({
         peer: assertInteger(entry.peer, "frontier peer"),
-        stamp:
-          entry.stamp instanceof WireStamp
-            ? entry.stamp
-            : WireStamp.fromWire(entry.stamp),
+        stamp: entry.stamp instanceof WireStamp ? entry.stamp : WireStamp.fromWire(entry.stamp),
       });
     }
   }
@@ -757,10 +743,7 @@ export class CrdtSync {
 
   toWire() {
     return {
-      frontier: this.frontier.map((entry) => [
-        entry.peer,
-        entry.stamp.toWire(),
-      ]),
+      frontier: this.frontier.map((entry) => [entry.peer, entry.stamp.toWire()]),
       ops: this.ops.map((op) => op.toWire()),
     };
   }
@@ -886,9 +869,11 @@ export class CausalReceipt {
 
 export class CausalReceipts {
   constructor(receipts = []) {
-    this.receipts = Object.freeze(receipts.map((receipt) =>
-      receipt instanceof CausalReceipt ? receipt : CausalReceipt.fromWire(receipt),
-    ));
+    this.receipts = Object.freeze(
+      receipts.map((receipt) =>
+        receipt instanceof CausalReceipt ? receipt : CausalReceipt.fromWire(receipt),
+      ),
+    );
     Object.freeze(this);
   }
 
@@ -940,8 +925,7 @@ export class ReceiptMessage {
   }
 
   static decodeJson(data) {
-    const text =
-      data instanceof Uint8Array ? textDecoder.decode(data) : String(data);
+    const text = data instanceof Uint8Array ? textDecoder.decode(data) : String(data);
     return ReceiptMessage.fromWire(JSON.parse(text));
   }
 }
@@ -1159,8 +1143,7 @@ export class IpcMessage {
   }
 
   static decodeJson(data) {
-    const text =
-      data instanceof Uint8Array ? textDecoder.decode(data) : String(data);
+    const text = data instanceof Uint8Array ? textDecoder.decode(data) : String(data);
     return IpcMessage.fromWire(JSON.parse(text));
   }
 }
@@ -1309,7 +1292,10 @@ export class Outbox {
   }
 
   retainedEpochs() {
-    return this.store.scanAfter(this.ackedThrough).map(([epoch]) => epoch).sort((a, b) => a - b);
+    return this.store
+      .scanAfter(this.ackedThrough)
+      .map(([epoch]) => epoch)
+      .sort((a, b) => a - b);
   }
 }
 
@@ -1595,7 +1581,9 @@ export class SyncDriver {
           this.ackOwed = true;
           progress.applied.push(msg);
         } else if (res.action === ResyncAction.RequestSnapshot) {
-          const req = IpcMessage.resyncRequestMessage(new ResyncRequest({ fromEpoch: res.fromEpoch }));
+          const req = IpcMessage.resyncRequestMessage(
+            new ResyncRequest({ fromEpoch: res.fromEpoch }),
+          );
           if (this.#trySend(req)) progress.resyncRequested = true;
           else this.stalledSince = now;
         }
@@ -1644,10 +1632,7 @@ export class SessionHandshake {
   constructor(fields) {
     const obj = assertObject(fields, "SessionHandshake");
     this.protocolId = assertString(obj.protocol_id, "protocol_id");
-    this.protocolMajorVersion = assertInteger(
-      obj.protocol_major_version,
-      "protocol_major_version",
-    );
+    this.protocolMajorVersion = assertInteger(obj.protocol_major_version, "protocol_major_version");
     this.codec = assertString(obj.codec, "codec");
     this.maxFrameSize = assertInteger(obj.max_frame_size, "max_frame_size");
     this.fragmentationSupported = assertBoolean(
@@ -1725,8 +1710,7 @@ export class SessionHandshake {
   }
 
   static decodeJson(data) {
-    const text =
-      data instanceof Uint8Array ? textDecoder.decode(data) : String(data);
+    const text = data instanceof Uint8Array ? textDecoder.decode(data) : String(data);
     return SessionHandshake.fromWire(JSON.parse(text));
   }
 }
@@ -2514,7 +2498,8 @@ export class CommandProjection {
   }
 
   applyProjection(image) {
-    const img = image instanceof CommandProjectionImage ? image : CommandProjectionImage.fromWire(image);
+    const img =
+      image instanceof CommandProjectionImage ? image : CommandProjectionImage.fromWire(image);
     this.#generation = Math.max(this.#generation, img.generation);
     for (const entry of img.commands) {
       this.#entries.set(entry.commandId, entry);
@@ -2603,9 +2588,7 @@ export class CommandRpcClient {
       return { kind: CallStateKind.Conflict };
     }
     const entry = this.projection.terminalFor(commandId);
-    return entry
-      ? { kind: CallStateKind.Resolved, entry }
-      : { kind: CallStateKind.Pending };
+    return entry ? { kind: CallStateKind.Resolved, entry } : { kind: CallStateKind.Pending };
   }
 }
 

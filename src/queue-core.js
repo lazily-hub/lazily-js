@@ -35,13 +35,7 @@ export const QueuePopError = Object.freeze({
 });
 
 /** The five `QueueCell` reader kinds, in matrix order. */
-export const QUEUE_READER_KINDS = Object.freeze([
-  "head",
-  "len",
-  "is_empty",
-  "is_full",
-  "closed",
-]);
+export const QUEUE_READER_KINDS = Object.freeze(["head", "len", "is_empty", "is_full", "closed"]);
 
 /** The four `WorkQueueCell` reader kinds, in matrix order. */
 export const WORK_QUEUE_READER_KINDS = Object.freeze([

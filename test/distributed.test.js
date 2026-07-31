@@ -33,8 +33,8 @@ function loadFixture(name) {
   const path = join(specFixtures, name);
   assert.ok(
     existsSync(path),
-    `missing canonical spec fixture ${path} — clone the lazily-spec sibling `
-      + `(git clone https://github.com/lazily-hub/lazily-spec.git ../lazily-spec)`,
+    `missing canonical spec fixture ${path} — clone the lazily-spec sibling ` +
+      `(git clone https://github.com/lazily-hub/lazily-spec.git ../lazily-spec)`,
   );
   const fixture = JSON.parse(readFileSync(path, "utf8"));
   assert.equal(fixture.protocol_version, 1);
@@ -68,7 +68,10 @@ test("InMemoryDataChannel round-trips an IpcMessage via WebRtcSink -> WebRtcSour
   openSink.send(IpcMessage.snapshot(twoNodeSnapshot()));
   const received = source.recv();
   assert.equal(received.isSnapshot, true);
-  assert.deepEqual(received.snapshot.nodes.map((n) => n.node), [1, 2]);
+  assert.deepEqual(
+    received.snapshot.nodes.map((n) => n.node),
+    [1, 2],
+  );
   // Nothing else pending on an open channel.
   assert.equal(source.recv(), null);
   void sink;
@@ -147,15 +150,23 @@ test("distributed/crdt_sync_frames.json round-trips each CrdtSync envelope", () 
             assert.equal(message.crdtSync.ops.length, expected, where);
             break;
           case "has_keyed_op":
-            assert.equal(message.crdtSync.ops.some((op) => op.key !== null), expected, where);
+            assert.equal(
+              message.crdtSync.ops.some((op) => op.key !== null),
+              expected,
+              where,
+            );
             break;
           case "has_keyless_op":
-            assert.equal(message.crdtSync.ops.some((op) => op.key === null), expected, where);
+            assert.equal(
+              message.crdtSync.ops.some((op) => op.key === null),
+              expected,
+              where,
+            );
             break;
           default:
             assert.fail(`${frame.label}: unknown frame assertion key \`${key}\``);
         }
-          });
+      });
     }
   }
 });
@@ -178,12 +189,7 @@ test("distributed/anti_entropy_converge.json converges and is idempotent", () =>
     const runtime = new CrdtPlaneRuntime(9);
     const applied = ingestOps(runtime, ops);
     assertKey(scenario.expect, "applied_count", applied, `${scenario.name} applied_count`);
-    assertKey(
-      scenario.expect,
-      "converged",
-      runtime.converged(),
-      `${scenario.name} converged`,
-    );
+    assertKey(scenario.expect, "converged", runtime.converged(), `${scenario.name} converged`);
 
     // Re-ingesting the same frame applies 0 new ops (state-based idempotence).
     const reapplied = ingestOps(runtime, ops, 200);

@@ -45,8 +45,7 @@ function quantile(sorted, q) {
 function summarize(samplesNs) {
   const sorted = [...samplesNs].sort((a, b) => a - b);
   const mean = sorted.reduce((a, v) => a + v, 0) / sorted.length;
-  const variance =
-    sorted.reduce((a, v) => a + (v - mean) ** 2, 0) / sorted.length;
+  const variance = sorted.reduce((a, v) => a + (v - mean) ** 2, 0) / sorted.length;
   const sem = Math.sqrt(variance / sorted.length);
   return {
     mean,

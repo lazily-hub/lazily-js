@@ -52,11 +52,7 @@ export class DisposedNodeError extends Error {
 }
 
 /** Any node handle a {@link Context} can address by degree or tear down. */
-export type NodeHandle =
-  | Source<never>
-  | Computed<never>
-  | Effect
-  | SignalHandle<never>;
+export type NodeHandle = Source<never> | Computed<never> | Effect | SignalHandle<never>;
 
 /**
  * A cell written from outside, folding writes under an optional merge policy

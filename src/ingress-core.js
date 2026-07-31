@@ -188,8 +188,7 @@ export function defaultIngressPolicy(overrides = {}) {
 export function ingressSchedule(kind, pollInterval) {
   return Object.freeze({
     kind,
-    pollInterval:
-      kind === IngressTransportKind.BoundedPolling ? Math.max(1, pollInterval) : null,
+    pollInterval: kind === IngressTransportKind.BoundedPolling ? Math.max(1, pollInterval) : null,
   });
 }
 
@@ -681,8 +680,7 @@ export class IngressCore {
     this._observedNow = now;
     for (const [key, scope] of this._scopes) {
       if (
-        scope.view(before, this._policy).readiness() !==
-        scope.view(now, this._policy).readiness()
+        scope.view(before, this._policy).readiness() !== scope.view(now, this._policy).readiness()
       ) {
         markScope(change, key, readinessOnly());
       }
@@ -769,8 +767,7 @@ export class IngressCore {
     const fence = survivor === undefined ? generation : survivor.generation;
 
     if (decision.kind === "refuse" || decision.kind === "block") {
-      const reason =
-        decision.kind === "block" ? IngressDropReason.Backpressure : decision.reason;
+      const reason = decision.kind === "block" ? IngressDropReason.Backpressure : decision.reason;
       markChannel(
         change,
         this._pushReceipt({

@@ -90,9 +90,15 @@ export class ThreadSafeIngressCell {
     this._mutex = options.mutex ?? new AtomicMutex();
     /** @type {Map<unknown, {value: object, readiness: object, authority: object, retry: object}>} */
     this._scopeReaders = new Map();
-    this._accepted = ctx.computed(() => this._locked(() => this._core.receipts(IngressReceiptChannel.Accepted)));
-    this._dropped = ctx.computed(() => this._locked(() => this._core.receipts(IngressReceiptChannel.Dropped)));
-    this._errors = ctx.computed(() => this._locked(() => this._core.receipts(IngressReceiptChannel.Error)));
+    this._accepted = ctx.computed(() =>
+      this._locked(() => this._core.receipts(IngressReceiptChannel.Accepted)),
+    );
+    this._dropped = ctx.computed(() =>
+      this._locked(() => this._core.receipts(IngressReceiptChannel.Dropped)),
+    );
+    this._errors = ctx.computed(() =>
+      this._locked(() => this._core.receipts(IngressReceiptChannel.Error)),
+    );
     this._transportKind = ctx.source(options.transport ?? IngressTransportKind.EventChannel);
     this._pollInterval = ctx.source(options.pollInterval ?? 1000);
     this._schedule = ctx.computed((cx) =>

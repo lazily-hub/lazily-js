@@ -24,8 +24,8 @@ function loadFixture(name) {
   const path = join(specFixtures, name);
   assert.ok(
     existsSync(path),
-    `missing canonical spec fixture ${path} — clone the lazily-spec sibling `
-      + `(git clone https://github.com/lazily-hub/lazily-spec.git ../lazily-spec)`,
+    `missing canonical spec fixture ${path} — clone the lazily-spec sibling ` +
+      `(git clone https://github.com/lazily-hub/lazily-spec.git ../lazily-spec)`,
   );
   const fixture = JSON.parse(readFileSync(path, "utf8"));
   assert.equal(fixture.protocol_version, 1);
@@ -35,9 +35,7 @@ function loadFixture(name) {
 const CLIENT_VARIANTS = new Set(["join", "offer", "answer", "ice", "relay", "leave"]);
 
 function decodeFrame(direction, wire) {
-  return direction === "client"
-    ? ClientMessage.fromWire(wire)
-    : ServerMessage.fromWire(wire);
+  return direction === "client" ? ClientMessage.fromWire(wire) : ServerMessage.fromWire(wire);
 }
 
 test("signaling frames.json round-trips every variant byte-for-byte", () => {
@@ -54,20 +52,12 @@ test("signaling frames.json round-trips every variant byte-for-byte", () => {
 test("signaling negative fixtures are rejected", () => {
   const frames = loadFixture("signaling/frames.json");
   for (const reject of frames.rejects) {
-    assert.throws(
-      () => decodeFrame(reject.direction, reject.wire),
-      TypeError,
-      reject.label,
-    );
+    assert.throws(() => decodeFrame(reject.direction, reject.wire), TypeError, reject.label);
   }
 
   const session = loadFixture("signaling/anti_spoof_session.json");
   for (const reject of session.rejects) {
-    assert.throws(
-      () => ClientMessage.fromWire(reject.input.recv),
-      TypeError,
-      reject.label,
-    );
+    assert.throws(() => ClientMessage.fromWire(reject.input.recv), TypeError, reject.label);
   }
 });
 
@@ -104,11 +94,21 @@ test("join without capabilities omits the key; with capabilities includes it", (
 function assertFrameAssertion(message, frame, key, expected) {
   const where = `${frame.label}: ${key}`;
   switch (key) {
-    case "peer": assert.equal(message.peer, expected, where); break;
-    case "to": assert.equal(message.to, expected, where); break;
-    case "from": assert.equal(message.from, expected, where); break;
-    case "peers": assert.deepEqual([...message.peers], expected, where); break;
-    case "code": assert.equal(message.code, expected, where); break;
+    case "peer":
+      assert.equal(message.peer, expected, where);
+      break;
+    case "to":
+      assert.equal(message.to, expected, where);
+      break;
+    case "from":
+      assert.equal(message.from, expected, where);
+      break;
+    case "peers":
+      assert.deepEqual([...message.peers], expected, where);
+      break;
+    case "code":
+      assert.equal(message.code, expected, where);
+      break;
     case "has_capabilities":
       assert.equal(message.capabilities !== null, expected, where);
       break;
@@ -123,9 +123,10 @@ function assertFrameAssertion(message, frame, key, expected) {
     // client-supplied `from` on the wire at all, so both halves are checked.
     case "server_stamped_from":
       assert.equal(
-        message.from !== null && message.from !== undefined
-          && ("to" in message ? message.to === null || message.to === undefined : true)
-          && !("to" in frame.wire),
+        message.from !== null &&
+          message.from !== undefined &&
+          ("to" in message ? message.to === null || message.to === undefined : true) &&
+          !("to" in frame.wire),
         expected,
         where,
       );
@@ -145,12 +146,9 @@ test("assertions metadata on each frame matches the decoded message", () => {
       assertKeyWith(a, key, (expected) => {
         assertFrameAssertion(message, frame, key, expected);
         checked += 1;
-          });
+      });
     }
-    assert.ok(
-      frame.direction !== "client" || CLIENT_VARIANTS.has(frame.variant),
-      frame.label,
-    );
+    assert.ok(frame.direction !== "client" || CLIENT_VARIANTS.has(frame.variant), frame.label);
   }
   assert.ok(checked > 0, "frames.json carried no assertions to check");
 });
@@ -180,11 +178,7 @@ test("anti_spoof_session.json replays through SignalingRoom", () => {
     if (message instanceof ClientJoin) registeredPeerByConn.set(conn, message.peer);
     const emitted = room.receive(conn, message);
 
-    assert.equal(
-      emitted.length,
-      step.expect.length,
-      `step conn=${conn} emit count`,
-    );
+    assert.equal(emitted.length, step.expect.length, `step conn=${conn} emit count`);
     for (let i = 0; i < emitted.length; i += 1) {
       assert.equal(emitted[i].to, step.expect[i].to, "routed connection id");
       assert.deepEqual(
@@ -212,7 +206,10 @@ test("anti_spoof_session.json replays through SignalingRoom", () => {
   }
 
   assert.ok(rostersSeen > 0, "no welcome roster was emitted — roster assertions are vacuous");
-  assert.ok(forwardsSeen > 0, "no directed frame was forwarded — the anti-spoof assertion is vacuous");
+  assert.ok(
+    forwardsSeen > 0,
+    "no directed frame was forwarded — the anti-spoof assertion is vacuous",
+  );
 
   const a = fixture.assertions;
   const observed = {
@@ -224,7 +221,7 @@ test("anti_spoof_session.json replays through SignalingRoom", () => {
     assertKeyWith(a, key, (expected) => {
       assert.ok(key in observed, `unknown session assertion key \`${key}\``);
       assert.equal(observed[key], expected, `anti_spoof_session assertion "${key}"`);
-      });
+    });
   }
 });
 

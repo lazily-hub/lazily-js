@@ -48,10 +48,10 @@ export function recordScenario(scenario) {
   if (rec === null) return scenario;
   if (rec.record(scenario) === false) {
     throw new Error(
-      "recordScenario: this object is not an element of a corpus fixture's `scenarios` "
-      + "array. Mark the parsed fixture's own scenario object — a copy (structuredClone, "
-      + "a spread, a hand-built stand-in) is not the thing the ledger tracks, and marking "
-      + "one would credit a replay the guard cannot tie to the corpus.",
+      "recordScenario: this object is not an element of a corpus fixture's `scenarios` " +
+        "array. Mark the parsed fixture's own scenario object — a copy (structuredClone, " +
+        "a spread, a hand-built stand-in) is not the thing the ledger tracks, and marking " +
+        "one would credit a replay the guard cannot tie to the corpus.",
     );
   }
   return scenario;
@@ -69,9 +69,7 @@ export function recordScenario(scenario) {
 export function* scenarios(fixture) {
   const list = fixture?.scenarios;
   if (!Array.isArray(list)) {
-    throw new TypeError(
-      `scenarios(): fixture has no \`scenarios\` array (got ${typeof list})`,
-    );
+    throw new TypeError(`scenarios(): fixture has no \`scenarios\` array (got ${typeof list})`);
   }
   for (const scenario of list) {
     recordScenario(scenario);

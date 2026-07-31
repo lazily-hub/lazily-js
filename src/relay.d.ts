@@ -7,7 +7,12 @@ import type { MergePolicy } from "./merge.js";
 // -- Phase 2: RelayCell + BackpressurePolicy ---------------------------------
 
 export type BoundDim = "Count" | "Bytes" | "Keys" | "Age";
-export const BoundDim: { readonly Count: "Count"; readonly Bytes: "Bytes"; readonly Keys: "Keys"; readonly Age: "Age" };
+export const BoundDim: {
+  readonly Count: "Count";
+  readonly Bytes: "Bytes";
+  readonly Keys: "Keys";
+  readonly Age: "Age";
+};
 
 export type Overflow = "Block" | "DropNewest" | "DropOldest" | "Conflate" | "Spill";
 export const Overflow: {
@@ -35,7 +40,13 @@ export class BackpressurePolicy {
   readonly highWater: CellHandle<number>;
   readonly lowWater: CellHandle<number>;
   readonly overflow: CellHandle<Overflow>;
-  constructor(ctx: Context, dimension: BoundDim, highWater: number, lowWater: number, overflow: Overflow);
+  constructor(
+    ctx: Context,
+    dimension: BoundDim,
+    highWater: number,
+    lowWater: number,
+    overflow: Overflow,
+  );
 }
 
 /** The algebra-typed conflating relay (Phase 2, in-proc core). */
@@ -62,7 +73,10 @@ export class RelayCell<T> {
 // -- Phase 3: SpillStore -----------------------------------------------------
 
 export type SpillMode = "CompactOnWrite" | "AppendCompact";
-export const SpillMode: { readonly CompactOnWrite: "CompactOnWrite"; readonly AppendCompact: "AppendCompact" };
+export const SpillMode: {
+  readonly CompactOnWrite: "CompactOnWrite";
+  readonly AppendCompact: "AppendCompact";
+};
 
 /** A paged durable tail for a RelayCell (Phase 3, in-memory reference backend). */
 export class SpillStore<T> {

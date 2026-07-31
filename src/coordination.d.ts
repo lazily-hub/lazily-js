@@ -26,7 +26,11 @@ export class LeaseCell<P = unknown> {
 }
 
 export type LeaderRoleLabel = "Leader" | "Follower" | "Candidate";
-export const LeaderRole: Readonly<{ Leader: "Leader"; Follower: "Follower"; Candidate: "Candidate" }>;
+export const LeaderRole: Readonly<{
+  Leader: "Leader";
+  Follower: "Follower";
+  Candidate: "Candidate";
+}>;
 
 export class LeaderCell<P = unknown> {
   constructor(ctx: Context, me: P);

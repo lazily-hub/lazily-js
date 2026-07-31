@@ -353,9 +353,7 @@ export class StateChart {
 
   /** Active atomic leaves, sorted (one per parallel region; one for single-region). */
   activeLeaves() {
-    return [...this.#config]
-      .filter((id) => this.#def.isLeaf(id))
-      .sort();
+    return [...this.#config].filter((id) => this.#def.isLeaf(id)).sort();
   }
 
   /** Hierarchical "state-in" predicate: `true` iff `id` is active. */
@@ -409,7 +407,14 @@ export class StateChart {
     const enterUnion = new Set();
     const takenTransitions = [];
     for (const cand of candidates) {
-      const { exitSet, enterSet } = computeExitEnter(def, cand.source, cand.transition, cand.leaf, config, this.#history);
+      const { exitSet, enterSet } = computeExitEnter(
+        def,
+        cand.source,
+        cand.transition,
+        cand.leaf,
+        config,
+        this.#history,
+      );
       let conflicts = false;
       for (const s of exitSet) {
         if (exitUnion.has(s)) {

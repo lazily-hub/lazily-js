@@ -116,20 +116,22 @@ test("named guards are fail-closed when absent from the guard map", () => {
 
 test("unsupported features are rejected explicitly, not silently ignored", () => {
   assert.throws(
-    () => ChartDef.fromChart({
-      initial: "a",
-      states: { root: { initial: "a" }, a: { parent: "root", run: ["doThing"] } },
-    }),
+    () =>
+      ChartDef.fromChart({
+        initial: "a",
+        states: { root: { initial: "a" }, a: { parent: "root", run: ["doThing"] } },
+      }),
     /run/,
   );
   assert.throws(
-    () => ChartDef.fromChart({
-      initial: "a",
-      states: {
-        root: { initial: "a" },
-        a: { parent: "root", on: { GO: { target: "a", guard: { expr: "x" } } } },
-      },
-    }),
+    () =>
+      ChartDef.fromChart({
+        initial: "a",
+        states: {
+          root: { initial: "a" },
+          a: { parent: "root", on: { GO: { target: "a", guard: { expr: "x" } } } },
+        },
+      }),
     /expr/,
   );
 });

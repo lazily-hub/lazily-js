@@ -44,9 +44,9 @@ function fetch(block, key, verb) {
   }
   if (!(key in block)) {
     throw new Error(
-      `${verb}: key '${key}' is not present in the fixture block. `
-      + "A runner asserting a key the corpus does not carry is asserting nothing; "
-      + "fix the key name or drop the call.",
+      `${verb}: key '${key}' is not present in the fixture block. ` +
+        "A runner asserting a key the corpus does not carry is asserting nothing; " +
+        "fix the key name or drop the call.",
     );
   }
   // Reading through the block marks it consumed via the recorder's accessor.
@@ -105,8 +105,8 @@ export function assertBlock(block, actual, where) {
 export function excuseKey(block, key, reason) {
   if (typeof reason !== "string" || reason.trim() === "") {
     throw new Error(
-      `excuseKey(${key}): a reason is required. An undeclared exception is the `
-      + "silent skip this guard exists to catch.",
+      `excuseKey(${key}): a reason is required. An undeclared exception is the ` +
+        "silent skip this guard exists to catch.",
     );
   }
   if (block === null || typeof block !== "object") {

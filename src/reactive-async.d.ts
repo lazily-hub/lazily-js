@@ -135,10 +135,7 @@ export class AsyncContext {
 
 /** Any node handle an {@link AsyncContext} can address by degree or tear down. */
 export type AsyncNodeHandle =
-| AsyncSource<never>
-| AsyncComputed<never>
-  | AsyncEffectHandle
-  | AsyncSignalHandle<never>;
+  AsyncSource<never> | AsyncComputed<never> | AsyncEffectHandle | AsyncSignalHandle<never>;
 
 /**
  * A teardown scope over an {@link AsyncContext}: nodes created through it are

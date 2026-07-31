@@ -72,8 +72,14 @@ test("GraphView applies native snapshot then delta", () => {
 
 test("GraphView re-emitted delta is idempotent", () => {
   const replica = new GraphView();
-  replica.applySnapshot(new Snapshot({ epoch: 1, nodes: [new NodeSnapshot(1, "t", new NodeStatePayload(bytes("a")))] }));
-  const delta = new Delta({ baseEpoch: 1, epoch: 2, ops: [new DeltaOpCellSet(1, new IpcValueInline(bytes("b")))] });
+  replica.applySnapshot(
+    new Snapshot({ epoch: 1, nodes: [new NodeSnapshot(1, "t", new NodeStatePayload(bytes("a")))] }),
+  );
+  const delta = new Delta({
+    baseEpoch: 1,
+    epoch: 2,
+    ops: [new DeltaOpCellSet(1, new IpcValueInline(bytes("b")))],
+  });
   replica.applyDelta(delta);
   const after = str(replica.node(1).payload);
   replica.applyDelta(delta);

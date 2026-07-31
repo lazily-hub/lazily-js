@@ -146,7 +146,9 @@ test("conformance: stableid_alignment.json", () => {
           scenario.expect,
           "matches",
           a.newMatches.map((m) =>
-            m.kind === "inserted" ? "Inserted" : `${m.kind === "same" ? "Same" : "Edited"}:${m.oldIndex}`,
+            m.kind === "inserted"
+              ? "Inserted"
+              : `${m.kind === "same" ? "Same" : "Edited"}:${m.oldIndex}`,
           ),
           scenario.name,
         );
@@ -183,8 +185,8 @@ test("conformance: stableid_alignment.json", () => {
       // the run rather than replay nothing, which is how the anchored scenario went
       // missing in the first place.
       assert.fail(
-        `${scenario.name}: unmodelled stableid_alignment scenario shape `
-        + `(keys: ${Object.keys(scenario).join(", ")})`,
+        `${scenario.name}: unmodelled stableid_alignment scenario shape ` +
+          `(keys: ${Object.keys(scenario).join(", ")})`,
       );
     }
   }

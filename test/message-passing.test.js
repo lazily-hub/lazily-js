@@ -144,8 +144,19 @@ test("rpc facade resolves only on terminal receipt", () => {
   client.ingestCommand(
     CommandMessage.ofEvents(
       new CommandEvents([
-        new CommandEvent({ eventId: "ev-1", commandId: id, kind: CommandEventKind.Accepted, generation: 42, detail: "queued" }),
-        new CommandEvent({ eventId: "ev-2", commandId: id, kind: CommandEventKind.Started, generation: 42 }),
+        new CommandEvent({
+          eventId: "ev-1",
+          commandId: id,
+          kind: CommandEventKind.Accepted,
+          generation: 42,
+          detail: "queued",
+        }),
+        new CommandEvent({
+          eventId: "ev-2",
+          commandId: id,
+          kind: CommandEventKind.Started,
+          generation: 42,
+        }),
       ]),
     ),
   );
@@ -236,7 +247,10 @@ test("terminal conflict fails closed fixture", () => {
   // asserted against the folded projection rather than trusted as an input.
   assertKeyWith(fx.expect, "conflict_command_id", (id) => {
     assert.ok(
-      p.toImage().toWire().commands.some((c) => c.command_id === id),
+      p
+        .toImage()
+        .toWire()
+        .commands.some((c) => c.command_id === id),
       `conflict_command_id ${id} names no command in the folded projection`,
     );
   });

@@ -27,7 +27,8 @@
 
 import { Context } from "./reactive.js";
 
-const HAS_SHARED_MEMORY = typeof SharedArrayBuffer !== "undefined" && typeof Atomics !== "undefined";
+const HAS_SHARED_MEMORY =
+  typeof SharedArrayBuffer !== "undefined" && typeof Atomics !== "undefined";
 
 /**
  * A reentrant mutex whose lock word optionally lives in a `SharedArrayBuffer`,

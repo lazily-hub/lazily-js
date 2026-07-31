@@ -75,9 +75,10 @@ export function projectionSummary(projection) {
   const route = projection.route ?? {};
   const transport = projection.transport ?? {};
   const proof = projection.proof ?? {};
-  const patches = transport.patches && typeof transport.patches === "object"
-    ? Object.entries(transport.patches)
-    : [];
+  const patches =
+    transport.patches && typeof transport.patches === "object"
+      ? Object.entries(transport.patches)
+      : [];
   const sortedPatches = patches.sort(([a], [b]) => a.localeCompare(b));
   const latest = sortedPatches.length > 0 ? sortedPatches[sortedPatches.length - 1] : undefined;
   return {
@@ -85,9 +86,8 @@ export function projectionSummary(projection) {
     routePaneId: typeof route.pane_id === "string" ? route.pane_id : undefined,
     latestTransportPatchId: latest?.[0],
     latestTransportPhase: typeof latest?.[1]?.phase === "string" ? latest[1].phase : undefined,
-    proofMarkers: proof.markers && typeof proof.markers === "object"
-      ? Object.keys(proof.markers).length
-      : 0,
+    proofMarkers:
+      proof.markers && typeof proof.markers === "object" ? Object.keys(proof.markers).length : 0,
   };
 }
 
@@ -98,9 +98,11 @@ export function projectionSummary(projection) {
  * @returns {string}
  */
 export function compactProjectionSummary(summary) {
-  return `route=${summary.routeReadiness ?? "unknown"} pane=${summary.routePaneId ?? "-"} `
-    + `transport=${summary.latestTransportPatchId ?? "-"}:${summary.latestTransportPhase ?? "-"} `
-    + `proof_markers=${summary.proofMarkers}`;
+  return (
+    `route=${summary.routeReadiness ?? "unknown"} pane=${summary.routePaneId ?? "-"} ` +
+    `transport=${summary.latestTransportPatchId ?? "-"}:${summary.latestTransportPhase ?? "-"} ` +
+    `proof_markers=${summary.proofMarkers}`
+  );
 }
 
 /**
@@ -133,20 +135,14 @@ export function decodeStateProjectionPointer(koffi, ptr, freeString) {
  * @returns {LazilyFFI}
  */
 export function wrapAgentDocStateProjectionFFI(koffi, lib) {
-  const state_projection = lib.func(
-    "void *agent_doc_state_projection(const char *document_hash)",
-  );
+  const state_projection = lib.func("void *agent_doc_state_projection(const char *document_hash)");
   const record_state_event = lib.func(
     "int agent_doc_record_state_event(const char *document_hash, const char *fact_json)",
   );
   const free_string = lib.func("void agent_doc_free_string(void *ptr)");
   return {
     stateProjection(documentHashValue) {
-      return decodeStateProjectionPointer(
-        koffi,
-        state_projection(documentHashValue),
-        free_string,
-      );
+      return decodeStateProjectionPointer(koffi, state_projection(documentHashValue), free_string);
     },
     recordStateEvent(documentHashValue, factJson) {
       return record_state_event(documentHashValue, factJson) === 1;

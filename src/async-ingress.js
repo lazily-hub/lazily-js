@@ -97,9 +97,7 @@ export class AsyncIngressCell {
     this._dropped = ctx.computedAsync(async () =>
       this._core.receipts(IngressReceiptChannel.Dropped),
     );
-    this._errors = ctx.computedAsync(async () =>
-      this._core.receipts(IngressReceiptChannel.Error),
-    );
+    this._errors = ctx.computedAsync(async () => this._core.receipts(IngressReceiptChannel.Error));
     this._transportKind = ctx.source(options.transport ?? IngressTransportKind.EventChannel);
     this._pollInterval = ctx.source(options.pollInterval ?? 1000);
     this._schedule = ctx.computedAsync(async (cx) =>

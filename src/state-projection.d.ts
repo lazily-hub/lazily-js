@@ -103,12 +103,6 @@ export class StateProjectionClient extends EventEmitter {
   once(event: "projection", listener: (projection: string | null) => void): this;
   off(event: "projection", listener: (projection: string | null) => void): this;
   emit(event: "projection", projection: string | null): boolean;
-  addListener(
-    event: "projection",
-    listener: (projection: string | null) => void,
-  ): this;
-  removeListener(
-    event: "projection",
-    listener: (projection: string | null) => void,
-  ): this;
+  addListener(event: "projection", listener: (projection: string | null) => void): this;
+  removeListener(event: "projection", listener: (projection: string | null) => void): this;
 }

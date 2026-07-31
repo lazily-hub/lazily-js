@@ -108,8 +108,12 @@ function lcsLen(a, b) {
 // Word-LCS similarity ratio in [0,1]: 2·|LCS| / (|a|+|b|). 1.0 = identical token
 // sequence; both-empty => 1.0.
 export function similarity(a, b) {
-  const aw = String(a).split(/\s+/u).filter((t) => t.length > 0);
-  const bw = String(b).split(/\s+/u).filter((t) => t.length > 0);
+  const aw = String(a)
+    .split(/\s+/u)
+    .filter((t) => t.length > 0);
+  const bw = String(b)
+    .split(/\s+/u)
+    .filter((t) => t.length > 0);
   if (aw.length === 0 && bw.length === 0) {
     return 1.0;
   }
@@ -176,8 +180,7 @@ export function align(oldBlocks, newBlocks) {
       }
       const sim = similarity(newBlocks[ni].text, oldBlocks[oi].text);
       const better =
-        sim > bestSim ||
-        (sim === bestSim && Math.abs(oi - ni) < Math.abs(bestOi - ni));
+        sim > bestSim || (sim === bestSim && Math.abs(oi - ni) < Math.abs(bestOi - ni));
       if (better) {
         bestSim = sim;
         bestOi = oi;

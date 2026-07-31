@@ -92,7 +92,9 @@ export class ThreadSafeReactiveMap {
       return warm;
     }
     const handle =
-      this._kind === EntryKind.Source ? this._ctx.source(compute()) : this._ctx.computed(() => compute());
+      this._kind === EntryKind.Source
+        ? this._ctx.source(compute())
+        : this._ctx.computed(() => compute());
     // First-writer-wins commit: on a lost race the freshly-built node is
     // orphaned and the key keeps its single stable handle.
     const { handle: stored, mutation } = this._mutex.runExclusive(() =>

@@ -25,7 +25,10 @@ function buildTree() {
         a: {
           id: "a",
           value: "A",
-          children: { order: ["a1", "a2"], values: { a1: { id: "a1", value: 1 }, a2: { id: "a2", value: 2 } } },
+          children: {
+            order: ["a1", "a2"],
+            values: { a1: { id: "a1", value: 1 }, a2: { id: "a2", value: 2 } },
+          },
         },
         b: { id: "b", value: "B", children: { order: [], values: {} } },
       },
@@ -117,7 +120,11 @@ test("Lean moveChild_preserves_parent_value: a child reorder does not change the
   t.moveChildAfter(["a"], "a1", "a2"); // a1 ↔ a2
 
   assert.equal(t.getValue(["a"]), parentValueBefore, "parent's value cell untouched");
-  assert.equal(t.childHandle(["a"], "a1"), childHandleBefore, "child handle stable across atomic move");
+  assert.equal(
+    t.childHandle(["a"], "a1"),
+    childHandleBefore,
+    "child handle stable across atomic move",
+  );
   assert.equal(t.getValue(["a", "a1"]), childValueBefore, "child value preserved");
   assert.deepEqual(t.childKeys(["a"]), ["a2", "a1"], "child order changed");
 });

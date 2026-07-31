@@ -69,7 +69,9 @@ test("commutativity holds exactly when the flag is set", () => {
     }
   }
   // Honesty: cleared flags exhibit a counterexample.
-  assert.ok(!eq(KeepLatest.merge(KeepLatest.merge(0, 1), 2), KeepLatest.merge(KeepLatest.merge(0, 2), 1)));
+  assert.ok(
+    !eq(KeepLatest.merge(KeepLatest.merge(0, 1), 2), KeepLatest.merge(KeepLatest.merge(0, 2), 1)),
+  );
   assert.ok(!eq(RawFifo.merge([1], [2]), RawFifo.merge([2], [1])));
 });
 

@@ -111,7 +111,10 @@ if (out || walkOut) {
       const p = typeof file === "string" ? file : file?.toString?.();
       if (!p || !p.includes(marker)) return null;
       // Store the id relative to the conformance root, matching the corpus listing.
-      return p.slice(p.indexOf(marker) + marker.length).split(path.sep).join("/");
+      return p
+        .slice(p.indexOf(marker) + marker.length)
+        .split(path.sep)
+        .join("/");
     } catch {
       // Never let bookkeeping break a test run.
       return null;
@@ -134,13 +137,7 @@ if (out || walkOut) {
   // phase-qualified name (`collections/semtree_incremental.json`). Leaving them
   // out let a whole assertion block sit outside both rungs, which is the gap
   // the tracked-name list exists to close.
-  const TRACKED = new Set([
-    "assertions",
-    "expect",
-    "expected",
-    "expect_initial",
-    "expect_after",
-  ]);
+  const TRACKED = new Set(["assertions", "expect", "expected", "expect_initial", "expect_after"]);
 
   // Prose keys inside a tracked block. Their values are English sentences about
   // the step, not values to compare, so they are exempt from read, assertion and
@@ -233,11 +230,11 @@ if (out || walkOut) {
         for (const [name, claim] of Object.entries(value)) {
           if (typeof claim !== "string") {
             throw new Error(
-              `${rel}: invariants.${name} is not prose (${typeof claim}). `
-              + "`invariants` is exempt from key-consumption tracking because its "
-              + "values are English descriptions of what `steps` encode. A value "
-              + "with a machine-checkable shape belongs in `expect`/`expected` "
-              + "where the consumption guard can see it.",
+              `${rel}: invariants.${name} is not prose (${typeof claim}). ` +
+                "`invariants` is exempt from key-consumption tracking because its " +
+                "values are English descriptions of what `steps` encode. A value " +
+                "with a machine-checkable shape belongs in `expect`/`expected` " +
+                "where the consumption guard can see it.",
             );
           }
         }
@@ -300,9 +297,7 @@ if (out || walkOut) {
         if (id === null) return false;
         // Prose keys carry no presence record, so they carry no mark either.
         if (!keyRecords.has(`${id}\t${key}\tP`)) return false;
-        keyRecords.add(
-          tag === "X" ? `${id}\t${key}\tX\t${reason}` : `${id}\t${key}\t${tag}`,
-        );
+        keyRecords.add(tag === "X" ? `${id}\t${key}\tX\t${reason}` : `${id}\t${key}\t${tag}`);
         return true;
       },
     };

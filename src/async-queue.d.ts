@@ -61,11 +61,7 @@ export {
 /** The `AsyncContext` reactive FIFO. Reads resolve through `getAsync`. */
 export class AsyncQueueCell {
   constructor(ctx: AsyncContext, initial?: QueueInitial, storage?: QueueStorage);
-  static from(
-    ctx: AsyncContext,
-    initial?: QueueInitial,
-    storage?: QueueStorage,
-  ): AsyncQueueCell;
+  static from(ctx: AsyncContext, initial?: QueueInitial, storage?: QueueStorage): AsyncQueueCell;
   tryPush(value: unknown): QueuePushResult;
   tryPop(): QueuePopResult;
   close(): QueueCloseResult;

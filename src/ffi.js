@@ -23,10 +23,7 @@ export { LazilyFfiMessageKind, LazilyFfiStatus, IpcMessage };
 function isUnknownKind(message) {
   return !(
     message &&
-    (message.isSnapshot ||
-      message.isDelta ||
-      message.isCrdtSync ||
-      message.isControl)
+    (message.isSnapshot || message.isDelta || message.isCrdtSync || message.isControl)
   );
 }
 
@@ -89,7 +86,7 @@ export function encodeMessage(message) {
  *   {@link LazilyFfiStatus.InvalidMessage} on a parse failure.
  */
 export function decodeMessage(payload) {
-  const len = typeof payload === "string" ? payload.length : payload?.length ?? 0;
+  const len = typeof payload === "string" ? payload.length : (payload?.length ?? 0);
   if (!payload || len === 0) {
     return { status: LazilyFfiStatus.Empty, message: null };
   }
@@ -141,10 +138,7 @@ export class FfiChannel {
     if (status !== LazilyFfiStatus.Ok) {
       return status;
     }
-    const bytes =
-      typeof payload === "string"
-        ? new TextEncoder().encode(payload)
-        : payload.slice(); // own a copy — mirrors the C-ABI buffer-copy contract
+    const bytes = typeof payload === "string" ? new TextEncoder().encode(payload) : payload.slice(); // own a copy — mirrors the C-ABI buffer-copy contract
     this.#queue.push(bytes);
     return LazilyFfiStatus.Ok;
   }

@@ -56,11 +56,7 @@ function validator(name) {
 }
 
 function errorsText(fn, data) {
-  return (
-    fn.errors
-      ?.map((e) => `${e.instancePath || "/"}: ${e.message}`)
-      .join("\n") ?? ""
-  );
+  return fn.errors?.map((e) => `${e.instancePath || "/"}: ${e.message}`).join("\n") ?? "";
 }
 
 test("lazily-js Snapshot wire validates against schemas/snapshot.json", () => {
@@ -114,12 +110,15 @@ test("lazily-js Delta wire (all 7 ops + NodeAdd key) validates against schemas/d
 test("lazily-js CrdtSync wire (keyed + keyless ops) validates against schemas/distributed.json", () => {
   const message = IpcMessage.crdtSync(
     new CrdtSync({
-      frontier: [
-        { peer: 1, stamp: new WireStamp({ wallTime: 200, logical: 0, peer: 1 }) },
-      ],
+      frontier: [{ peer: 1, stamp: new WireStamp({ wallTime: 200, logical: 0, peer: 1 }) }],
       ops: [
         new CrdtOp(1, new WireStamp({ wallTime: 200, logical: 0, peer: 1 }), Uint8Array.of(10, 20)),
-        CrdtOp.keyed(2, "scores/alice", new WireStamp({ wallTime: 180, logical: 3, peer: 2 }), Uint8Array.of(30)),
+        CrdtOp.keyed(
+          2,
+          "scores/alice",
+          new WireStamp({ wallTime: 180, logical: 3, peer: 2 }),
+          Uint8Array.of(30),
+        ),
       ],
     }),
   );

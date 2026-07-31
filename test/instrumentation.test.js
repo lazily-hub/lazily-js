@@ -12,9 +12,13 @@ import {
 // --- benchmark harness (light-tier parity with py/go/dart) ------------------
 test("benchmark returns a timing-only BenchmarkResult", () => {
   let n = 0;
-  const r = benchmark("increment", () => {
-    n += 1;
-  }, 500);
+  const r = benchmark(
+    "increment",
+    () => {
+      n += 1;
+    },
+    500,
+  );
   assert.ok(r instanceof BenchmarkResult);
   assert.equal(r.name, "increment");
   assert.equal(r.iterations, 500);
@@ -33,7 +37,12 @@ test("runBenchmarkSuite returns one result per reactive-core case", () => {
   assert.ok(Array.isArray(suite));
   assert.ok(suite.length >= 5);
   const names = suite.map((r) => r.name);
-  for (const expected of ["cell_set_get", "computed_recompute", "effect_rerun", "family_materialize"]) {
+  for (const expected of [
+    "cell_set_get",
+    "computed_recompute",
+    "effect_rerun",
+    "family_materialize",
+  ]) {
     assert.ok(names.includes(expected), `suite includes ${expected}`);
   }
   for (const r of suite) {

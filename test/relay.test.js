@@ -161,7 +161,11 @@ test("transport_independent across framing", () => {
   for (const policy of [Sum, Max, KeepLatest]) {
     const ops = [3, 1, 4, 1, 5, 9];
     const flat = ops.reduce((a, b) => policy.merge(a, b));
-    for (const transport of [new InProcTransport(), new FramedTransport(2), new FramedTransport(3)]) {
+    for (const transport of [
+      new InProcTransport(),
+      new FramedTransport(2),
+      new FramedTransport(3),
+    ]) {
       for (const op of ops) transport.deliver(op);
       const ctx = new Context();
       const r = relay(ctx, policy);
@@ -206,7 +210,10 @@ test("Outbox → Inbox link converges", () => {
   while (transport.hasPending()) {
     for (const frame of transport.poll()) inbox.receive(frame);
   }
-  assert.equal(inbox.consume(64), ops.reduce((a, b) => a + b));
+  assert.equal(
+    inbox.consume(64),
+    ops.reduce((a, b) => a + b),
+  );
 });
 
 // -- Phase 6 -----------------------------------------------------------------

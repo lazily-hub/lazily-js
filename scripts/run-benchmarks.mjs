@@ -109,9 +109,7 @@ function render(results) {
   lines.push("node scripts/run-benchmarks.mjs");
   lines.push("```");
   lines.push("");
-  lines.push(
-    "Mean wall-clock time per iteration; 95% CI half-width from the standard error.",
-  );
+  lines.push("Mean wall-clock time per iteration; 95% CI half-width from the standard error.");
   lines.push("");
   lines.push("| Group | Case | Mean | 95% CI | p75 | p99 | Samples |");
   lines.push("|---|---|---:|---:|---:|---:|---:|");
@@ -131,12 +129,7 @@ function refresh(results) {
   if (startIdx === -1 || endIdx === -1) {
     throw new Error(`missing ${START} / ${END} markers in BENCHMARKS.md`);
   }
-  const next =
-    md.slice(0, startIdx + START.length) +
-    "\n\n" +
-    body +
-    "\n\n" +
-    md.slice(endIdx);
+  const next = md.slice(0, startIdx + START.length) + "\n\n" + body + "\n\n" + md.slice(endIdx);
   writeFileSync(BENCHMARKS_MD, next);
 }
 

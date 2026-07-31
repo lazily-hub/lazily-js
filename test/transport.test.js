@@ -45,8 +45,8 @@ function loadFixture(name) {
   const path = join(specFixtures, name);
   assert.ok(
     existsSync(path),
-    `missing canonical spec fixture ${path} — clone the lazily-spec sibling `
-      + `(git clone https://github.com/lazily-hub/lazily-spec.git ../lazily-spec)`,
+    `missing canonical spec fixture ${path} — clone the lazily-spec sibling ` +
+      `(git clone https://github.com/lazily-hub/lazily-spec.git ../lazily-spec)`,
   );
   return JSON.parse(readFileSync(path, "utf8"));
 }
@@ -221,15 +221,9 @@ test("BlobRouter never resolves a descriptor of the wrong kind", () => {
 test("BlobRouter.resolve handles inline and shared values", () => {
   const ip = new InProcessBackend();
   const router = new BlobRouter().register(ip);
-  assert.deepEqual(
-    [...router.resolve(IpcValue.inline(bytes("inline")))],
-    [...bytes("inline")],
-  );
+  assert.deepEqual([...router.resolve(IpcValue.inline(bytes("inline")))], [...bytes("inline")]);
   const ref = ip.write(bytes("shared"));
-  assert.deepEqual(
-    [...router.resolve(IpcValue.sharedBlob(ref))],
-    [...bytes("shared")],
-  );
+  assert.deepEqual([...router.resolve(IpcValue.sharedBlob(ref))], [...bytes("shared")]);
 });
 
 // ---------------------------------------------------------------------------
@@ -252,9 +246,7 @@ test("resolveValue reads back a spilled value zero-copy", () => {
   const original = bytes("y".repeat(700));
   const { value } = spillValue(IpcValue.inline(original), ip, 512);
   assert.deepEqual([...resolveValue(value, ip)], [...original]);
-  assert.deepEqual([...resolveValue(IpcValue.inline(bytes("z")), ip)], [
-    ...bytes("z"),
-  ]);
+  assert.deepEqual([...resolveValue(IpcValue.inline(bytes("z")), ip)], [...bytes("z")]);
 });
 
 test("spillMessage rewrites oversized Delta payloads to descriptors", () => {

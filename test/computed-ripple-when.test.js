@@ -150,10 +150,7 @@ test("pass-through computedRippleWhen(() => true) always propagates", () => {
   // re-fires.
   ctx.set(input, 5);
   assert.equal(ctx.get(observer), 0);
-  assert.ok(
-    recomputes > base,
-    "pass-through propagates even when the value is unchanged",
-  );
+  assert.ok(recomputes > base, "pass-through propagates even when the value is unchanged");
 });
 
 test("computedRippleWhen guard is cleared on dispose (no stale predicate on a recycled id)", () => {
@@ -161,7 +158,10 @@ test("computedRippleWhen guard is cleared on dispose (no stale predicate on a re
   const input = ctx.source(0);
 
   // A never-suppress slot, then dispose it so its id returns to the free list.
-  const first = ctx.computedRippleWhen((cx) => cx.get(input), () => true);
+  const first = ctx.computedRippleWhen(
+    (cx) => cx.get(input),
+    () => true,
+  );
   assert.equal(ctx.get(first), 0);
   ctx.disposeNode(first);
 

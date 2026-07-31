@@ -27,8 +27,8 @@ function loadFixture(name) {
   const path = join(specFixtures, name);
   assert.ok(
     existsSync(path),
-    `missing canonical spec fixture ${path} — clone the lazily-spec sibling `
-      + `(git clone https://github.com/lazily-hub/lazily-spec.git ../lazily-spec)`,
+    `missing canonical spec fixture ${path} — clone the lazily-spec sibling ` +
+      `(git clone https://github.com/lazily-hub/lazily-spec.git ../lazily-spec)`,
   );
   return JSON.parse(readFileSync(path, "utf8"));
 }
@@ -59,11 +59,17 @@ test("family-granularity sync: materialize on ingest (#lzfamilysync)", () => {
     }
 
     const frame = origin.syncFrame();
-    const applied = target.ingest(new CrdtSync({ frontier: origin.frontierEntries(), ops: frame.ops }), 1000);
+    const applied = target.ingest(
+      new CrdtSync({ frontier: origin.frontierEntries(), ops: frame.ops }),
+      1000,
+    );
     assert.ok(applied > 0, `[${name}] ingest applied at least one op`);
 
     if (scenario.reingest) {
-      const reapplied = target.ingest(new CrdtSync({ frontier: origin.frontierEntries(), ops: frame.ops }), 1001);
+      const reapplied = target.ingest(
+        new CrdtSync({ frontier: origin.frontierEntries(), ops: frame.ops }),
+        1001,
+      );
       assertKey(
         scenario.expect,
         "reingest_applied",

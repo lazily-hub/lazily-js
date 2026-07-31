@@ -145,7 +145,7 @@ export class TextCrdt {
 
   insert(index, ch) {
     const visible = this.#orderedIds(false);
-    const origin = index === 0 ? null : visible[index - 1] ?? null;
+    const origin = index === 0 ? null : (visible[index - 1] ?? null);
     const id = this.#nextId();
     this.#invalidateOrdered();
     this.#elems.set(id._key, new Elem(id, ch, origin, null));
@@ -159,7 +159,7 @@ export class TextCrdt {
   // tiebreak, preserving the standard CRDT convergence contract.
   insertStr(index, str) {
     const visible = this.#orderedIds(false);
-    let origin = index === 0 ? null : visible[index - 1] ?? null;
+    let origin = index === 0 ? null : (visible[index - 1] ?? null);
     this.#invalidateOrdered();
     for (const ch of String(str)) {
       const id = this.#nextId();
@@ -235,9 +235,7 @@ export class TextCrdt {
       if (existing) {
         if (existing.deleted && oe.deleted) {
           const merged =
-            existing.deleted.compareTo(oe.deleted) <= 0
-              ? existing.deleted
-              : oe.deleted;
+            existing.deleted.compareTo(oe.deleted) <= 0 ? existing.deleted : oe.deleted;
           if (merged !== existing.deleted) {
             existing.deleted = merged;
             anyChange = true;
@@ -361,8 +359,7 @@ export class TextCrdt {
       const existing = this.#elems.get(id._key);
       if (existing) {
         if (existing.deleted && deleted) {
-          const merged =
-            existing.deleted.compareTo(deleted) <= 0 ? existing.deleted : deleted;
+          const merged = existing.deleted.compareTo(deleted) <= 0 ? existing.deleted : deleted;
           if (merged !== existing.deleted) {
             existing.deleted = merged;
             anyChange = true;

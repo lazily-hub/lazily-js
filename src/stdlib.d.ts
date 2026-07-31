@@ -61,7 +61,11 @@ export type RevisionBarrierObservation = {
 };
 
 export class RevisionBarrier {
-  constructor(revision: LogicalClock, requiredRevision: LogicalClock, deadline?: LogicalClock | null);
+  constructor(
+    revision: LogicalClock,
+    requiredRevision: LogicalClock,
+    deadline?: LogicalClock | null,
+  );
   observe(
     now: LogicalClock,
     predicate: boolean,

@@ -343,7 +343,11 @@ for (const FlavorCls of FLAVORS) {
     };
 
     const cases = [
-      ["move_before, key precedes anchor", (f) => ops.moveBefore(f, "a", "d"), ["b", "c", "a", "d"]],
+      [
+        "move_before, key precedes anchor",
+        (f) => ops.moveBefore(f, "a", "d"),
+        ["b", "c", "a", "d"],
+      ],
       ["move_before, key follows anchor", (f) => ops.moveBefore(f, "d", "b"), ["a", "d", "b", "c"]],
       ["move_after, key precedes anchor", (f) => ops.moveAfter(f, "a", "c"), ["b", "c", "a", "d"]],
       ["move_after, key follows anchor", (f) => ops.moveAfter(f, "d", "a"), ["a", "d", "b", "c"]],

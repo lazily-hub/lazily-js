@@ -40,10 +40,7 @@ test("TimerCell single-shot", () => {
       // The corpus spells the fired unit payload `"()"`; this binding materialises
       // it as `true`, and an unfired timer as `null`. Refuse any other encoding
       // rather than silently mapping it to `null`.
-      assert.ok(
-        want === "()" || want === null,
-        `unmodelled timer payload ${JSON.stringify(want)}`,
-      );
+      assert.ok(want === "()" || want === null, `unmodelled timer payload ${JSON.stringify(want)}`);
       assert.equal(timer.value(), want === "()" ? true : null);
     });
     assertKey(step.expected, "next_fire", timer.nextFire());

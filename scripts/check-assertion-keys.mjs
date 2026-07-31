@@ -88,13 +88,7 @@ const DECLARED_UNCONSUMED = [
   })),
 ];
 
-const TRACKED = new Set([
-  "assertions",
-  "expect",
-  "expected",
-  "expect_initial",
-  "expect_after",
-]);
+const TRACKED = new Set(["assertions", "expect", "expected", "expect_initial", "expect_after"]);
 
 function fail(lines) {
   for (const line of lines) console.error(line);
@@ -149,7 +143,10 @@ let problems = 0;
 // absent manifest, one fixture at a time.
 if (existsSync(FIXTURE_MANIFEST)) {
   const opened = new Set(
-    readFileSync(FIXTURE_MANIFEST, "utf8").split("\n").map((l) => l.trim()).filter(Boolean),
+    readFileSync(FIXTURE_MANIFEST, "utf8")
+      .split("\n")
+      .map((l) => l.trim())
+      .filter(Boolean),
   );
   for (const fixture of [...opened].sort()) {
     const path = join(SPEC_DIR, fixture);
@@ -279,9 +276,9 @@ for (const entry of DECLARED_UNCONSUMED) {
   const id = entry.key === "*" ? entry.fixture : `${entry.fixture}\t${entry.key}`;
   if (!excused.has(id)) {
     fail([
-      `ERROR: DECLARED_UNCONSUMED lists '${entry.fixture}'`
-        + (entry.key === "*" ? "" : ` key '${entry.key}'`)
-        + ", but nothing there is unconsumed.",
+      `ERROR: DECLARED_UNCONSUMED lists '${entry.fixture}'` +
+        (entry.key === "*" ? "" : ` key '${entry.key}'`) +
+        ", but nothing there is unconsumed.",
       `       Reason on file: ${entry.reason}`,
       "       The excuse is stale — the suite either consumes it now or no longer",
       "       carries it. Delete the entry; an excuse left behind understates",
@@ -293,14 +290,14 @@ for (const entry of DECLARED_UNCONSUMED) {
 
 if (problems > 0) {
   console.error(
-    `assertion-key consumption FAILED: ${problems} problem(s), ${unread} unread key(s),`
-    + ` ${unasserted} read-but-unasserted key(s), ${stale} stale excuse(s)`,
+    `assertion-key consumption FAILED: ${problems} problem(s), ${unread} unread key(s),` +
+      ` ${unasserted} read-but-unasserted key(s), ${stale} stale excuse(s)`,
   );
   process.exit(1);
 }
 
 console.error(
-  `assertion-key consumption OK: ${consumed}/${present.size} fixture assertion keys ASSERTED against`
-  + ` their own fixture value by the suite (${declaredHere} excused in-runner,`
-  + ` ${excused.size} declared unconsumed; runtime manifest — these values were really compared)`,
+  `assertion-key consumption OK: ${consumed}/${present.size} fixture assertion keys ASSERTED against` +
+    ` their own fixture value by the suite (${declaredHere} excused in-runner,` +
+    ` ${excused.size} declared unconsumed; runtime manifest — these values were really compared)`,
 );

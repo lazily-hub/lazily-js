@@ -7,7 +7,13 @@ import test from "node:test";
 import { assertKey, assertKeyWith } from "./support/assert-key.js";
 
 import { Context } from "../src/reactive.js";
-import { BarrierCell, LeaderCell, LeaseCell, LockCell, SemaphoreCell } from "../src/coordination.js";
+import {
+  BarrierCell,
+  LeaderCell,
+  LeaseCell,
+  LockCell,
+  SemaphoreCell,
+} from "../src/coordination.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const specDir = join(here, "..", "..", "lazily-spec", "conformance", "coordination");

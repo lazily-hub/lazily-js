@@ -51,8 +51,8 @@ function loadFixture(name) {
   const path = join(specFixtures, name);
   assert.ok(
     existsSync(path),
-    `missing canonical spec fixture ${path} — clone the lazily-spec sibling `
-      + `(git clone https://github.com/lazily-hub/lazily-spec.git ../lazily-spec)`,
+    `missing canonical spec fixture ${path} — clone the lazily-spec sibling ` +
+      `(git clone https://github.com/lazily-hub/lazily-spec.git ../lazily-spec)`,
   );
   const fixture = JSON.parse(readFileSync(path, "utf8"));
   assert.equal(fixture.protocol_version, 1);
@@ -78,16 +78,12 @@ function decodePayloadJson(bytes) {
 
 // Inline JSON carried by a snapshot node state (null for SharedBlob / Opaque).
 function nodePayloadJson(node) {
-  return node.state instanceof NodeStatePayload
-    ? decodePayloadJson(node.state.bytes)
-    : null;
+  return node.state instanceof NodeStatePayload ? decodePayloadJson(node.state.bytes) : null;
 }
 
 // Inline JSON carried by a delta CellSet/SlotValue op payload (null for SharedBlob).
 function valueOpPayloadJson(op) {
-  return op.payload instanceof IpcValueInline
-    ? decodePayloadJson(op.payload.bytes)
-    : null;
+  return op.payload instanceof IpcValueInline ? decodePayloadJson(op.payload.bytes) : null;
 }
 
 // Find the `.phase` of the decoded payload object that carries `markerField`
@@ -97,8 +93,7 @@ function valueOpPayloadJson(op) {
 // baseline projection carries cycle_id but has no phase) is not a false hit.
 function phaseByMarker(objects, markerField) {
   const found = objects.find(
-    (obj) =>
-      obj && typeof obj === "object" && markerField in obj && "phase" in obj,
+    (obj) => obj && typeof obj === "object" && markerField in obj && "phase" in obj,
   );
   return found?.phase;
 }
@@ -150,21 +145,39 @@ function assertFixtureAssertions(message, fixture) {
       assertKeyWith(a, key, (expected) => {
         let actual;
         switch (key) {
-          case "epoch": actual = snap.epoch; break;
-          case "node_count": actual = snap.nodes.length; break;
-          case "edge_count": actual = snap.edges.length; break;
-          case "root_count": actual = snap.roots.length; break;
-          case "first_node_type_tag": actual = snap.nodes[0].typeTag; break;
-          case "first_node_state_kind": actual = nodeStateKind(snap.nodes[0].state); break;
+          case "epoch":
+            actual = snap.epoch;
+            break;
+          case "node_count":
+            actual = snap.nodes.length;
+            break;
+          case "edge_count":
+            actual = snap.edges.length;
+            break;
+          case "root_count":
+            actual = snap.roots.length;
+            break;
+          case "first_node_type_tag":
+            actual = snap.nodes[0].typeTag;
+            break;
+          case "first_node_state_kind":
+            actual = nodeStateKind(snap.nodes[0].state);
+            break;
           case "has_opaque_node":
             actual = snap.nodes.some((n) => n.state instanceof NodeStateOpaque);
             break;
           case "opaque_node_id":
             actual = snap.nodes.find((n) => n.state instanceof NodeStateOpaque)?.node;
             break;
-          case "blob_offset": actual = firstSharedBlob(snap)?.offset; break;
-          case "blob_len": actual = firstSharedBlob(snap)?.len; break;
-          case "blob_epoch": actual = firstSharedBlob(snap)?.epoch; break;
+          case "blob_offset":
+            actual = firstSharedBlob(snap)?.offset;
+            break;
+          case "blob_len":
+            actual = firstSharedBlob(snap)?.len;
+            break;
+          case "blob_epoch":
+            actual = firstSharedBlob(snap)?.epoch;
+            break;
           case "type_tags":
             actual = snap.nodes.map((n) => n.typeTag);
             break;
@@ -183,10 +196,11 @@ function assertFixtureAssertions(message, fixture) {
             actual = snap.nodes.map((n) => n.typeTag).every((t) => vocab.has(t));
             break;
           }
-          default: throw new Error(`unknown snapshot assertion key: ${key}`);
+          default:
+            throw new Error(`unknown snapshot assertion key: ${key}`);
         }
         assert.deepEqual(actual, expected, `snapshot assertion "${key}"`);
-          });
+      });
     }
   } else if (message.isDelta) {
     const delta = message.delta;
@@ -194,10 +208,18 @@ function assertFixtureAssertions(message, fixture) {
       assertKeyWith(a, key, (expected) => {
         let actual;
         switch (key) {
-          case "base_epoch": actual = delta.baseEpoch; break;
-          case "epoch": actual = delta.epoch; break;
-          case "is_sequential": actual = delta.isNextAfter(delta.baseEpoch); break;
-          case "op_count": actual = delta.ops.length; break;
+          case "base_epoch":
+            actual = delta.baseEpoch;
+            break;
+          case "epoch":
+            actual = delta.epoch;
+            break;
+          case "is_sequential":
+            actual = delta.isNextAfter(delta.baseEpoch);
+            break;
+          case "op_count":
+            actual = delta.ops.length;
+            break;
           case "has_all_op_variants": {
             const kinds = new Set(delta.ops.map((op) => deltaOpKind(op)));
             actual = ALL_OP_KINDS.every((k) => kinds.has(k));
@@ -206,7 +228,9 @@ function assertFixtureAssertions(message, fixture) {
           case "resync_after_epoch_10":
             actual = delta.applyStatus(10).isResyncRequired;
             break;
-          case "first_op_kind": actual = deltaOpKind(delta.ops[0]); break;
+          case "first_op_kind":
+            actual = deltaOpKind(delta.ops[0]);
+            break;
           case "first_op_payload_kind":
             actual = Object.keys(delta.ops[0].payload.toWire())[0];
             break;
@@ -217,9 +241,7 @@ function assertFixtureAssertions(message, fixture) {
             actual = delta.ops[0].payload.blob?.backend;
             break;
           case "added_type_tags":
-            actual = delta.ops
-              .filter((op) => op instanceof DeltaOpNodeAdd)
-              .map((op) => op.typeTag);
+            actual = delta.ops.filter((op) => op instanceof DeltaOpNodeAdd).map((op) => op.typeTag);
             break;
           case "cycle_phase_after": {
             const objs = delta.ops
@@ -243,10 +265,11 @@ function assertFixtureAssertions(message, fixture) {
               .every((t) => vocab.has(t));
             break;
           }
-          default: throw new Error(`unknown delta assertion key: ${key}`);
+          default:
+            throw new Error(`unknown delta assertion key: ${key}`);
         }
         assert.deepEqual(actual, expected, `delta assertion "${key}"`);
-          });
+      });
     }
   } else {
     assert.fail(`unknown message kind for fixture ${fixture.description ?? ""}`);
@@ -342,7 +365,10 @@ test("snapshot permission filter omits unreadable nodes", () => {
 
   const filtered = snapshot.filterReadable(permissions, 1);
 
-  assert.deepEqual(filtered.nodes.map((node) => node.node), [1, 2]);
+  assert.deepEqual(
+    filtered.nodes.map((node) => node.node),
+    [1, 2],
+  );
   assert.deepEqual(filtered.edges, [new EdgeSnapshot(2, 1)]);
   assert.deepEqual(filtered.roots, [1, 2]);
 });
@@ -379,10 +405,11 @@ test("permissions gate operation kinds independently", () => {
 });
 
 test("NodeSnapshot omits key when absent and emits it when set", () => {
-  assert.deepEqual(
-    NodeSnapshot.payload(1, "i32", Uint8Array.of(1)).toWire(),
-    { node: 1, type_tag: "i32", state: { Payload: [1] } },
-  );
+  assert.deepEqual(NodeSnapshot.payload(1, "i32", Uint8Array.of(1)).toWire(), {
+    node: 1,
+    type_tag: "i32",
+    state: { Payload: [1] },
+  });
 
   const keyed = NodeSnapshot.payload(1, "i32", Uint8Array.of(1), "scores/alice");
   assert.equal(keyed.key, "scores/alice");
@@ -491,11 +518,7 @@ function canonicalCrdtSync() {
       { peer: 2, stamp: new WireStamp({ wallTime: 180, logical: 3, peer: 2 }) },
     ],
     ops: [
-      new CrdtOp(
-        1,
-        new WireStamp({ wallTime: 200, logical: 0, peer: 1 }),
-        Uint8Array.of(10, 20),
-      ),
+      new CrdtOp(1, new WireStamp({ wallTime: 200, logical: 0, peer: 1 }), Uint8Array.of(10, 20)),
       CrdtOp.keyed(
         2,
         "scores/alice",
@@ -510,10 +533,7 @@ test("CrdtSync round-trips the canonical lazily-rs serde JSON byte-for-byte", ()
   const message = IpcMessage.crdtSync(canonicalCrdtSync());
 
   assert.deepEqual(message.toWire(), CRDT_CANONICAL_WIRE);
-  assert.deepEqual(
-    message.encodeJson(),
-    new TextEncoder().encode(CRDT_CANONICAL_JSON),
-  );
+  assert.deepEqual(message.encodeJson(), new TextEncoder().encode(CRDT_CANONICAL_JSON));
 
   const decoded = IpcMessage.decodeJson(message.encodeJson());
   assert.equal(decoded.isCrdtSync, true);
@@ -521,11 +541,7 @@ test("CrdtSync round-trips the canonical lazily-rs serde JSON byte-for-byte", ()
 });
 
 test("a keyless CrdtOp serializes key: null (derived serde, not omitted)", () => {
-  const op = new CrdtOp(
-    9,
-    new WireStamp({ wallTime: 5, logical: 1, peer: 7 }),
-    Uint8Array.of(1),
-  );
+  const op = new CrdtOp(9, new WireStamp({ wallTime: 5, logical: 1, peer: 7 }), Uint8Array.of(1));
   assert.equal(op.key, null);
   assert.deepEqual(op.toWire(), {
     node: 9,
@@ -603,7 +619,10 @@ test("ReceiptProjection records terminal outcome and ignores stale generation", 
     { kind: ReceiptApplyStatusKind.Recorded },
   );
   assert.deepEqual(
-    projection.observe(7, CausalReceipt.rejected("receipt-stale", "patch-123", "editor", 6, "stale generation")),
+    projection.observe(
+      7,
+      CausalReceipt.rejected("receipt-stale", "patch-123", "editor", 6, "stale generation"),
+    ),
     { kind: ReceiptApplyStatusKind.StaleGeneration, expected: 7, actual: 6 },
   );
   assert.deepEqual(
@@ -747,15 +766,18 @@ test("conformance delta sequential", () => {
   assert.equal(delta.isNextAfter(40), true);
   assert.equal(delta.isNextAfter(39), false);
   assert.equal(delta.ops.length, 7);
-  assert.deepEqual(new Set(delta.ops.map((op) => op.constructor)), new Set([
-    DeltaOpCellSet,
-    DeltaOpSlotValue,
-    DeltaOpInvalidate,
-    DeltaOpNodeAdd,
-    DeltaOpNodeRemove,
-    DeltaOpEdgeAdd,
-    DeltaOpEdgeRemove,
-  ]));
+  assert.deepEqual(
+    new Set(delta.ops.map((op) => op.constructor)),
+    new Set([
+      DeltaOpCellSet,
+      DeltaOpSlotValue,
+      DeltaOpInvalidate,
+      DeltaOpNodeAdd,
+      DeltaOpNodeRemove,
+      DeltaOpEdgeAdd,
+      DeltaOpEdgeRemove,
+    ]),
+  );
 
   assertRoundTripJson(message, fixture);
 });
@@ -809,11 +831,7 @@ test("conformance agent-doc snapshot", () => {
   assert.equal(snap.roots.length, 1);
   assert.deepEqual(
     snap.nodes.map((n) => n.typeTag),
-    [
-      "agent_doc.document.baseline",
-      "agent_doc.closeout.cycle",
-      "agent_doc.queue.head",
-    ],
+    ["agent_doc.document.baseline", "agent_doc.closeout.cycle", "agent_doc.queue.head"],
   );
   // every node carries its serde_json(struct) payload inline as bytes
   assert.ok(snap.nodes.every((n) => n.state instanceof NodeStatePayload));
@@ -830,9 +848,7 @@ test("conformance agent-doc delta", () => {
   assert.equal(delta.epoch, 6);
   assert.equal(delta.ops.length, 4);
   assert.deepEqual(
-    delta.ops
-      .filter((op) => op instanceof DeltaOpNodeAdd)
-      .map((op) => op.typeTag),
+    delta.ops.filter((op) => op instanceof DeltaOpNodeAdd).map((op) => op.typeTag),
     ["agent_doc.transport.patch"],
   );
   assert.deepEqual(
@@ -872,16 +888,10 @@ test("assertFixtureAssertions catches wire/assertions drift", () => {
   // A drifted metadata field must fail loudly instead of passing silently.
   const drifted = structuredClone(fixture);
   drifted.assertions.node_count = fixture.assertions.node_count + 999;
-  assert.throws(
-    () => assertFixtureAssertions(message, drifted),
-    /snapshot assertion "node_count"/,
-  );
+  assert.throws(() => assertFixtureAssertions(message, drifted), /snapshot assertion "node_count"/);
 
   // An unknown assertion key must also fail (new metadata can't be ignored).
   const unknown = structuredClone(fixture);
   unknown.assertions.unexpected_field = true;
-  assert.throws(
-    () => assertFixtureAssertions(message, unknown),
-    /unknown snapshot assertion key/,
-  );
+  assert.throws(() => assertFixtureAssertions(message, unknown), /unknown snapshot assertion key/);
 });

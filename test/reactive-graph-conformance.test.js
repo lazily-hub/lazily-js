@@ -211,14 +211,14 @@ for (const model of MODELS) {
     assert.deepEqual(
       [...divergences.observed].sort(),
       [...divergences.known].sort(),
-      `${model.name}: divergence ledger drifted — a ledger entry whose divergence `
-      + "no longer reproduces must be removed, not left masking the assertion",
+      `${model.name}: divergence ledger drifted — a ledger entry whose divergence ` +
+        "no longer reproduces must be removed, not left masking the assertion",
     );
 
     console.log(
-      `reactive-graph[${model.name}]: replayed ${replayed.length} fixtures, `
-      + `${totalOps} ops, ${totalChecks} assertions, ${Object.keys(skips).length} skipped, `
-      + `${divergences.observed.size} known divergences`,
+      `reactive-graph[${model.name}]: replayed ${replayed.length} fixtures, ` +
+        `${totalOps} ops, ${totalChecks} assertions, ${Object.keys(skips).length} skipped, ` +
+        `${divergences.observed.size} known divergences`,
     );
   });
 }

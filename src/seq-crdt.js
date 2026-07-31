@@ -234,11 +234,14 @@ export class SeqCrdt {
     const frac = keyBetween(lo ?? null, hi ?? null);
     const pos = new Position(frac, this.#peer);
     const stamp = this.#hlc.send(nowMicros);
-    this.#entries.set(id, new Entry(
-      new LwwRegister(value, stamp),
-      new LwwRegister(pos, stamp),
-      new LwwRegister(false, stamp),
-    ));
+    this.#entries.set(
+      id,
+      new Entry(
+        new LwwRegister(value, stamp),
+        new LwwRegister(pos, stamp),
+        new LwwRegister(false, stamp),
+      ),
+    );
   }
 
   insertBack(id, value, nowMicros) {

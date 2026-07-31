@@ -20,12 +20,7 @@ export const IngressLifecycle: Readonly<{
 }>;
 
 export type IngressReadinessLabel =
-  | "unknown"
-  | "warming"
-  | "ready"
-  | "stale"
-  | "suspended"
-  | "closed";
+  "unknown" | "warming" | "ready" | "stale" | "suspended" | "closed";
 export const IngressReadiness: Readonly<{
   Unknown: "unknown";
   Warming: "warming";
@@ -61,12 +56,7 @@ export const IngressError: Readonly<{
 }>;
 
 export type IngressAdmissionKindLabel =
-  | "accepted"
-  | "conflated"
-  | "buffered"
-  | "generation_handoff"
-  | "dropped"
-  | "blocked";
+  "accepted" | "conflated" | "buffered" | "generation_handoff" | "dropped" | "blocked";
 export const IngressAdmissionKind: Readonly<{
   Accepted: "accepted";
   Conflated: "conflated";

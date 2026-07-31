@@ -9,8 +9,7 @@ export const LazilyFfiMessageKind: {
   readonly Delta: 2;
   readonly CrdtSync: 3;
 };
-export type LazilyFfiMessageKind =
-  (typeof LazilyFfiMessageKind)[keyof typeof LazilyFfiMessageKind];
+export type LazilyFfiMessageKind = (typeof LazilyFfiMessageKind)[keyof typeof LazilyFfiMessageKind];
 
 /** FFI operation status code (schemas/ffi.json § LazilyFfiStatus). */
 export const LazilyFfiStatus: {

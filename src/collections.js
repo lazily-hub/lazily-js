@@ -242,14 +242,11 @@ export function reconcileCollections(prior, target) {
   const commonInTarget = targetOrder.filter((key) => priorIndex.has(key));
   const priorIndices = commonInTarget.map((key) => priorIndex.get(key));
   const lisPositions = new Set(longestIncreasingSubsequence(priorIndices));
-  const stableKeys = new Set(
-    commonInTarget.filter((_, i) => lisPositions.has(i)),
-  );
+  const stableKeys = new Set(commonInTarget.filter((_, i) => lisPositions.has(i)));
 
   // Stable entries whose value is also unchanged keep their value cell intact.
   const stableKeysNotInvalidated = commonInTarget.filter(
-    (key) =>
-      stableKeys.has(key) && deepEqual(priorValues[key], targetValues[key]),
+    (key) => stableKeys.has(key) && deepEqual(priorValues[key], targetValues[key]),
   );
 
   const ops = [];
@@ -303,7 +300,11 @@ function buildNode(spec) {
   for (const key of order) {
     childNodes[key] = buildNode(childSpecs[key]);
   }
-  return new TreeNode(spec && spec.id, spec && spec.value, new SourceMap({ order, values: childNodes }));
+  return new TreeNode(
+    spec && spec.id,
+    spec && spec.value,
+    new SourceMap({ order, values: childNodes }),
+  );
 }
 
 export class TreeNode {
@@ -319,7 +320,11 @@ export class TreeNode {
     for (const key of childOrder) {
       childValues[key] = this.children.get(key).snapshot();
     }
-    return { id: this.id, value: this.value, children: { order: [...childOrder], values: childValues } };
+    return {
+      id: this.id,
+      value: this.value,
+      children: { order: [...childOrder], values: childValues },
+    };
   }
 }
 
@@ -380,7 +385,12 @@ export class SourceTree {
     if (changed) {
       node.value = value;
     }
-    return { path: Array.isArray(path) ? path : [path], value: changed ? [key] : [], membership: false, order: false };
+    return {
+      path: Array.isArray(path) ? path : [path],
+      value: changed ? [key] : [],
+      membership: false,
+      order: false,
+    };
   }
 
   hasChild(path, key) {

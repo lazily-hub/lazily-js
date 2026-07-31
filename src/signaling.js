@@ -517,15 +517,27 @@ export class SignalingRoom {
 
   #join(connId, peer, emit) {
     if (this.#byConn.has(connId)) {
-      emit(connId, ServerMessage.error(SignalingErrorCode.AlreadyJoined, "connection already joined"));
+      emit(
+        connId,
+        ServerMessage.error(SignalingErrorCode.AlreadyJoined, "connection already joined"),
+      );
       return;
     }
     if (!this.#permissions.isAllowed(peer, { kind: "join" })) {
-      emit(connId, ServerMessage.error(SignalingErrorCode.PermissionDenied, `peer ${peer} is not allowed to join`));
+      emit(
+        connId,
+        ServerMessage.error(
+          SignalingErrorCode.PermissionDenied,
+          `peer ${peer} is not allowed to join`,
+        ),
+      );
       return;
     }
     if (this.#byPeer.has(peer)) {
-      emit(connId, ServerMessage.error(SignalingErrorCode.DuplicatePeer, `peer ${peer} already present`));
+      emit(
+        connId,
+        ServerMessage.error(SignalingErrorCode.DuplicatePeer, `peer ${peer} already present`),
+      );
       return;
     }
 
@@ -569,10 +581,7 @@ export class SignalingRoom {
     if (targetConn === undefined) {
       emit(
         connId,
-        ServerMessage.error(
-          SignalingErrorCode.UnknownTarget,
-          `peer ${to} is not in this session`,
-        ),
+        ServerMessage.error(SignalingErrorCode.UnknownTarget, `peer ${to} is not in this session`),
       );
       return;
     }
@@ -634,10 +643,7 @@ export class MemorySignalingSocket {
   static pair() {
     const aToB = new FrameQueue();
     const bToA = new FrameQueue();
-    return [
-      new MemorySignalingSocket(aToB, bToA),
-      new MemorySignalingSocket(bToA, aToB),
-    ];
+    return [new MemorySignalingSocket(aToB, bToA), new MemorySignalingSocket(bToA, aToB)];
   }
 
   send(text) {

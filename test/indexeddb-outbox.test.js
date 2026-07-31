@@ -22,7 +22,10 @@ test("IndexedDbStore reloads the durable cursor and unacknowledged suffix", asyn
   const reopened = new Outbox(reopenedStore);
   assert.equal(reopened.ackedThrough, 1);
   assert.deepEqual(reopened.retainedEpochs(), [2, 3]);
-  assert.deepEqual(reopened.replayFrom(0).map(([epoch]) => epoch), [2, 3]);
+  assert.deepEqual(
+    reopened.replayFrom(0).map(([epoch]) => epoch),
+    [2, 3],
+  );
   reopenedStore.close();
 });
 

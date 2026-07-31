@@ -307,7 +307,10 @@ class SyncModel extends SyncFlavorModel {
     super(
       (p, m, t, i) => {
         const ctx = new Context();
-        return { ctx, cell: new IngressCell(ctx, { policy: p, merge: m, transport: t, pollInterval: i }) };
+        return {
+          ctx,
+          cell: new IngressCell(ctx, { policy: p, merge: m, transport: t, pollInterval: i }),
+        };
       },
       policy,
       merge,
@@ -474,64 +477,64 @@ async function materialize(model, keys) {
 async function assertState(model, step, where) {
   const expected = step.expected;
   await assertKeyWith(expected, "scopes", async (scopes) => {
-  for (const [key, want] of Object.entries(scopes)) {
-    const view = model.view(key);
-    assert.ok(view !== null, `${where}: scope ${key} absent`);
-    assert.equal(
-      view.lifecycle,
-      member(IngressLifecycle, want.lifecycle, "lifecycle"),
-      `${where}: ${key} lifecycle`,
-    );
-    assert.equal(view.generation, want.generation, `${where}: ${key} generation`);
-    assert.equal(
-      view.deliveredThrough,
-      want.delivered_through === undefined ? null : want.delivered_through,
-      `${where}: ${key} watermark`,
-    );
-    assert.equal(view.buffered, want.buffered, `${where}: ${key} buffered`);
-    assert.equal(
-      view.consecutiveErrors,
-      want.consecutive_errors,
-      `${where}: ${key} consecutive errors`,
-    );
-    assert.equal(await model.value(key), want.window, `${where}: ${key} window`);
-    assert.equal(
-      await model.readiness(key),
-      member(IngressReadiness, want.readiness, "readiness"),
-      `${where}: ${key} readiness`,
-    );
-    const authority = await model.authority(key);
-    if (want.authority === null) {
-      assert.equal(authority, null, `${where}: ${key} authority`);
-    } else {
-      assert.deepEqual(
-        authority,
-        {
-          generation: want.authority.generation,
-          deliveredThrough:
-            want.authority.delivered_through === undefined
-              ? null
-              : want.authority.delivered_through,
-          stampedAt: want.authority.stamped_at,
-        },
-        `${where}: ${key} authority`,
+    for (const [key, want] of Object.entries(scopes)) {
+      const view = model.view(key);
+      assert.ok(view !== null, `${where}: scope ${key} absent`);
+      assert.equal(
+        view.lifecycle,
+        member(IngressLifecycle, want.lifecycle, "lifecycle"),
+        `${where}: ${key} lifecycle`,
       );
-    }
-    const retry = await model.retry(key);
-    if (want.retry === null) {
-      assert.equal(retry, null, `${where}: ${key} retry`);
-    } else {
-      assert.deepEqual(
-        retry,
-        {
-          attempt: want.retry.attempt,
-          backoff: want.retry.backoff,
-          resumeFrom: want.retry.resume_from,
-        },
-        `${where}: ${key} retry`,
+      assert.equal(view.generation, want.generation, `${where}: ${key} generation`);
+      assert.equal(
+        view.deliveredThrough,
+        want.delivered_through === undefined ? null : want.delivered_through,
+        `${where}: ${key} watermark`,
       );
+      assert.equal(view.buffered, want.buffered, `${where}: ${key} buffered`);
+      assert.equal(
+        view.consecutiveErrors,
+        want.consecutive_errors,
+        `${where}: ${key} consecutive errors`,
+      );
+      assert.equal(await model.value(key), want.window, `${where}: ${key} window`);
+      assert.equal(
+        await model.readiness(key),
+        member(IngressReadiness, want.readiness, "readiness"),
+        `${where}: ${key} readiness`,
+      );
+      const authority = await model.authority(key);
+      if (want.authority === null) {
+        assert.equal(authority, null, `${where}: ${key} authority`);
+      } else {
+        assert.deepEqual(
+          authority,
+          {
+            generation: want.authority.generation,
+            deliveredThrough:
+              want.authority.delivered_through === undefined
+                ? null
+                : want.authority.delivered_through,
+            stampedAt: want.authority.stamped_at,
+          },
+          `${where}: ${key} authority`,
+        );
+      }
+      const retry = await model.retry(key);
+      if (want.retry === null) {
+        assert.equal(retry, null, `${where}: ${key} retry`);
+      } else {
+        assert.deepEqual(
+          retry,
+          {
+            attempt: want.retry.attempt,
+            backoff: want.retry.backoff,
+            resumeFrom: want.retry.resume_from,
+          },
+          `${where}: ${key} retry`,
+        );
+      }
     }
-  }
   });
 
   await assertKeyWith(expected, "receipts", async (receipts) => {
@@ -547,48 +550,48 @@ async function assertState(model, step, where) {
  */
 function assertInvalidation(step, before, after, where) {
   assertKeyWith(step.expected, "invalidates", (want) => {
-  assert.ok(want, `${where}: expected.invalidates is missing — the matrix IS the contract`);
-  assert.equal(
-    step.invalidates,
-    undefined,
-    `${where}: \`invalidates\` appears at STEP level; this runner reads ` +
-      "expected.invalidates, so a step-level copy would be silently ignored",
-  );
-  for (const [key, wantScope] of Object.entries(want.scopes)) {
-    const beforeScope = before.scopes.get(key);
-    const afterScope = after.scopes.get(key);
-    assert.ok(beforeScope && afterScope, `${where}: ${key} was never probed`);
-    for (const kind of KINDS) {
-      const expectedFlag = wantScope[kind];
+    assert.ok(want, `${where}: expected.invalidates is missing — the matrix IS the contract`);
+    assert.equal(
+      step.invalidates,
+      undefined,
+      `${where}: \`invalidates\` appears at STEP level; this runner reads ` +
+        "expected.invalidates, so a step-level copy would be silently ignored",
+    );
+    for (const [key, wantScope] of Object.entries(want.scopes)) {
+      const beforeScope = before.scopes.get(key);
+      const afterScope = after.scopes.get(key);
+      assert.ok(beforeScope && afterScope, `${where}: ${key} was never probed`);
+      for (const kind of KINDS) {
+        const expectedFlag = wantScope[kind];
+        assert.equal(
+          typeof expectedFlag,
+          "boolean",
+          `${where}: ${key}.${kind} has no invalidation flag`,
+        );
+        const invalidated = beforeScope[kind] && !afterScope[kind];
+        assert.equal(
+          invalidated,
+          expectedFlag,
+          `${where}: ${key}.${kind} invalidation (was valid=${beforeScope[kind]}, ` +
+            `now valid=${afterScope[kind]})`,
+        );
+      }
+    }
+    for (const channel of CHANNELS) {
+      const expectedFlag = want.receipts[channel];
       assert.equal(
         typeof expectedFlag,
         "boolean",
-        `${where}: ${key}.${kind} has no invalidation flag`,
+        `${where}: receipts.${channel} has no invalidation flag`,
       );
-      const invalidated = beforeScope[kind] && !afterScope[kind];
+      const invalidated = before.receipts[channel] && !after.receipts[channel];
       assert.equal(
         invalidated,
         expectedFlag,
-        `${where}: ${key}.${kind} invalidation (was valid=${beforeScope[kind]}, ` +
-          `now valid=${afterScope[kind]})`,
+        `${where}: receipts.${channel} invalidation — asserted per channel, never by ` +
+          "receipt COUNT: a stale cache recomputes to the right count",
       );
     }
-  }
-  for (const channel of CHANNELS) {
-    const expectedFlag = want.receipts[channel];
-    assert.equal(
-      typeof expectedFlag,
-      "boolean",
-      `${where}: receipts.${channel} has no invalidation flag`,
-    );
-    const invalidated = before.receipts[channel] && !after.receipts[channel];
-    assert.equal(
-      invalidated,
-      expectedFlag,
-      `${where}: receipts.${channel} invalidation — asserted per channel, never by ` +
-        "receipt COUNT: a stale cache recomputes to the right count",
-    );
-  }
   });
 }
 
@@ -769,7 +772,9 @@ test("ingress ledger: is not all skips, and every shipped row is replayed", () =
     LEDGER.some((row) => row.shipped),
     "a ledger of nothing-shipped is not coverage",
   );
-  const shipped = LEDGER.filter((row) => row.shipped).map((row) => row.name).sort();
+  const shipped = LEDGER.filter((row) => row.shipped)
+    .map((row) => row.name)
+    .sort();
   const replayed = MODELS.map((Model) => Model.flavor).sort();
   assert.deepEqual(
     replayed,
@@ -807,10 +812,7 @@ for (const ModelCls of MODELS) {
 
     await model.value(key);
     model.admit(ingressEnvelope(key, 1, 5, 0, 1));
-    assert.ok(
-      model.valueIsValid(key),
-      "a buffered envelope must NOT invalidate the value reader",
-    );
+    assert.ok(model.valueIsValid(key), "a buffered envelope must NOT invalidate the value reader");
 
     // And the receipt channels are independent: a buffered envelope mints no
     // receipt at all, so no channel moves either.

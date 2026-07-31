@@ -55,10 +55,7 @@ export class NodeStateOpaque {
   toWire(): "Opaque";
 }
 
-export type NodeStateValue =
-  | NodeStatePayload
-  | NodeStateSharedBlob
-  | NodeStateOpaque;
+export type NodeStateValue = NodeStatePayload | NodeStateSharedBlob | NodeStateOpaque;
 
 export const NodeState: {
   payload(bytes: WireBytes): NodeStatePayload;
@@ -95,7 +92,12 @@ export class NodeSnapshot {
   readonly state: NodeStateValue;
   readonly key: string | null;
   toWire(): unknown;
-  static payload(node: NodeId, typeTag: string, bytes: WireBytes, key?: string | null): NodeSnapshot;
+  static payload(
+    node: NodeId,
+    typeTag: string,
+    bytes: WireBytes,
+    key?: string | null,
+  ): NodeSnapshot;
   static sharedBlob(
     node: NodeId,
     typeTag: string,
@@ -200,7 +202,12 @@ export const DeltaOp: {
   cellSet(node: NodeId, payload: IpcValueValue | ShmBlobRef | WireBytes): DeltaOpCellSet;
   slotValue(node: NodeId, payload: IpcValueValue | ShmBlobRef | WireBytes): DeltaOpSlotValue;
   invalidate(node: NodeId): DeltaOpInvalidate;
-  nodeAdd(node: NodeId, typeTag: string, state: NodeStateValue, key?: string | null): DeltaOpNodeAdd;
+  nodeAdd(
+    node: NodeId,
+    typeTag: string,
+    state: NodeStateValue,
+    key?: string | null,
+  ): DeltaOpNodeAdd;
   nodeRemove(node: NodeId): DeltaOpNodeRemove;
   edgeAdd(dependent: NodeId, dependency: NodeId): DeltaOpEdgeAdd;
   edgeRemove(dependent: NodeId, dependency: NodeId): DeltaOpEdgeRemove;
@@ -224,11 +231,7 @@ export class DeltaApplyStatus {
 }
 
 export class Delta {
-  constructor(fields: {
-    baseEpoch: number;
-    epoch: number;
-    ops?: readonly DeltaOpValue[];
-  });
+  constructor(fields: { baseEpoch: number; epoch: number; ops?: readonly DeltaOpValue[] });
   readonly baseEpoch: number;
   readonly epoch: number;
   readonly ops: readonly DeltaOpValue[];
@@ -300,11 +303,7 @@ export const ReceiptOutcome: {
   readonly Rejected: "rejected";
 };
 
-export type ReceiptOutcomeValue =
-  | "observed"
-  | "accepted"
-  | "applied"
-  | "rejected";
+export type ReceiptOutcomeValue = "observed" | "accepted" | "applied" | "rejected";
 
 export function isTerminalReceiptOutcome(outcome: ReceiptOutcomeValue): boolean;
 
@@ -337,10 +336,32 @@ export class CausalReceipt {
   readonly payloadHash: string | null;
   readonly isTerminal: boolean;
   toWire(): CausalReceiptWire;
-  static observed(receiptId: string, causationId: string, observer: string, generation: number): CausalReceipt;
-  static accepted(receiptId: string, causationId: string, observer: string, generation: number): CausalReceipt;
-  static applied(receiptId: string, causationId: string, observer: string, generation: number, payloadHash?: string | null): CausalReceipt;
-  static rejected(receiptId: string, causationId: string, observer: string, generation: number, reason?: string | null): CausalReceipt;
+  static observed(
+    receiptId: string,
+    causationId: string,
+    observer: string,
+    generation: number,
+  ): CausalReceipt;
+  static accepted(
+    receiptId: string,
+    causationId: string,
+    observer: string,
+    generation: number,
+  ): CausalReceipt;
+  static applied(
+    receiptId: string,
+    causationId: string,
+    observer: string,
+    generation: number,
+    payloadHash?: string | null,
+  ): CausalReceipt;
+  static rejected(
+    receiptId: string,
+    causationId: string,
+    observer: string,
+    generation: number,
+    reason?: string | null,
+  ): CausalReceipt;
   static fromWire(value: unknown): CausalReceipt;
 }
 
@@ -380,7 +401,10 @@ export type ReceiptApplyStatus =
     };
 
 export class ReceiptProjection {
-  observe(currentGeneration: number | null | undefined, receipt: CausalReceipt | CausalReceiptWire): ReceiptApplyStatus;
+  observe(
+    currentGeneration: number | null | undefined,
+    receipt: CausalReceipt | CausalReceiptWire,
+  ): ReceiptApplyStatus;
   latestFor(causationId: string): CausalReceipt | null;
   terminalFor(causationId: string): CausalReceipt | null;
   containsReceipt(receiptId: string): boolean;
@@ -645,9 +669,7 @@ export type HandshakeWire = {
   features?: string[];
 };
 
-export type CompatibilityResult =
-  | { ok: true }
-  | { ok: false; field: string; reason: string };
+export type CompatibilityResult = { ok: true } | { ok: false; field: string; reason: string };
 
 export class SessionHandshake {
   constructor(fields: HandshakeWire);
@@ -810,13 +832,7 @@ export const CommandEventKind: {
 };
 
 export type CommandEventKindValue =
-  | "observed"
-  | "accepted"
-  | "started"
-  | "progress"
-  | "cancelled"
-  | "superseded"
-  | "timed_out";
+  "observed" | "accepted" | "started" | "progress" | "cancelled" | "superseded" | "timed_out";
 
 export type CommandEventWire = {
   event_id: string;
@@ -900,19 +916,24 @@ export class CommandProjectionEntry {
   readonly reason: string | null;
   readonly terminalReceiptId: string | null;
   readonly lastEventId: string | null;
-  with(patch: Partial<{
-    status: CommandStatusValue;
-    terminal: boolean;
-    reason: string | null;
-    terminalReceiptId: string | null;
-    lastEventId: string | null;
-  }>): CommandProjectionEntry;
+  with(
+    patch: Partial<{
+      status: CommandStatusValue;
+      terminal: boolean;
+      reason: string | null;
+      terminalReceiptId: string | null;
+      lastEventId: string | null;
+    }>,
+  ): CommandProjectionEntry;
   toWire(): CommandProjectionEntryWire;
   static fromWire(value: unknown): CommandProjectionEntry;
 }
 
 export class CommandProjectionImage {
-  constructor(generation: number, commands?: ReadonlyArray<CommandProjectionEntry | CommandProjectionEntryWire>);
+  constructor(
+    generation: number,
+    commands?: ReadonlyArray<CommandProjectionEntry | CommandProjectionEntryWire>,
+  );
   readonly generation: number;
   readonly commands: readonly CommandProjectionEntry[];
   toWire(): { generation: number; commands: CommandProjectionEntryWire[] };
@@ -948,7 +969,12 @@ export type CommandApplyStatus =
   | { kind: "duplicate" }
   | { kind: "unknown" }
   | { kind: "stale_generation"; expected: number; actual: number }
-  | { kind: "terminal_conflict"; commandId: string; existing: CommandStatusValue; incoming: CommandStatusValue };
+  | {
+      kind: "terminal_conflict";
+      commandId: string;
+      existing: CommandStatusValue;
+      incoming: CommandStatusValue;
+    };
 
 export class CommandProjection {
   readonly generation: number;
@@ -971,14 +997,20 @@ export const CallStateKind: {
 };
 
 export type CallState =
-  | { kind: "pending" }
-  | { kind: "resolved"; entry: CommandProjectionEntry }
-  | { kind: "conflict" };
+  { kind: "pending" } | { kind: "resolved"; entry: CommandProjectionEntry } | { kind: "conflict" };
 
 export type CommandTransport = (message: CommandMessage) => void;
 
-export function submitCommand(transport: CommandTransport, projection: CommandProjection, submit: CommandSubmit): string;
-export function cancelCommand(transport: CommandTransport, projection: CommandProjection, cancel: CommandCancel): void;
+export function submitCommand(
+  transport: CommandTransport,
+  projection: CommandProjection,
+  submit: CommandSubmit,
+): string;
+export function cancelCommand(
+  transport: CommandTransport,
+  projection: CommandProjection,
+  cancel: CommandCancel,
+): void;
 
 export class CommandRpcClient {
   constructor(transport: CommandTransport);

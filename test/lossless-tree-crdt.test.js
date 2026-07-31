@@ -26,7 +26,12 @@ function loadFixture(name) {
   return JSON.parse(readFileSync(path, "utf8"));
 }
 
-const LEAF_KIND = { token: LeafKind.Token, trivia: LeafKind.Trivia, raw: LeafKind.Raw, error: LeafKind.Error };
+const LEAF_KIND = {
+  token: LeafKind.Token,
+  trivia: LeafKind.Trivia,
+  raw: LeafKind.Raw,
+  error: LeafKind.Error,
+};
 
 function nodeSeed(spec) {
   if (typeof spec.element === "string") return { type: "element", kind: spec.element };
@@ -115,21 +120,12 @@ function assertExpect(world, expect, scenario) {
   for (const key of Object.keys(expect)) {
     switch (key) {
       case "render":
-        assertKey(
-          expect,
-          "render",
-          world.replicas.get("a").render(),
-          `${scenario}: render on a`,
-        );
+        assertKey(expect, "render", world.replicas.get("a").render(), `${scenario}: render on a`);
         break;
       case "render_on":
         assertKeyWith(expect, "render_on", (renders) => {
           for (const [name, text] of Object.entries(renders)) {
-            assert.equal(
-              world.replicas.get(name).render(),
-              text,
-              `${scenario}: render on ${name}`,
-            );
+            assert.equal(world.replicas.get(name).render(), text, `${scenario}: render on ${name}`);
           }
         });
         break;

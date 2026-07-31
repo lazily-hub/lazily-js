@@ -28,12 +28,24 @@ function sumTree(ctx) {
   return new SemTree(
     ctx,
     {
-      id: "root", value: 0,
+      id: "root",
+      value: 0,
       children: {
         order: ["a", "b"],
         values: {
-          a: { id: "a", value: 1, children: { order: ["a1", "a2"], values: { a1: { id: "a1", value: 10 }, a2: { id: "a2", value: 20 } } } },
-          b: { id: "b", value: 2, children: { order: ["b1"], values: { b1: { id: "b1", value: 100 } } } },
+          a: {
+            id: "a",
+            value: 1,
+            children: {
+              order: ["a1", "a2"],
+              values: { a1: { id: "a1", value: 10 }, a2: { id: "a2", value: 20 } },
+            },
+          },
+          b: {
+            id: "b",
+            value: 2,
+            children: { order: ["b1"], values: { b1: { id: "b1", value: 100 } } },
+          },
         },
       },
     },
@@ -66,7 +78,8 @@ test("memo guard: an edit that does not change the folded count does not re-run 
   const t = new SemTree(
     ctx,
     {
-      id: "root", value: 0,
+      id: "root",
+      value: 0,
       children: {
         order: ["a", "b"],
         values: {

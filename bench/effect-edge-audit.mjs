@@ -267,7 +267,12 @@ function runCascade(Context, width) {
     srcs.push(src);
     const victims = [];
     for (let i = 0; i < width - 1; i++) {
-      victims.push(ctx.effect(() => { runs++; ctx.getCell(src); }));
+      victims.push(
+        ctx.effect(() => {
+          runs++;
+          ctx.getCell(src);
+        }),
+      );
     }
     let armed = false;
     ctx.effect(() => {

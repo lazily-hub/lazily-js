@@ -41,7 +41,8 @@ test("collection conformance: cellmap_atomic_move.json", () => {
     assertKey(expected, "order", map.order, `${step.op.type}: order`);
     if ("membership" in expected) {
       assertKeyWith(expected, "membership", (membership) =>
-        assertSameSet(map.keys(), membership, step.op.type));
+        assertSameSet(map.keys(), membership, step.op.type),
+      );
     }
     if ("values" in expected) {
       assertKeyWith(expected, "values", (values) => {
@@ -79,7 +80,8 @@ test("collection conformance: cellmap_independence.json", () => {
 
     assertKey(expected, "order", map.order, `${step.op.type}: order`);
     assertKeyWith(expected, "membership", (membership) =>
-      assertSameSet(map.keys(), membership, step.op.type));
+      assertSameSet(map.keys(), membership, step.op.type),
+    );
     if ("values" in expected) {
       assertKeyWith(expected, "values", (values) => {
         for (const [key, value] of Object.entries(values)) {
@@ -93,18 +95,11 @@ test("collection conformance: cellmap_independence.json", () => {
 
 test("collection conformance: keyed_reconciliation_lis.json", () => {
   const fixture = loadFixture("keyed_reconciliation_lis.json");
-  const result = reconcileCollections(
-    fixture.reconcile.prior,
-    fixture.reconcile.target,
-  );
+  const result = reconcileCollections(fixture.reconcile.prior, fixture.reconcile.target);
 
   assertKey(fixture.expected, "ops", result.ops);
   assertKey(fixture.expected, "result_order", result.result_order);
-  assertKey(
-    fixture.expected,
-    "stable_keys_not_invalidated",
-    result.stable_keys_not_invalidated,
-  );
+  assertKey(fixture.expected, "stable_keys_not_invalidated", result.stable_keys_not_invalidated);
 });
 
 test("SourceMap move keeps the handle; remove then re-add mints a new one", () => {
@@ -151,7 +146,11 @@ function playerTree() {
     children: {
       order: ["alice", "bob"],
       values: {
-        alice: { id: "alice", value: 10, children: { order: ["a1"], values: { a1: { id: "a1", value: 1 } } } },
+        alice: {
+          id: "alice",
+          value: 10,
+          children: { order: ["a1"], values: { a1: { id: "a1", value: 1 } } },
+        },
         bob: { id: "bob", value: 20 },
       },
     },
@@ -224,7 +223,12 @@ test("SourceTree descendant edit does not invalidate an unrelated sibling's chil
   const tree = playerTree();
   // Edit a grandchild under alice; bob's level (and root level) must be untouched.
   const report = tree.setValue(["alice", "a1"], 7);
-  assert.deepEqual(report, { path: ["alice", "a1"], value: ["a1"], membership: false, order: false });
+  assert.deepEqual(report, {
+    path: ["alice", "a1"],
+    value: ["a1"],
+    membership: false,
+    order: false,
+  });
   assert.equal(tree.getValue(["alice", "a1"]), 7);
   // Root child level and bob are observationally unchanged.
   assert.deepEqual(tree.childKeys([]), ["alice", "bob"]);

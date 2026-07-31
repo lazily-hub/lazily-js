@@ -22,12 +22,7 @@
 // Mirrors `lazily-rs/src/thread_safe_queue.rs`, `thread_safe_topic.rs` and
 // `thread_safe_work_queue.rs`.
 
-import {
-  QueueCore,
-  TopicCore,
-  VecDequeStorage,
-  WorkQueueCore,
-} from "./queue-core.js";
+import { QueueCore, TopicCore, VecDequeStorage, WorkQueueCore } from "./queue-core.js";
 import { AtomicMutex } from "./thread-safe.js";
 
 export {

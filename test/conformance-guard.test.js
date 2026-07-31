@@ -26,8 +26,8 @@ const specConformance = join(specRoot, "conformance");
 const bundled = join(here, "conformance");
 
 const CLONE_HINT =
-  "clone the canonical sibling: "
-  + "git clone --depth 1 https://github.com/lazily-hub/lazily-spec.git ../lazily-spec";
+  "clone the canonical sibling: " +
+  "git clone --depth 1 https://github.com/lazily-hub/lazily-spec.git ../lazily-spec";
 
 // Every `conformance/<area>` directory the suite reads. Keep in sync with the
 // `join(here, "..", "..", "lazily-spec", "conformance", <area>)` constants in
@@ -89,18 +89,26 @@ test("every conformance area the suite reads exists and is non-empty", () => {
     if (readdirSync(dir).filter((f) => f.endsWith(".json")).length === 0) empty.push(area);
   }
   assert.deepEqual(missing, [], `conformance areas missing from the spec sibling — ${CLONE_HINT}`);
-  assert.deepEqual(empty, [], "conformance areas present but empty — every fixture in them would silently skip");
+  assert.deepEqual(
+    empty,
+    [],
+    "conformance areas present but empty — every fixture in them would silently skip",
+  );
 });
 
 test("no bundled fixture copy shadows the canonical spec", () => {
   assert.ok(
     !existsSync(bundled),
-    `${bundled} exists — a bundled copy shadows the canonical fixture and makes drift invisible. `
-      + "Read ../lazily-spec/conformance directly instead.",
+    `${bundled} exists — a bundled copy shadows the canonical fixture and makes drift invisible. ` +
+      "Read ../lazily-spec/conformance directly instead.",
   );
 });
 
 test("formerly-bundled fixtures all resolve under the canonical spec", () => {
   const unresolved = FORMERLY_BUNDLED.filter((rel) => !existsSync(join(specConformance, rel)));
-  assert.deepEqual(unresolved, [], `fixtures no longer resolvable after de-bundling — ${CLONE_HINT}`);
+  assert.deepEqual(
+    unresolved,
+    [],
+    `fixtures no longer resolvable after de-bundling — ${CLONE_HINT}`,
+  );
 });

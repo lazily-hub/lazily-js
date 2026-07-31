@@ -8,7 +8,12 @@ export type InvalidationReport = {
 
 export type SourceMapOp =
   | { type: "set_value"; key: CollectionKey; value: unknown }
-  | { type: "insert"; key: CollectionKey; value: unknown; at?: "end" | "start" | number | CollectionKey }
+  | {
+      type: "insert";
+      key: CollectionKey;
+      value: unknown;
+      at?: "end" | "start" | number | CollectionKey;
+    }
   | { type: "remove"; key: CollectionKey }
   | { type: "move_to"; key: CollectionKey; index: number }
   | { type: "move_before"; key: CollectionKey; before: CollectionKey }
@@ -103,9 +108,21 @@ export class SourceTree {
     at?: "end" | "start" | number | CollectionKey,
   ): TreeInvalidationReport;
   removeChild(path: CollectionKey[] | CollectionKey, key: CollectionKey): TreeInvalidationReport;
-  moveChildTo(path: CollectionKey[] | CollectionKey, key: CollectionKey, index: number): TreeInvalidationReport;
-  moveChildBefore(path: CollectionKey[] | CollectionKey, key: CollectionKey, beforeKey: CollectionKey): TreeInvalidationReport;
-  moveChildAfter(path: CollectionKey[] | CollectionKey, key: CollectionKey, afterKey: CollectionKey): TreeInvalidationReport;
+  moveChildTo(
+    path: CollectionKey[] | CollectionKey,
+    key: CollectionKey,
+    index: number,
+  ): TreeInvalidationReport;
+  moveChildBefore(
+    path: CollectionKey[] | CollectionKey,
+    key: CollectionKey,
+    beforeKey: CollectionKey,
+  ): TreeInvalidationReport;
+  moveChildAfter(
+    path: CollectionKey[] | CollectionKey,
+    key: CollectionKey,
+    afterKey: CollectionKey,
+  ): TreeInvalidationReport;
   snapshot(): TreeNodeSnapshot;
 }
 

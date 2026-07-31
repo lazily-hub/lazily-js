@@ -36,7 +36,11 @@ test("kindOf discriminates Snapshot / Delta / CrdtSync", () => {
 
 // --- codec: encode/decode round-trip over real spec wire --------------------
 test("encodeMessage / decodeMessage round-trips canonical wire", () => {
-  for (const name of ["snapshot_minimal.json", "snapshot_multi_node.json", "delta_sequential.json"]) {
+  for (const name of [
+    "snapshot_minimal.json",
+    "snapshot_multi_node.json",
+    "delta_sequential.json",
+  ]) {
     const wire = loadWire(name);
     const msg = IpcMessage.fromWire(wire);
     const enc = encodeMessage(msg);

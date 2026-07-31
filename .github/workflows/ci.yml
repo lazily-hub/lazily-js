@@ -32,6 +32,14 @@ jobs:
       - name: Install dependencies
         run: npm ci || npm install
 
+      # The formatting gate (#lazilyformattinggate). AFTER the install, because
+      # prettier is a pinned devDependency and `npm run format` resolves it from
+      # node_modules — that resolution IS the pin. Running it before the install
+      # would either fail outright or fall back to some other prettier, which is
+      # the failure mode that reddened the dart and zig gates in this same series.
+      - name: Format gate (make fmt)
+        run: make fmt
+
       # `npm run build` is this repo's lint equivalent for the JS: it syntax-checks
       # every published entry point with `node --check` and regenerates the
       # size-limit budgets. There is no separate lint script.

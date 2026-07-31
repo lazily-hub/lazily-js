@@ -73,10 +73,7 @@ export function spillValue(
   threshold?: number,
 ): { value: IpcValueValue; spilled: number };
 
-export function resolveValue(
-  value: IpcValueValue,
-  backend: BlobBackend,
-): BlobView;
+export function resolveValue(value: IpcValueValue, backend: BlobBackend): BlobView;
 
 export function spillMessage(
   message: IpcMessage,
@@ -110,7 +107,4 @@ export interface ShmBackendOptions {
 
 /** Create or attach a cross-process POSIX shared-memory `shm` backend.
  * Rejects with {@link ShmUnavailableError} in a runtime without FFI. */
-export function createShmBackend(
-  name: string,
-  options?: ShmBackendOptions,
-): Promise<ShmBackend>;
+export function createShmBackend(name: string, options?: ShmBackendOptions): Promise<ShmBackend>;

@@ -23,8 +23,8 @@ function loadCrdtTreeFixture(name) {
   const path = join(specCrdtTree, name);
   assert.ok(
     existsSync(path),
-    `missing canonical spec fixture ${path} — clone the lazily-spec sibling `
-      + `(git clone https://github.com/lazily-hub/lazily-spec.git ../lazily-spec)`,
+    `missing canonical spec fixture ${path} — clone the lazily-spec sibling ` +
+      `(git clone https://github.com/lazily-hub/lazily-spec.git ../lazily-spec)`,
   );
   return JSON.parse(readFileSync(path, "utf8"));
 }
@@ -95,11 +95,13 @@ test("CrdtTree: algebra.json canonical fixture", () => {
   // — a runner that names its own scenario id is making a claim, and a claim rots.
   const mergeScenario = recordScenario(fixture.scenarios[0]);
   const base = TextCrdt.fromStr(mergeScenario.seed.peer, mergeScenario.seed.text);
-  const replicas = new Map(mergeScenario.replicas.map((definition) => {
-    const replica = base.fork(definition.peer);
-    replica.insertStr(replica.len(), definition.insert);
-    return [definition.name, replica];
-  }));
+  const replicas = new Map(
+    mergeScenario.replicas.map((definition) => {
+      const replica = base.fork(definition.peer);
+      replica.insertStr(replica.len(), definition.insert);
+      return [definition.name, replica];
+    }),
+  );
   const folds = mergeScenario.merge_orders.map((order, index) => {
     const folded = base.fork(100 + index);
     for (const name of order) folded.mergeFrom(replicas.get(name));
@@ -117,9 +119,12 @@ test("CrdtTree: algebra.json canonical fixture", () => {
   assertKey(
     mergeScenario.expect,
     "version_vectors_equal",
-    folds.slice(1).every((folded) =>
-      JSON.stringify(folded.versionVector()) === JSON.stringify(folds[0].versionVector()),
-    ),
+    folds
+      .slice(1)
+      .every(
+        (folded) =>
+          JSON.stringify(folded.versionVector()) === JSON.stringify(folds[0].versionVector()),
+      ),
     "merge order independence: version_vectors_equal",
   );
 
@@ -149,7 +154,10 @@ test("CrdtTree: algebra.json canonical fixture", () => {
   // A snapshot that re-minted op ids on restore would converge on TEXT and still
   // double every element on the later merge. That is what this key counts, and
   // nothing else in the scenario can see it.
-  for (const [name, replica] of [["canonical", canonical], ["restored", restored]]) {
+  for (const [name, replica] of [
+    ["canonical", canonical],
+    ["restored", restored],
+  ]) {
     const ids = replica.deltaSince({}).map((op) => `${op.id.peer}:${op.id.counter}`);
     assertKey(
       snapshotScenario.expect,
@@ -208,9 +216,15 @@ test("gc collects a stable deleted leaf", () => {
   c.delete(2);
   assert.equal(c.text(), "ab");
   assert.equal(c.tombstoneCount(), 1);
-  assert.equal(c.gcWith(() => false), 0);
+  assert.equal(
+    c.gcWith(() => false),
+    0,
+  );
   assert.equal(c.tombstoneCount(), 1);
-  assert.equal(c.gcWith(() => true), 1);
+  assert.equal(
+    c.gcWith(() => true),
+    1,
+  );
   assert.equal(c.tombstoneCount(), 0);
   assert.equal(c.text(), "ab");
 });
@@ -218,10 +232,16 @@ test("gc collects a stable deleted leaf", () => {
 test("gc keeps referenced tombstone then collects bottom-up", () => {
   const c = TextCrdt.fromStr(1, "abc");
   c.delete(1); // 'b' is origin of 'c'
-  assert.equal(c.gcWith(() => true), 0); // referenced, kept
+  assert.equal(
+    c.gcWith(() => true),
+    0,
+  ); // referenced, kept
   assert.equal(c.text(), "ac");
   c.delete(1); // now 'c'
-  assert.equal(c.gcWith(() => true), 2); // both collected bottom-up
+  assert.equal(
+    c.gcWith(() => true),
+    2,
+  ); // both collected bottom-up
   assert.equal(c.tombstoneCount(), 0);
   assert.equal(c.text(), "a");
 });
@@ -307,62 +327,62 @@ function runTextCrdtScenario(scenario) {
       excuseKey(
         expect,
         "on",
-        "selector, not an observation: names which replica text/len/tombstone_count "
-        + "are read from, and those reads are asserted against their own keys",
+        "selector, not an observation: names which replica text/len/tombstone_count " +
+          "are read from, and those reads are asserted against their own keys",
       );
       continue;
     }
     assertKeyWith(expect, key, (want) => {
-    switch (key) {
-      case "text":
-        assert.equal(main_().text(), want, label);
-        break;
-      case "len":
-        assert.equal(main_().len(), want, label);
-        break;
-      case "texts_equal":
-        for (const [x, y] of want) {
-          assert.equal(replicas.get(x).text(), replicas.get(y).text(), label);
-        }
-        break;
-      case "text_on":
-        for (const [name, wantText] of Object.entries(want)) {
-          assert.equal(replicas.get(name).text(), wantText, `${label}: text_on ${name}`);
-        }
-        break;
-      case "version_vector_on":
-        for (const [name, wantVv] of Object.entries(want)) {
-          assert.deepEqual(
-            replicas.get(name).versionVector(),
-            wantVv,
-            `${label}: version_vector_on ${name}`,
+      switch (key) {
+        case "text":
+          assert.equal(main_().text(), want, label);
+          break;
+        case "len":
+          assert.equal(main_().len(), want, label);
+          break;
+        case "texts_equal":
+          for (const [x, y] of want) {
+            assert.equal(replicas.get(x).text(), replicas.get(y).text(), label);
+          }
+          break;
+        case "text_on":
+          for (const [name, wantText] of Object.entries(want)) {
+            assert.equal(replicas.get(name).text(), wantText, `${label}: text_on ${name}`);
+          }
+          break;
+        case "version_vector_on":
+          for (const [name, wantVv] of Object.entries(want)) {
+            assert.deepEqual(
+              replicas.get(name).versionVector(),
+              wantVv,
+              `${label}: version_vector_on ${name}`,
+            );
+          }
+          break;
+        // The interleaving fixture pins the ENDS of the converged text, which is
+        // the part `texts_equal` cannot see: two replicas that agreed on a wrong
+        // order would satisfy `texts_equal` and `len` together.
+        case "a_starts_with":
+          assert.ok(
+            replicas.get("a").text().startsWith(want),
+            `${label}: a_starts_with ${JSON.stringify(want)} (got ${JSON.stringify(replicas.get("a").text())})`,
           );
-        }
-        break;
-      // The interleaving fixture pins the ENDS of the converged text, which is
-      // the part `texts_equal` cannot see: two replicas that agreed on a wrong
-      // order would satisfy `texts_equal` and `len` together.
-      case "a_starts_with":
-        assert.ok(
-          replicas.get("a").text().startsWith(want),
-          `${label}: a_starts_with ${JSON.stringify(want)} (got ${JSON.stringify(replicas.get("a").text())})`,
-        );
-        break;
-      case "a_ends_with":
-        assert.ok(
-          replicas.get("a").text().endsWith(want),
-          `${label}: a_ends_with ${JSON.stringify(want)} (got ${JSON.stringify(replicas.get("a").text())})`,
-        );
-        break;
-      // The gc fixture's whole point: the visible text is unchanged AND the
-      // tombstone really went away. Text alone cannot distinguish a collected
-      // tombstone from a retained one.
-      case "tombstone_count":
-        assert.equal(main_().tombstoneCount(), want, `${label}: tombstone_count`);
-        break;
-      default:
-        assert.fail(`${label}: unknown textcrdt expectation \`${key}\``);
-    }
+          break;
+        case "a_ends_with":
+          assert.ok(
+            replicas.get("a").text().endsWith(want),
+            `${label}: a_ends_with ${JSON.stringify(want)} (got ${JSON.stringify(replicas.get("a").text())})`,
+          );
+          break;
+        // The gc fixture's whole point: the visible text is unchanged AND the
+        // tombstone really went away. Text alone cannot distinguish a collected
+        // tombstone from a retained one.
+        case "tombstone_count":
+          assert.equal(main_().tombstoneCount(), want, `${label}: tombstone_count`);
+          break;
+        default:
+          assert.fail(`${label}: unknown textcrdt expectation \`${key}\``);
+      }
     });
   }
 }

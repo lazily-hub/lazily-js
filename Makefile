@@ -1,4 +1,4 @@
-.PHONY: check build typecheck test test-interop-peer conformance-coverage assertion-keys \
+.PHONY: check fmt fmt-fix build typecheck test test-interop-peer conformance-coverage assertion-keys \
     scenario-coverage ci-reach bench bench-scale benchmark benchmark-update benchmark-check
 
 # Every gate is its own target rather than a line in one monolithic recipe. A
@@ -7,8 +7,28 @@
 # gate CI stopped running. Split like this, the guard prints one line per gate.
 # The order here is the order the gates must run in: the conformance rungs audit
 # evidence files that `test` writes, so they are useless before it.
-check: build typecheck test test-interop-peer conformance-coverage assertion-keys \
+check: fmt build typecheck test test-interop-peer conformance-coverage assertion-keys \
     scenario-coverage ci-reach
+
+# The formatting GATE (#lazilyformattinggate). This binding had no formatting
+# floor: `build` is the lint equivalent (node --check per entry point) and
+# `typecheck` reads like it might cover style, but neither looks at formatting,
+# so drift stayed invisible until someone read a diff.
+#
+# prettier is pinned to an EXACT version in devDependencies — no caret. Three
+# gates in this family have now been bitten by pinning the style and not the
+# implementation (clang-format defaults moving between majors, zig `master`
+# resolving to a different nightly in CI than locally, `dart format` picking a
+# different style from build state). A caret range would reintroduce exactly
+# that: prettier ships style changes in minors, so `^3.9.6` is a gate whose
+# verdict changes on npm's schedule rather than on anything a contributor did.
+#
+# --check is the gate; `fmt-fix` writes and is not in `check`.
+fmt:
+	npm run format
+
+fmt-fix:
+	npm run format:fix
 
 # `npm run build` is this repo's lint equivalent: it syntax-checks every
 # published entry point with `node --check` and regenerates the size budgets.

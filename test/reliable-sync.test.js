@@ -1,5 +1,12 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, appendFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+  appendFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -40,8 +47,8 @@ function loadFixture(name) {
   const path = join(specDir, name);
   assert.ok(
     existsSync(path),
-    `missing canonical spec fixture ${path} — clone the lazily-spec sibling `
-      + `(git clone https://github.com/lazily-hub/lazily-spec.git ../lazily-spec)`,
+    `missing canonical spec fixture ${path} — clone the lazily-spec sibling ` +
+      `(git clone https://github.com/lazily-hub/lazily-spec.git ../lazily-spec)`,
   );
   return JSON.parse(readFileSync(path, "utf8"));
 }
@@ -87,7 +94,9 @@ function foldFrame(state, message) {
 }
 
 const stateWire = (state) =>
-  Object.fromEntries([...state.entries()].sort((a, b) => a[0] - b[0]).map(([k, v]) => [String(k), v]));
+  Object.fromEntries(
+    [...state.entries()].sort((a, b) => a[0] - b[0]).map(([k, v]) => [String(k), v]),
+  );
 
 const seedState = (wire) =>
   new Map(Object.entries(wire ?? {}).map(([node, bytes]) => [Number(node), [...bytes]]));
@@ -129,9 +138,10 @@ test("reliable-sync: generic Outbox owns cursor, prune, and replay", () => {
   const reopened = new Outbox(store);
   assert.equal(reopened.ackedThrough, 1);
   assert.deepEqual(reopened.retainedEpochs(), [2]);
-  assert.deepEqual(reopened.replayFrom(0).map(([epoch, msg]) => [epoch, msg.toWire()]), [
-    [2, two.toWire()],
-  ]);
+  assert.deepEqual(
+    reopened.replayFrom(0).map(([epoch, msg]) => [epoch, msg.toWire()]),
+    [[2, two.toWire()]],
+  );
 });
 
 test("reliable-sync: outbox_store_protocol.json", () => {
@@ -207,16 +217,25 @@ test("reliable-sync: multi_epoch_delta.json", () => {
   for (const key of Object.keys(fx.assertions)) {
     assertKeyWith(fx.assertions, key, (expected) => {
       switch (key) {
-        case "base_epoch": assert.equal(wireDelta.baseEpoch, expected, key); break;
-        case "epoch": assert.equal(wireDelta.epoch, expected, key); break;
-        case "span": assert.equal(wireDelta.span(), expected, key); break;
+        case "base_epoch":
+          assert.equal(wireDelta.baseEpoch, expected, key);
+          break;
+        case "epoch":
+          assert.equal(wireDelta.epoch, expected, key);
+          break;
+        case "span":
+          assert.equal(wireDelta.span(), expected, key);
+          break;
         case "is_multi_epoch":
           assert.equal(wireDelta.epoch > wireDelta.baseEpoch + 1, expected, key);
           break;
-        case "op_count": assert.equal(wireDelta.ops.length, expected, key); break;
-        default: assert.fail(`multi_epoch_delta: unknown assertion key \`${key}\``);
+        case "op_count":
+          assert.equal(wireDelta.ops.length, expected, key);
+          break;
+        default:
+          assert.fail(`multi_epoch_delta: unknown assertion key \`${key}\``);
       }
-      });
+    });
   }
 
   for (const sc of scenarios(fx)) {
@@ -266,8 +285,8 @@ test("reliable-sync: multi_epoch_delta.json", () => {
               }
             }
             assert.equal(
-              unitCoord.lastEpoch === coord.lastEpoch
-                && JSON.stringify(stateWire(unitState)) === JSON.stringify(stateWire(state)),
+              unitCoord.lastEpoch === coord.lastEpoch &&
+                JSON.stringify(stateWire(unitState)) === JSON.stringify(stateWire(state)),
               expected,
               where,
             );
@@ -276,7 +295,7 @@ test("reliable-sync: multi_epoch_delta.json", () => {
           default:
             assert.fail(`${sc.name}: unknown expectation \`${key}\``);
         }
-          });
+      });
     }
   }
 });
@@ -323,9 +342,15 @@ test("reliable-sync: resync_gap_converge.json", () => {
     assertKeyWith(sc.expect, key, (expected) => {
       const where = `drop_suffix_then_resync_converges: ${key}`;
       switch (key) {
-        case "final_last_epoch": assert.equal(coord.lastEpoch, expected, where); break;
-        case "resync_requests_emitted": assert.equal(requests, expected, where); break;
-        case "converged_nodes": assert.deepEqual(stateWire(state), expected, where); break;
+        case "final_last_epoch":
+          assert.equal(coord.lastEpoch, expected, where);
+          break;
+        case "resync_requests_emitted":
+          assert.equal(requests, expected, where);
+          break;
+        case "converged_nodes":
+          assert.deepEqual(stateWire(state), expected, where);
+          break;
         case "equals_no_drop_receiver":
           assert.equal(
             JSON.stringify(stateWire(state)) === JSON.stringify(stateWire(wholeState)),
@@ -333,9 +358,10 @@ test("reliable-sync: resync_gap_converge.json", () => {
             where,
           );
           break;
-        default: assert.fail(`drop_suffix_then_resync_converges: unknown expectation \`${key}\``);
+        default:
+          assert.fail(`drop_suffix_then_resync_converges: unknown expectation \`${key}\``);
       }
-      });
+    });
   }
 
   const single = scenario(fx, "single_request_per_gap");
@@ -348,11 +374,16 @@ test("reliable-sync: resync_gap_converge.json", () => {
     assertKeyWith(single.expect, key, (expected) => {
       const where = `single_request_per_gap: ${key}`;
       switch (key) {
-        case "final_last_epoch": assert.equal(c2.lastEpoch, expected, where); break;
-        case "resync_requests_emitted": assert.equal(req2, expected, where); break;
-        default: assert.fail(`single_request_per_gap: unknown expectation \`${key}\``);
+        case "final_last_epoch":
+          assert.equal(c2.lastEpoch, expected, where);
+          break;
+        case "resync_requests_emitted":
+          assert.equal(req2, expected, where);
+          break;
+        default:
+          assert.fail(`single_request_per_gap: unknown expectation \`${key}\``);
       }
-      });
+    });
   }
 });
 
@@ -378,18 +409,24 @@ test("reliable-sync: idempotent_redelivery.json", () => {
       assertKeyWith(sc.expect, key, (expected) => {
         const where = `${name}: ${key}`;
         switch (key) {
-          case "final_last_epoch": assert.equal(coord.lastEpoch, expected, where); break;
-          case "state_after": assert.deepEqual(stateWire(state), expected, where); break;
+          case "final_last_epoch":
+            assert.equal(coord.lastEpoch, expected, where);
+            break;
+          case "state_after":
+            assert.deepEqual(stateWire(state), expected, where);
+            break;
           case "net_effect_unchanged":
             assert.equal(
-              JSON.stringify(stateWire(state)) === JSON.stringify(stateWire(seedState(sc.state_before))),
+              JSON.stringify(stateWire(state)) ===
+                JSON.stringify(stateWire(seedState(sc.state_before))),
               expected,
               where,
             );
             break;
-          default: assert.fail(`${name}: unknown expectation \`${key}\``);
+          default:
+            assert.fail(`${name}: unknown expectation \`${key}\``);
         }
-          });
+      });
     }
   }
 });
@@ -420,15 +457,22 @@ class FileOutbox {
   ackThrough(epoch) {
     if (epoch > this.ackedThrough) this.ackedThrough = epoch;
     const retained = this.#readAll().filter(([e]) => e > this.ackedThrough);
-    writeFileSync(this.path, retained.map(([e, m]) => `${JSON.stringify([e, m.toWire()])}\n`).join(""));
+    writeFileSync(
+      this.path,
+      retained.map(([e, m]) => `${JSON.stringify([e, m.toWire()])}\n`).join(""),
+    );
   }
 
   replayFrom(cursor) {
-    return this.#readAll().filter(([e]) => e > cursor).sort((a, b) => a[0] - b[0]);
+    return this.#readAll()
+      .filter(([e]) => e > cursor)
+      .sort((a, b) => a[0] - b[0]);
   }
 
   retainedEpochs() {
-    return this.#readAll().map(([e]) => e).sort((a, b) => a - b);
+    return this.#readAll()
+      .map(([e]) => e)
+      .sort((a, b) => a - b);
   }
 }
 
@@ -476,8 +520,9 @@ test("reliable-sync: outbox_replay_after_crash.json", () => {
   const owed = appended.filter(([e]) => e > cursor).flatMap(([, m]) => opKeysOf(m));
   const alreadySeen = appended.filter(([e]) => e <= cursor).flatMap(([, m]) => opKeysOf(m));
   const lost = owed.filter((k) => !landed.includes(k)).length;
-  const doubled = landed.filter((k, i) => landed.indexOf(k) !== i).length
-    + landed.filter((k) => alreadySeen.includes(k)).length;
+  const doubled =
+    landed.filter((k, i) => landed.indexOf(k) !== i).length +
+    landed.filter((k) => alreadySeen.includes(k)).length;
 
   for (const key of Object.keys(sc.expect)) {
     assertKeyWith(sc.expect, key, (expected) => {
@@ -487,13 +532,21 @@ test("reliable-sync: outbox_replay_after_crash.json", () => {
           assert.deepEqual(mem.retainedEpochs(), expected, where);
           break;
         case "replayed_from_cursor":
-          assert.deepEqual(replay.map(([e]) => e), expected, where);
+          assert.deepEqual(
+            replay.map(([e]) => e),
+            expected,
+            where,
+          );
           break;
         // Order, not just membership: at-least-once replay that arrives out of
         // order fails the base_epoch chain, and `replayed_from_cursor` compared as
         // a set would not have seen it.
         case "replay_order":
-          assert.deepEqual(replay.map(([e]) => e), expected, where);
+          assert.deepEqual(
+            replay.map(([e]) => e),
+            expected,
+            where,
+          );
           break;
         case "receiver_applies":
           assert.deepEqual(applied, expected, where);
@@ -501,17 +554,22 @@ test("reliable-sync: outbox_replay_after_crash.json", () => {
         case "receiver_last_epoch_after":
           assert.equal(coord.lastEpoch, expected, where);
           break;
-        case "ops_lost": assert.equal(lost, expected, where); break;
-        case "ops_doubled": assert.equal(doubled, expected, where); break;
+        case "ops_lost":
+          assert.equal(lost, expected, where);
+          break;
+        case "ops_doubled":
+          assert.equal(doubled, expected, where);
+          break;
         // The property the whole fixture is named for. At-least-once delivery plus
         // idempotent apply = exactly-once EFFECT; the epoch keys above cannot see
         // it because they never look at the ops.
         case "exactly_once_effect":
           assert.equal(lost === 0 && doubled === 0, expected, where);
           break;
-        default: assert.fail(`${sc.name}: unknown expectation \`${key}\``);
+        default:
+          assert.fail(`${sc.name}: unknown expectation \`${key}\``);
       }
-      });
+    });
   }
 
   // send_failure_retains_frame_for_next_tick
@@ -525,7 +583,9 @@ test("reliable-sync: outbox_replay_after_crash.json", () => {
     assertKeyWith(sc2.expect, key, (expected) => {
       const where = `${sc2.name}: ${key}`;
       switch (key) {
-        case "retained": assert.deepEqual(mem2.retainedEpochs(), expected, where); break;
+        case "retained":
+          assert.deepEqual(mem2.retainedEpochs(), expected, where);
+          break;
         // Append-before-send: a failed send leaves the frame durable, which is
         // exactly what the pre-outbox bug did not do.
         case "frame_retained_after_failed_send":
@@ -535,7 +595,9 @@ test("reliable-sync: outbox_replay_after_crash.json", () => {
             where,
           );
           break;
-        case "resent_on_next_tick": assert.deepEqual(resent, expected, where); break;
+        case "resent_on_next_tick":
+          assert.deepEqual(resent, expected, where);
+          break;
         // The pre-outbox defect: bumping the out-epoch before the send left a hole
         // no later tick could fill. A gap is permanent iff some appended epoch is
         // neither retained nor re-sent.
@@ -546,9 +608,10 @@ test("reliable-sync: outbox_replay_after_crash.json", () => {
             where,
           );
           break;
-        default: assert.fail(`${sc2.name}: unknown expectation \`${key}\``);
+        default:
+          assert.fail(`${sc2.name}: unknown expectation \`${key}\``);
       }
-      });
+    });
   }
 
   rmSync(dir, { recursive: true, force: true });
@@ -580,7 +643,9 @@ test("reliable-sync: liveness_orset_lww.json", () => {
     assertKeyWith(add.expect, key, (expected) => {
       const where = `open_set_add_wins_over_stale_remove: ${key}`;
       switch (key) {
-        case "present": assert.equal(set.present(), expected, where); break;
+        case "present":
+          assert.equal(set.present(), expected, where);
+          break;
         // The mechanism, not just the verdict: `present` alone is satisfied by an
         // OR-set that ignores removes entirely. This pins that the doc stays open
         // BECAUSE the remove observed only the earlier tag.
@@ -603,9 +668,10 @@ test("reliable-sync: liveness_orset_lww.json", () => {
           assert.equal(before === after ? 0 : 1, expected, where);
           break;
         }
-        default: assert.fail(`open_set_add_wins_over_stale_remove: unknown expectation \`${key}\``);
+        default:
+          assert.fail(`open_set_add_wins_over_stale_remove: unknown expectation \`${key}\``);
       }
-      });
+    });
   }
 
   const lww = scenario(fx, "lww_alive_highest_stamp_wins");
@@ -619,7 +685,9 @@ test("reliable-sync: liveness_orset_lww.json", () => {
     assertKeyWith(lww.expect, key, (expected) => {
       const where = `lww_alive_highest_stamp_wins: ${key}`;
       switch (key) {
-        case "value": assert.equal(reg.value, expected, where); break;
+        case "value":
+          assert.equal(reg.value, expected, where);
+          break;
         // Which op won, not just what value survived: a register resolving by
         // arrival order lands on the same value whenever the last write happens to
         // carry the highest stamp, and this fixture is built so it does not.
@@ -634,9 +702,10 @@ test("reliable-sync: liveness_orset_lww.json", () => {
         case "order_independent":
           assert.equal(foldLww([...lww.ops].reverse()).value === reg.value, expected, where);
           break;
-        default: assert.fail(`lww_alive_highest_stamp_wins: unknown expectation \`${key}\``);
+        default:
+          assert.fail(`lww_alive_highest_stamp_wins: unknown expectation \`${key}\``);
       }
-      });
+    });
   }
 
   const death = scenario(fx, "whole_editor_death_cascades");
@@ -648,7 +717,10 @@ test("reliable-sync: liveness_orset_lww.json", () => {
     });
   const alive = new Map();
   for (const [pid, v] of Object.entries(death.alive_before)) {
-    alive.set(Number(pid), new WireLwwRegister(new WireStamp({ wallTime: 1, logical: 0, peer: 1 }), v));
+    alive.set(
+      Number(pid),
+      new WireLwwRegister(new WireStamp({ wallTime: 1, logical: 0, peer: 1 }), v),
+    );
   }
   const liveDocs = () =>
     [...new Set(open.filter(([, p]) => alive.get(p)?.value === true).map(([doc]) => doc))].sort();
@@ -665,8 +737,12 @@ test("reliable-sync: liveness_orset_lww.json", () => {
         // Checked, not assumed. The "after" set alone does not say the cascade
         // happened — an aggregate that was already {docC} before the death would
         // satisfy it.
-        case "live_docs_before": assert.deepEqual(liveBefore, [...expected].sort(), where); break;
-        case "live_docs_after": assert.deepEqual(live, [...expected].sort(), where); break;
+        case "live_docs_before":
+          assert.deepEqual(liveBefore, [...expected].sort(), where);
+          break;
+        case "live_docs_after":
+          assert.deepEqual(live, [...expected].sort(), where);
+          break;
         case "cascade":
           assert.equal(live.length < liveBefore.length, expected, where);
           break;
@@ -675,9 +751,10 @@ test("reliable-sync: liveness_orset_lww.json", () => {
           // key that does.
           assert.equal(typeof expected, "string", where);
           break;
-        default: assert.fail(`whole_editor_death_cascades: unknown expectation \`${key}\``);
+        default:
+          assert.fail(`whole_editor_death_cascades: unknown expectation \`${key}\``);
       }
-      });
+    });
   }
 
   // This scenario was in the fixture and replayed by nothing: the runner picked
@@ -712,7 +789,9 @@ test("reliable-sync: liveness_orset_lww.json", () => {
     assertKeyWith(agg.expect, key, (expected) => {
       const where = `${agg.name}: ${key}`;
       switch (key) {
-        case "converged_live_docs": assert.deepEqual(aggregate, expected, where); break;
+        case "converged_live_docs":
+          assert.deepEqual(aggregate, expected, where);
+          break;
         case "order_independent":
           assert.equal(
             JSON.stringify(foldAggregate([...agg.ops].reverse())) === JSON.stringify(aggregate),
@@ -731,16 +810,18 @@ test("reliable-sync: liveness_orset_lww.json", () => {
           break;
         // Per-doc isolation: dropping one doc's ops removes only that doc.
         case "per_doc_isolation": {
-          const isolated = aggregate.every((doc) =>
-            JSON.stringify(foldAggregate(agg.ops.filter((o) => !o.key.startsWith(`${doc}/`))))
-              === JSON.stringify(aggregate.filter((d) => d !== doc)),
+          const isolated = aggregate.every(
+            (doc) =>
+              JSON.stringify(foldAggregate(agg.ops.filter((o) => !o.key.startsWith(`${doc}/`)))) ===
+              JSON.stringify(aggregate.filter((d) => d !== doc)),
           );
           assert.equal(isolated, expected, where);
           break;
         }
-        default: assert.fail(`${agg.name}: unknown expectation \`${key}\``);
+        default:
+          assert.fail(`${agg.name}: unknown expectation \`${key}\``);
       }
-      });
+    });
   }
 });
 
@@ -888,7 +969,10 @@ test("sync-driver: surfaces a source read error as DriverError", () => {
   const wire = makeWire();
   const d = driverAt(wire, 0);
   wire.sourceErr = true;
-  assert.throws(() => d.tick(), (e) => e instanceof DriverError && e.kind === "Source");
+  assert.throws(
+    () => d.tick(),
+    (e) => e instanceof DriverError && e.kind === "Source",
+  );
 });
 
 test("sync-driver: gap then covering snapshot converges", () => {

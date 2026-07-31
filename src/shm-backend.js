@@ -95,8 +95,7 @@ class ShmRegionArena {
     if (end > this.capacity) {
       throw new RangeError("shm region full: grow capacity or advanceEpoch");
     }
-    const generation =
-      Number(this.#view.getBigUint64(H_GENERATION, true)) + 1;
+    const generation = Number(this.#view.getBigUint64(H_GENERATION, true)) + 1;
     const epoch = this.epoch;
     const checksum = blobChecksum(payload);
     // Entry header.
@@ -126,14 +125,10 @@ class ShmRegionArena {
     const entryStart = ref.offset - ENTRY_HEADER;
     if (entryStart < HEADER_SIZE) return null;
     if (ref.offset + ref.len > this.capacity) return null;
-    if (Number(this.#view.getBigUint64(entryStart + 0, true)) !== ref.generation)
-      return null;
-    if (Number(this.#view.getBigUint64(entryStart + 8, true)) !== ref.epoch)
-      return null;
-    if (Number(this.#view.getBigUint64(entryStart + 16, true)) !== ref.len)
-      return null;
-    if (Number(this.#view.getBigUint64(entryStart + 24, true)) !== ref.checksum)
-      return null;
+    if (Number(this.#view.getBigUint64(entryStart + 0, true)) !== ref.generation) return null;
+    if (Number(this.#view.getBigUint64(entryStart + 8, true)) !== ref.epoch) return null;
+    if (Number(this.#view.getBigUint64(entryStart + 16, true)) !== ref.len) return null;
+    if (Number(this.#view.getBigUint64(entryStart + 24, true)) !== ref.checksum) return null;
     return this.#u8.subarray(ref.offset, ref.offset + ref.len);
   }
 
@@ -204,9 +199,7 @@ async function mapNode(name, capacity, create) {
   const require = createRequire(import.meta.url);
   const koffi = require("koffi");
   const libc = koffi.load(abi.lib);
-  const shm_open = libc.func(
-    "int shm_open(const char* name, int oflag, unsigned int mode)",
-  );
+  const shm_open = libc.func("int shm_open(const char* name, int oflag, unsigned int mode)");
   const ftruncate = libc.func("int ftruncate(int fd, long length)");
   const mmap = libc.func(
     "void* mmap(void* addr, size_t length, int prot, int flags, int fd, long offset)",
@@ -257,14 +250,7 @@ async function mapBun(name, capacity, create) {
     },
     ftruncate: { args: [FFIType.i32, FFIType.i64], returns: FFIType.i32 },
     mmap: {
-      args: [
-        FFIType.ptr,
-        FFIType.usize,
-        FFIType.i32,
-        FFIType.i32,
-        FFIType.i32,
-        FFIType.i64,
-      ],
+      args: [FFIType.ptr, FFIType.usize, FFIType.i32, FFIType.i32, FFIType.i32, FFIType.i64],
       returns: FFIType.ptr,
     },
     munmap: { args: [FFIType.ptr, FFIType.usize], returns: FFIType.i32 },
@@ -325,14 +311,7 @@ async function mapDeno(name, capacity, create) {
     c.shm_unlink(nameC);
     throw new Error("ftruncate failed sizing shm region");
   }
-  const ptr = c.mmap(
-    null,
-    BigInt(capacity),
-    PROT_READ | PROT_WRITE,
-    MAP_SHARED,
-    fd,
-    0n,
-  );
+  const ptr = c.mmap(null, BigInt(capacity), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0n);
   if (ptr === null) {
     c.close(fd);
     if (create) c.shm_unlink(nameC);

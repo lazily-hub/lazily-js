@@ -23,11 +23,18 @@ test("AtomicMutex runs exclusively and is reentrant within a realm", () => {
 
 test("AtomicMutex releases the lock even if fn throws", () => {
   const m = new AtomicMutex();
-  assert.throws(() => m.runExclusive(() => {
-    throw new Error("boom");
-  }), /boom/);
+  assert.throws(
+    () =>
+      m.runExclusive(() => {
+        throw new Error("boom");
+      }),
+    /boom/,
+  );
   // Lock must be free again — a subsequent acquire completes.
-  assert.equal(m.runExclusive(() => 1), 1);
+  assert.equal(
+    m.runExclusive(() => 1),
+    1,
+  );
 });
 
 test("AtomicMutex exposes a shareable lock buffer when shared memory is available", () => {

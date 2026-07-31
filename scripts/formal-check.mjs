@@ -27,10 +27,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 // Layout: <repo>/scripts/formal-check.mjs and <superproject>/src/lazily-formal.
 // From the published package root, `../lazily-formal` covers the in-repo
 // submodule layout (`src/lazily-js` ↔ `src/lazily-formal`).
-const candidates = [
-  join(here, "..", "lazily-formal"),
-  join(here, "..", "..", "lazily-formal"),
-];
+const candidates = [join(here, "..", "lazily-formal"), join(here, "..", "..", "lazily-formal")];
 
 function resolveFormalDir() {
   for (const candidate of candidates) {

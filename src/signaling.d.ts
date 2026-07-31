@@ -106,12 +106,7 @@ export class ClientLeave {
 }
 
 export type ClientMessageInstance =
-  | ClientJoin
-  | ClientOffer
-  | ClientAnswer
-  | ClientIce
-  | ClientRelay
-  | ClientLeave;
+  ClientJoin | ClientOffer | ClientAnswer | ClientIce | ClientRelay | ClientLeave;
 
 export const ClientMessage: {
   join(peer: PeerId, capabilities?: Iterable<string> | null): ClientJoin;
@@ -254,7 +249,8 @@ export const ServerMessage: {
 
 export type SignalingMode = "open" | "allowlist";
 
-export type SignalOp = { kind: "join" } | { kind: "offer" | "answer" | "ice" | "relay"; to: PeerId };
+export type SignalOp =
+  { kind: "join" } | { kind: "offer" | "answer" | "ice" | "relay"; to: PeerId };
 
 export class SignalingPermissions {
   constructor(mode?: SignalingMode);

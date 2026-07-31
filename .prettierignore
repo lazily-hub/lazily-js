@@ -1,0 +1,11 @@
+# Generated, vendored, or byte-sensitive — never reformat.
+node_modules/
+build/
+dist/
+.tsift/
+package-lock.json
+# Prose and data files are out of scope: this gate is a floor for CODE, and
+# reformatting BENCHMARKS.md / README.md would bury real diffs in churn.
+*.md
+*.json
+*.yml

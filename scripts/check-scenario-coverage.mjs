@@ -63,8 +63,8 @@ const FIXTURE_MANIFEST =
 function excuseScenario(fixture, id, reason) {
   if (typeof reason !== "string" || reason.trim() === "") {
     throw new Error(
-      `excuseScenario(${fixture}, ${id}): a reason is required. An undeclared exception `
-      + "is the silent skip this guard exists to catch.",
+      `excuseScenario(${fixture}, ${id}): a reason is required. An undeclared exception ` +
+        "is the silent skip this guard exists to catch.",
     );
   }
   return { fixture, id, reason: reason.replace(/\s+/g, " ").trim() };
@@ -112,10 +112,16 @@ if (!existsSync(FIXTURE_MANIFEST) || statSync(FIXTURE_MANIFEST).size === 0) {
 }
 
 const replayed = new Set(
-  readFileSync(SCENARIO_MANIFEST, "utf8").split("\n").map((l) => l.trim()).filter(Boolean),
+  readFileSync(SCENARIO_MANIFEST, "utf8")
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean),
 );
 const opened = new Set(
-  readFileSync(FIXTURE_MANIFEST, "utf8").split("\n").map((l) => l.trim()).filter(Boolean),
+  readFileSync(FIXTURE_MANIFEST, "utf8")
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean),
 );
 
 // The corpus-wide fixed resolution order, identical in every binding:
@@ -158,7 +164,10 @@ for (const fixture of corpusFixtures()) {
     continue;
   }
   if (parsed === null || typeof parsed !== "object" || !Array.isArray(parsed.scenarios)) continue;
-  corpusScenarios.set(fixture, parsed.scenarios.map((s, i) => resolveId(s, i)));
+  corpusScenarios.set(
+    fixture,
+    parsed.scenarios.map((s, i) => resolveId(s, i)),
+  );
 }
 
 const excusedByFixture = new Map();
@@ -292,8 +301,8 @@ for (const entry of EXCUSED_SCENARIOS) {
 // corpus gap visible so it can be fixed upstream in lazily-spec.
 if (positional.length > 0) {
   console.error(
-    `NOTE: ${positional.length} scenario(s) have neither \`id\` nor \`name\` and were`
-    + " identified by POSITION, which is not stable under a corpus reorder:",
+    `NOTE: ${positional.length} scenario(s) have neither \`id\` nor \`name\` and were` +
+      " identified by POSITION, which is not stable under a corpus reorder:",
   );
   for (const entry of positional) console.error(`      ${entry}`);
   console.error(
@@ -303,14 +312,14 @@ if (positional.length > 0) {
 
 if (problems > 0) {
   console.error(
-    `scenario replay FAILED: ${problems} problem(s); ${covered}/${total} scenarios replayed`
-    + ` across ${checkedFixtures.length} opened fixture(s)`,
+    `scenario replay FAILED: ${problems} problem(s); ${covered}/${total} scenarios replayed` +
+      ` across ${checkedFixtures.length} opened fixture(s)`,
   );
   process.exit(1);
 }
 
 console.error(
-  `scenario replay OK: ${covered}/${total} scenarios REPLAYED across ${checkedFixtures.length}`
-  + ` opened scenario-bearing fixtures (${excusedOk} excused, ${positional.length} identified by`
-  + " position; runtime ledger — these scenarios were really run)",
+  `scenario replay OK: ${covered}/${total} scenarios REPLAYED across ${checkedFixtures.length}` +
+    ` opened scenario-bearing fixtures (${excusedOk} excused, ${positional.length} identified by` +
+    " position; runtime ledger — these scenarios were really run)",
 );

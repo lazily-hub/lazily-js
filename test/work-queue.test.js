@@ -77,12 +77,7 @@ function runFixture(fixture) {
     });
     assertKey(step.expected, "pending", queue.pendingItems(), `step ${i}: pending`);
     assertKey(step.expected, "in_flight", queue.inFlightDeliveries(), `step ${i}: in_flight`);
-    assertKey(
-      step.expected,
-      "dead_letters",
-      queue.deadLetterItems(),
-      `step ${i}: dead_letters`,
-    );
+    assertKey(step.expected, "dead_letters", queue.deadLetterItems(), `step ${i}: dead_letters`);
     assertKey(
       step.expected,
       "reads",

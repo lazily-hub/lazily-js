@@ -362,11 +362,7 @@ export function resolveValue(value, backend) {
 // states — returning { message, spilledBytes }. Oversized payloads are replaced
 // by SharedBlob descriptors so the message stays small on the wire. Sites
 // already carrying a descriptor are left untouched. The input is not mutated.
-export function spillMessage(
-  message,
-  backend,
-  threshold = DEFAULT_SPILL_THRESHOLD,
-) {
+export function spillMessage(message, backend, threshold = DEFAULT_SPILL_THRESHOLD) {
   let total = 0;
 
   if (message.isSnapshot) {
@@ -374,9 +370,7 @@ export function spillMessage(
     const nodes = snap.nodes.map((node) => {
       const { state, spilled } = spillState(node.state, backend, threshold);
       total += spilled;
-      return spilled === 0
-        ? node
-        : new NodeSnapshot(node.node, node.typeTag, state, node.key);
+      return spilled === 0 ? node : new NodeSnapshot(node.node, node.typeTag, state, node.key);
     });
     return {
       message: IpcMessage.snapshot(
@@ -407,16 +401,12 @@ export function spillMessage(
       if (op instanceof DeltaOpNodeAdd) {
         const { state, spilled } = spillState(op.state, backend, threshold);
         total += spilled;
-        return spilled === 0
-          ? op
-          : new DeltaOpNodeAdd(op.node, op.typeTag, state, op.key);
+        return spilled === 0 ? op : new DeltaOpNodeAdd(op.node, op.typeTag, state, op.key);
       }
       return op;
     });
     return {
-      message: IpcMessage.delta(
-        new Delta({ baseEpoch: delta.baseEpoch, epoch: delta.epoch, ops }),
-      ),
+      message: IpcMessage.delta(new Delta({ baseEpoch: delta.baseEpoch, epoch: delta.epoch, ops })),
       spilledBytes: total,
     };
   }
@@ -426,14 +416,10 @@ export function spillMessage(
     const ops = sync.ops.map((op) => {
       const { value, spilled } = spillValue(op.state, backend, threshold);
       total += spilled;
-      return spilled === 0
-        ? op
-        : new op.constructor(op.node, op.stamp, value, op.key);
+      return spilled === 0 ? op : new op.constructor(op.node, op.stamp, value, op.key);
     });
     return {
-      message: IpcMessage.crdtSync(
-        new CrdtSync({ frontier: sync.frontier, ops }),
-      ),
+      message: IpcMessage.crdtSync(new CrdtSync({ frontier: sync.frontier, ops })),
       spilledBytes: total,
     };
   }
@@ -462,10 +448,7 @@ export function shmSupported() {
   // Deno / Bun expose a namespace global; Node exposes process.versions.node.
   if (typeof globalThis.Deno !== "undefined") return true;
   if (typeof globalThis.Bun !== "undefined") return true;
-  return (
-    typeof globalThis.process !== "undefined" &&
-    !!globalThis.process?.versions?.node
-  );
+  return typeof globalThis.process !== "undefined" && !!globalThis.process?.versions?.node;
 }
 
 // Create (or attach to) a POSIX shared-memory `shm` backend named `name`

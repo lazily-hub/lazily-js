@@ -106,10 +106,7 @@ export class InMemoryDataChannel {
     const aToB = [];
     const bToA = [];
     const state = { open: true };
-    return [
-      new InMemoryDataChannel(aToB, bToA, state),
-      new InMemoryDataChannel(bToA, aToB, state),
-    ];
+    return [new InMemoryDataChannel(aToB, bToA, state), new InMemoryDataChannel(bToA, aToB, state)];
   }
 
   sendFrame(frame) {
@@ -160,9 +157,7 @@ export class WebRtcSink {
         message.snapshot.filterReadable(this.#permissions, this.#peer),
       );
     } else if (message.isDelta) {
-      filtered = IpcMessage.delta(
-        message.delta.filterReadable(this.#permissions, this.#peer),
-      );
+      filtered = IpcMessage.delta(message.delta.filterReadable(this.#permissions, this.#peer));
     } else if (message.isCrdtSync) {
       filtered = IpcMessage.crdtSync(
         message.crdtSync.filterReadable(this.#permissions, this.#peer),
@@ -483,10 +478,7 @@ export class CrdtPlaneRuntime {
       peer: hlc.peer,
     });
     const key = this.#nodeToKey.get(node) ?? null;
-    const op =
-      key !== null
-        ? CrdtOp.keyed(node, key, wire, state)
-        : new CrdtOp(node, wire, state);
+    const op = key !== null ? CrdtOp.keyed(node, key, wire, state) : new CrdtOp(node, wire, state);
     const cell = this.#cellFor(node);
     const changed = cell.merge(op);
     if (!changed) {
@@ -537,10 +529,7 @@ export class CrdtPlaneRuntime {
 
   // Wire form of the frontier: [[peer, WireStamp.toWire()], ...].
   wireFrontier() {
-    return this.frontierEntries().map((entry) => [
-      entry.peer,
-      entry.stamp.toWire(),
-    ]);
+    return this.frontierEntries().map((entry) => [entry.peer, entry.stamp.toWire()]);
   }
 
   // Peers observed in this session (self included once local edits exist).
@@ -582,14 +571,10 @@ export class CrdtPlaneRuntime {
       let stamp;
       if (Array.isArray(entry)) {
         peer = entry[0];
-        stamp =
-          entry[1] instanceof WireStamp ? entry[1] : WireStamp.fromWire(entry[1]);
+        stamp = entry[1] instanceof WireStamp ? entry[1] : WireStamp.fromWire(entry[1]);
       } else {
         peer = entry.peer;
-        stamp =
-          entry.stamp instanceof WireStamp
-            ? entry.stamp
-            : WireStamp.fromWire(entry.stamp);
+        stamp = entry.stamp instanceof WireStamp ? entry.stamp : WireStamp.fromWire(entry.stamp);
       }
       watermark.set(peer, stamp);
     }
@@ -603,10 +588,7 @@ export class CrdtPlaneRuntime {
 
 /** Whether the browser WebRTC globals are present in this environment. */
 export function isWebRtcAvailable() {
-  return (
-    typeof RTCPeerConnection !== "undefined" &&
-    typeof RTCDataChannel !== "undefined"
-  );
+  return typeof RTCPeerConnection !== "undefined" && typeof RTCDataChannel !== "undefined";
 }
 
 const textEncoder = new TextEncoder();
@@ -738,8 +720,7 @@ export class RtcPeerConnector {
   }
 
   async addIceCandidate(candidate) {
-    const init =
-      typeof candidate === "string" ? JSON.parse(candidate) : candidate;
+    const init = typeof candidate === "string" ? JSON.parse(candidate) : candidate;
     await this.#pc.addIceCandidate(init);
   }
 

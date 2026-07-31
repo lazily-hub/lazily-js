@@ -118,15 +118,16 @@ function countUpto(n, o, cycle) {
 export class CronCore {
   constructor(cycle, offsets) {
     this.cycle = cycle < 1 ? 1 : cycle;
-    this.offsets = [...new Set(offsets.map((o) => ((o % this.cycle) + this.cycle) % this.cycle))].sort(
-      (a, b) => a - b,
-    );
+    this.offsets = [
+      ...new Set(offsets.map((o) => ((o % this.cycle) + this.cycle) % this.cycle)),
+    ].sort((a, b) => a - b);
     this.cursor = 0;
     this.count = 0;
   }
   #matchesIn(lo, hi) {
     let sum = 0;
-    for (const o of this.offsets) sum += countUpto(hi, o, this.cycle) - countUpto(lo, o, this.cycle);
+    for (const o of this.offsets)
+      sum += countUpto(hi, o, this.cycle) - countUpto(lo, o, this.cycle);
     return sum;
   }
   tick(now) {

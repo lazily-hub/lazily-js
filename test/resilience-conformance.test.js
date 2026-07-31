@@ -7,7 +7,12 @@ import test from "node:test";
 import { assertKey, assertKeyWith } from "./support/assert-key.js";
 
 import { Context } from "../src/reactive.js";
-import { BulkheadCell, CircuitBreakerCell, RetryPolicyCell, TimeoutCell } from "../src/resilience.js";
+import {
+  BulkheadCell,
+  CircuitBreakerCell,
+  RetryPolicyCell,
+  TimeoutCell,
+} from "../src/resilience.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const specDir = join(here, "..", "..", "lazily-spec", "conformance", "resilience");

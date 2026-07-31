@@ -258,19 +258,23 @@ function makeSyncLikeModel(name, makeContext) {
         },
         async computed(id, reads, offset, scopeName) {
           const compute = computes.countingSync(id, (c) =>
-            sumOffset(reads.map((r) => readVia(c, r)), offset),
+            sumOffset(
+              reads.map((r) => readVia(c, r)),
+              offset,
+            ),
           );
           const handle =
-            scopeName == null
-              ? ctx.computed(compute)
-              : scopes.get(scopeName).computed(compute);
+            scopeName == null ? ctx.computed(compute) : scopes.get(scopeName).computed(compute);
           handles.set(id, handle);
         },
         // Same `sum(reads) + offset` convention as `computed`, so the only
         // difference the fixtures see is eagerness.
         async signal(id, reads, offset, scopeName) {
           const compute = computes.countingSync(id, (c) =>
-            sumOffset(reads.map((r) => readVia(c, r)), offset),
+            sumOffset(
+              reads.map((r) => readVia(c, r)),
+              offset,
+            ),
           );
           const handle =
             scopeName == null ? ctx.signal(compute) : scopes.get(scopeName).signal(compute);
@@ -303,8 +307,7 @@ function makeSyncLikeModel(name, makeContext) {
             }
             return () => cleanupLog.push(id);
           };
-          const handle =
-            scopeName == null ? ctx.effect(body) : scopes.get(scopeName).effect(body);
+          const handle = scopeName == null ? ctx.effect(body) : scopes.get(scopeName).effect(body);
           handles.set(id, handle);
         },
         async read(id) {
@@ -394,8 +397,7 @@ export const asyncModel = {
       runLog,
       cleanupLog,
       async source(id, value, scopeName) {
-        const handle =
-          scopeName == null ? ctx.source(value) : scopes.get(scopeName).source(value);
+        const handle = scopeName == null ? ctx.source(value) : scopes.get(scopeName).source(value);
         handles.set(id, handle);
       },
       failNext(id, count) {
@@ -408,9 +410,7 @@ export const asyncModel = {
           return sumOffset(values, offset);
         });
         const handle =
-          scopeName == null
-            ? ctx.memoAsync(compute)
-            : scopes.get(scopeName).memoAsync(compute);
+          scopeName == null ? ctx.memoAsync(compute) : scopes.get(scopeName).memoAsync(compute);
         handles.set(id, handle);
       },
       async signal(id, reads, offset, scopeName) {
@@ -420,9 +420,7 @@ export const asyncModel = {
           return sumOffset(values, offset);
         });
         const handle =
-          scopeName == null
-            ? ctx.signalAsync(compute)
-            : scopes.get(scopeName).signalAsync(compute);
+          scopeName == null ? ctx.signalAsync(compute) : scopes.get(scopeName).signalAsync(compute);
         handles.set(id, handle);
       },
       async disposeSignal(id) {
@@ -453,9 +451,7 @@ export const asyncModel = {
           return () => cleanupLog.push(id);
         };
         const handle =
-          scopeName == null
-            ? ctx.effectAsync(body)
-            : scopes.get(scopeName).effectAsync(body);
+          scopeName == null ? ctx.effectAsync(body) : scopes.get(scopeName).effectAsync(body);
         handles.set(id, handle);
       },
       async read(id) {

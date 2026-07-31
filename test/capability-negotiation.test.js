@@ -28,7 +28,11 @@ function handshake(overrides = {}) {
 }
 
 test("SessionHandshake round-trips the canonical wire shape", () => {
-  const local = handshake({ peer_id: 7, session_id: "s-1", features: ["shared-blob", "signaling-relay"] });
+  const local = handshake({
+    peer_id: 7,
+    session_id: "s-1",
+    features: ["shared-blob", "signaling-relay"],
+  });
   const wire = local.toWire();
   assert.equal(wire.protocol_id, "lazily-ipc");
   assert.equal(wire.protocol_major_version, 1);
@@ -105,7 +109,14 @@ test("LazilyFfiMessageKind includes CrdtSync = 3 (required discriminant)", () =>
 
 test("LazilyFfiStatus mirrors schemas/ffi.json", () => {
   assert.deepEqual(
-    [LazilyFfiStatus.Ok, LazilyFfiStatus.Empty, LazilyFfiStatus.NullPointer, LazilyFfiStatus.InvalidMessage, LazilyFfiStatus.EncodeFailed, LazilyFfiStatus.Panic],
+    [
+      LazilyFfiStatus.Ok,
+      LazilyFfiStatus.Empty,
+      LazilyFfiStatus.NullPointer,
+      LazilyFfiStatus.InvalidMessage,
+      LazilyFfiStatus.EncodeFailed,
+      LazilyFfiStatus.Panic,
+    ],
     [0, 1, 2, 3, 4, 5],
   );
 });

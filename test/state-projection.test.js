@@ -22,10 +22,7 @@ import {
  * handling, event emission, event reporting) without a native dependency —
  * mirroring lazily-kt's StateProjectionClientTest.
  */
-function createMockFFI({
-  projectionJson = "null",
-  recordResult = 1,
-} = {}) {
+function createMockFFI({ projectionJson = "null", recordResult = 1 } = {}) {
   const mock = {
     projectionJson,
     recordResult,
@@ -112,10 +109,7 @@ test("refresh reflects later projection changes on repeated calls", () => {
   client.refresh();
 
   assert.equal(client.isAvailable, true);
-  assert.deepEqual(events, [
-    null,
-    '{"document":{"hash":"doc1","phase":"committed"}}',
-  ]);
+  assert.deepEqual(events, [null, '{"document":{"hash":"doc1","phase":"committed"}}']);
 });
 
 test("recordStateEvent passes fact JSON through and returns true on success", () => {
@@ -148,9 +142,7 @@ test("documentHash uses canonical path sha256", () => {
   const tmp = join(tmpdir(), `agent_doc_state_${Date.now()}.md`);
   writeFileSync(tmp, "state");
   try {
-    const expected = createHash("sha256")
-      .update(realpathSync(tmp), "utf-8")
-      .digest("hex");
+    const expected = createHash("sha256").update(realpathSync(tmp), "utf-8").digest("hex");
     assert.equal(documentHash(tmp), expected);
   } finally {
     unlinkSync(tmp);
@@ -227,18 +219,18 @@ test("wrapAgentDocStateProjectionFFI decodes and frees projection pointers", () 
     decode: {
       string(value) {
         assert.equal(value, ptr);
-        return "{\"document_hash\":\"doc-a\"}";
+        return '{"document_hash":"doc-a"}';
       },
     },
   };
 
   const ffi = wrapAgentDocStateProjectionFFI(koffi, lib);
 
-  assert.equal(ffi.stateProjection("doc-a"), "{\"document_hash\":\"doc-a\"}");
-  assert.equal(ffi.recordStateEvent("doc-a", "{\"fact\":true}"), true);
+  assert.equal(ffi.stateProjection("doc-a"), '{"document_hash":"doc-a"}');
+  assert.equal(ffi.recordStateEvent("doc-a", '{"fact":true}'), true);
   assert.deepEqual(calls, [
     ["projection", "doc-a"],
     ["free", ptr],
-    ["record", "doc-a", "{\"fact\":true}"],
+    ["record", "doc-a", '{"fact":true}'],
   ]);
 });

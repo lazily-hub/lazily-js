@@ -160,7 +160,15 @@ export class LosslessTreeCrdt {
         r.body.kind === "leaf"
           ? { kind: "leaf", leafKind: r.body.leafKind, text: r.body.text.clone() }
           : { kind: "element", elementKind: r.body.elementKind };
-      out.#nodes.set(k, { id: r.id, parent: r.parent, sort: r.sort, sortStamp: r.sortStamp, body, tomb: r.tomb, textHead: r.textHead });
+      out.#nodes.set(k, {
+        id: r.id,
+        parent: r.parent,
+        sort: r.sort,
+        sortStamp: r.sortStamp,
+        body,
+        tomb: r.tomb,
+        textHead: r.textHead,
+      });
     }
     out.#frontier = this.#frontier.copy();
     out.#log = this.#log.slice();
@@ -326,7 +334,10 @@ export class LosslessTreeCrdt {
     const prev = rec.textHead;
     const opId = this.#nextOpId();
     const newNode = { counter: opId.counter, peer: opId.peer };
-    this.#commitLocal({ id: opId, kind: { type: "SplitLeaf", node, new: newNode, sort, atChar, prev } });
+    this.#commitLocal({
+      id: opId,
+      kind: { type: "SplitLeaf", node, new: newNode, sort, atChar, prev },
+    });
     return newNode;
   }
 
@@ -343,7 +354,10 @@ export class LosslessTreeCrdt {
     const prevLeft = this.#get(left).textHead;
     const prevRight = this.#get(right).textHead;
     const opId = this.#nextOpId();
-    this.#commitLocal({ id: opId, kind: { type: "MergeLeaves", left, right, prevLeft, prevRight } });
+    this.#commitLocal({
+      id: opId,
+      kind: { type: "MergeLeaves", left, right, prevLeft, prevRight },
+    });
   }
 
   /** Ops this replica holds that `their` frontier lacks, ordered by dotted id. */
@@ -425,7 +439,11 @@ export class LosslessTreeCrdt {
         if (this.#get(k.id)) return;
         const body =
           k.seed.type === "leaf"
-            ? { kind: "leaf", leafKind: k.seed.leafKind, text: TextCrdt.fromStr(k.id.peer, k.seed.text) }
+            ? {
+                kind: "leaf",
+                leafKind: k.seed.leafKind,
+                text: TextCrdt.fromStr(k.id.peer, k.seed.text),
+              }
             : { kind: "element", elementKind: k.seed.kind };
         this.#nodes.set(idKey(k.id), {
           id: k.id,
@@ -499,7 +517,11 @@ export class LosslessTreeCrdt {
     const r = this.#get(right);
     if (!l || !r || l.body.kind !== "leaf" || r.body.kind !== "leaf") return;
     const combined = l.body.text.text() + r.body.text.text();
-    l.body = { kind: "leaf", leafKind: l.body.leafKind, text: TextCrdt.fromStr(left.peer, combined) };
+    l.body = {
+      kind: "leaf",
+      leafKind: l.body.leafKind,
+      text: TextCrdt.fromStr(left.peer, combined),
+    };
     l.textHead = opId;
     r.tomb = r.tomb ? minId(r.tomb, opId) : opId;
   }
@@ -526,9 +548,18 @@ export function treeUpdateToWire(update) {
       case "LeafEdit":
         return { LeafEdit: { node: k.node, prev: k.prev, ops: k.ops } };
       case "SplitLeaf":
-        return { SplitLeaf: { node: k.node, new: k.new, sort: k.sort, at_char: k.atChar, prev: k.prev } };
+        return {
+          SplitLeaf: { node: k.node, new: k.new, sort: k.sort, at_char: k.atChar, prev: k.prev },
+        };
       case "MergeLeaves":
-        return { MergeLeaves: { left: k.left, right: k.right, prev_left: k.prevLeft, prev_right: k.prevRight } };
+        return {
+          MergeLeaves: {
+            left: k.left,
+            right: k.right,
+            prev_left: k.prevLeft,
+            prev_right: k.prevRight,
+          },
+        };
       default:
         throw new Error(`unknown op kind: ${k.type}`);
     }

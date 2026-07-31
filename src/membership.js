@@ -116,7 +116,10 @@ export class MembershipCore {
           events.push({ type: "StateChanged", peer, from: PeerState.Alive, to: PeerState.Suspect });
         }
       } else if (record.state === PeerState.Suspect) {
-        if (record.suspectSince !== null && now - record.suspectSince >= this.config.suspectTimeout) {
+        if (
+          record.suspectSince !== null &&
+          now - record.suspectSince >= this.config.suspectTimeout
+        ) {
           record.state = PeerState.Dead;
           events.push({ type: "StateChanged", peer, from: PeerState.Suspect, to: PeerState.Dead });
         }

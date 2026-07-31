@@ -10,8 +10,7 @@ export const LeafKind: Readonly<Record<LeafKindName, LeafKindName>>;
 export const ROOT: Readonly<TreeNodeId>;
 
 export type NodeSeed =
-  | { type: "element"; kind: string }
-  | { type: "leaf"; leafKind: LeafKindName; text: string };
+  { type: "element"; kind: string } | { type: "leaf"; leafKind: LeafKindName; text: string };
 
 /** A batch of ops — the output of `diff`, the input to `applyUpdate`. */
 export type TreeUpdate = { ops: TreeOp[] };

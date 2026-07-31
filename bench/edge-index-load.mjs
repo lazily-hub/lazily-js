@@ -37,8 +37,7 @@ import { Context } from "../src/reactive.js";
 // would thrash a naive promote/demote boundary. A thrash bug is invisible at
 // every other rung, so the cluster is the point of the ladder, not padding.
 const LADDER = [
-  32, 64, 96, 128, 159, 160, 161, 192, 256, 1024, 4096, 65536, 262144, 1048576,
-  4194304, 10000000,
+  32, 64, 96, 128, 159, 160, 161, 192, 256, 1024, 4096, 65536, 262144, 1048576, 4194304, 10000000,
 ];
 
 const MEMORY_FLOOR_MB = 512; // refuse a rung projected to leave less than this

@@ -94,18 +94,13 @@ export class RelayCell {
     // Ops merged into the current window since the last drain (the Count bound).
     this._pending = ctx.source(0);
     this._depth = ctx.computed((c) => c.get(this._pending));
-    this._isFull = ctx.computed(
-      (c) => c.get(this._pending) >= c.get(policy.highWater),
-    );
+    this._isFull = ctx.computed((c) => c.get(this._pending) >= c.get(policy.highWater));
     this._isEmpty = ctx.computed((c) => c.get(this._head) === null);
   }
 
   /** Whether the current overflow choice is legal for the policy. */
   overflowIsLegal() {
-    return (
-      this.ctx.get(this.policy.overflow) !== Overflow.Conflate ||
-      this.mergePolicy.conflates
-    );
+    return this.ctx.get(this.policy.overflow) !== Overflow.Conflate || this.mergePolicy.conflates;
   }
 
   /** Demand-driven reader: current window depth (Count). */

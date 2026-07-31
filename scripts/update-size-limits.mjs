@@ -61,9 +61,7 @@ function render(results) {
   lines.push("|---|---:|---:|");
   for (const r of results) {
     const status = r.passed ? "✓" : "✗";
-    lines.push(
-      `| ${r.name} | ${formatSize(r.size)} ${status} | ${formatSize(r.sizeLimit)} |`,
-    );
+    lines.push(`| ${r.name} | ${formatSize(r.size)} ${status} | ${formatSize(r.sizeLimit)} |`);
   }
   return lines.join("\n");
 }
@@ -76,12 +74,7 @@ function refresh(results) {
   if (startIdx === -1 || endIdx === -1) {
     throw new Error(`missing ${START} / ${END} markers in README.md`);
   }
-  const next =
-    md.slice(0, startIdx + START.length) +
-    "\n\n" +
-    body +
-    "\n\n" +
-    md.slice(endIdx);
+  const next = md.slice(0, startIdx + START.length) + "\n\n" + body + "\n\n" + md.slice(endIdx);
   writeFileSync(README_MD, next);
 }
 

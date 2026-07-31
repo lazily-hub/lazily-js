@@ -26,12 +26,7 @@
 // Mirrors `lazily-rs/src/async_queue.rs`, `async_topic.rs` and
 // `async_work_queue.rs`.
 
-import {
-  QueueCore,
-  TopicCore,
-  VecDequeStorage,
-  WorkQueueCore,
-} from "./queue-core.js";
+import { QueueCore, TopicCore, VecDequeStorage, WorkQueueCore } from "./queue-core.js";
 
 export {
   QUEUE_READER_KINDS,

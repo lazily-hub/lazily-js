@@ -99,9 +99,7 @@ export class CrdtPlaneRuntime {
   membership(): PeerId[];
   membershipCount(): number;
   syncFrame(): CrdtSync;
-  syncFrameSince(
-    since: Iterable<FrontierEntry | [PeerId, WireStamp | unknown]>,
-  ): CrdtSync;
+  syncFrameSince(since: Iterable<FrontierEntry | [PeerId, WireStamp | unknown]>): CrdtSync;
   syncReply(request: CrdtSync): CrdtSync;
   // Family sync (#lzfamilysync)
   registerFamilyLww(namespace: string): this;

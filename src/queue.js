@@ -26,12 +26,7 @@
 // reader kinds changed — the core reader-kind independence law, which mirrors
 // the `PartialEq` guard the reactive bindings implement for free.
 
-import {
-  QueueCore,
-  TopicCore,
-  WorkQueueCore,
-  VecDequeStorage,
-} from "./queue-core.js";
+import { QueueCore, TopicCore, WorkQueueCore, VecDequeStorage } from "./queue-core.js";
 
 export {
   QUEUE_READER_KINDS,

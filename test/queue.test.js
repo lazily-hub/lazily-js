@@ -95,23 +95,23 @@ function runFixture(fixture) {
         result = q.close();
         break;
       case "batch": {
-      // MPSC: multiple producers push inside one logical Context batch. The
-      // queue reports each push's own invalidation while the graph defers its
-      // effect flush; collapse the reports into their union and assert the
+        // MPSC: multiple producers push inside one logical Context batch. The
+        // queue reports each push's own invalidation while the graph defers its
+        // effect flush; collapse the reports into their union and assert the
         // end-state (the fixture's expected invalidates reflects the net change
         // across the whole batch).
         const acc = { head: false, len: false, is_empty: false, is_full: false, closed: false };
-      ctx.batch(() => {
-        for (const inner of op.ops) {
-          assert.equal(inner.type, "push", "batch currently only wraps pushes");
-          const r = q.tryPush(inner.value);
-          for (const k of Object.keys(acc)) {
-            if (r.invalidates[k]) {
-              acc[k] = true;
+        ctx.batch(() => {
+          for (const inner of op.ops) {
+            assert.equal(inner.type, "push", "batch currently only wraps pushes");
+            const r = q.tryPush(inner.value);
+            for (const k of Object.keys(acc)) {
+              if (r.invalidates[k]) {
+                acc[k] = true;
+              }
             }
           }
-        }
-      });
+        });
         result = { returns: null, invalidates: acc };
         break;
       }

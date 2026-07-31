@@ -62,10 +62,7 @@ function defaultEqual(a, b) {
   }
   for (let i = 0; i < aKeys.length; i++) {
     const k = aKeys[i];
-    if (
-      !Object.prototype.hasOwnProperty.call(b, k) ||
-      !defaultEqual(a[k], b[k])
-    ) {
+    if (!Object.prototype.hasOwnProperty.call(b, k) || !defaultEqual(a[k], b[k])) {
       return false;
     }
   }

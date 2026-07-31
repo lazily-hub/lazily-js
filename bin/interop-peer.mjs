@@ -6,13 +6,7 @@
 import { createInterface } from "node:readline";
 import { CrdtPlaneRuntime } from "../src/distributed.js";
 import { CrdtSync, IpcMessage, IpcValue } from "../src/index.js";
-import {
-  RevisionBarrier,
-  Timeout,
-  TimeoutOperation,
-  Timer,
-  TimerError,
-} from "../src/stdlib.js";
+import { RevisionBarrier, Timeout, TimeoutOperation, Timer, TimerError } from "../src/stdlib.js";
 
 const PROTOCOL_VERSION = 1;
 const decoder = new TextDecoder();
@@ -199,9 +193,7 @@ class InteropPeer {
       state.barrier = new RevisionBarrier(
         wireU64(step.revision),
         wireU64(step.required_revision),
-        step.deadline === null || step.deadline === undefined
-          ? null
-          : wireU64(step.deadline),
+        step.deadline === null || step.deadline === undefined ? null : wireU64(step.deadline),
       );
       observation = state.barrier.receipt("");
     } else {
@@ -249,11 +241,7 @@ class InteropPeer {
       throw new TypeError("local_set key must be a string or null");
     }
     runtime.register(request.node, request.key);
-    const op = runtime.localUpdate(
-      request.node,
-      request.at,
-      IpcValue.fromWire(request.state),
-    );
+    const op = runtime.localUpdate(request.node, request.at, IpcValue.fromWire(request.state));
     if (op === null) {
       throw new Error("production runtime rejected fresh local op");
     }
@@ -391,11 +379,11 @@ if (process.argv.includes("--self-check")) {
         error: error instanceof Error ? error.message : String(error),
       };
     }
-process.stdout.write(
-  `${JSON.stringify(response, (_, value) =>
-    typeof value === "bigint" ? value.toString() : value,
-  )}\n`,
-);
+    process.stdout.write(
+      `${JSON.stringify(response, (_, value) =>
+        typeof value === "bigint" ? value.toString() : value,
+      )}\n`,
+    );
     if (request?.cmd === "bye") {
       lines.close();
       process.stdin.destroy();

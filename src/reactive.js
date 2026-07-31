@@ -300,13 +300,13 @@ const KIND_EFFECT = 3;
 // nodes carry no flags. Packing the booleans into one byte/id (vs ~5 separate
 // properties × ~8 B each on the slot object) is most of the #lzjsarenanodes
 // per-node memory win.
-const F_HAS_VALUE = 1 << 0;        // slot: a memoized value is cached
-const F_MEMO = 1 << 1;             // slot: equality-suppressed recompute
-const F_DIRTY = 1 << 2;            // slot: invalidate-on-next-read marker
-const F_FORCE_RECOMPUTE = 1 << 3;  // slot: force a recompute even if not dirty
-const F_IN_PROGRESS = 1 << 4;      // slot: cycle-detection tripwire
-const F_FORCE_RUN = 1 << 5;        // effect: force the next run regardless
-const F_EAGER = 1 << 6;            // slot: this computed is eager (has a puller)
+const F_HAS_VALUE = 1 << 0; // slot: a memoized value is cached
+const F_MEMO = 1 << 1; // slot: equality-suppressed recompute
+const F_DIRTY = 1 << 2; // slot: invalidate-on-next-read marker
+const F_FORCE_RECOMPUTE = 1 << 3; // slot: force a recompute even if not dirty
+const F_IN_PROGRESS = 1 << 4; // slot: cycle-detection tripwire
+const F_FORCE_RUN = 1 << 5; // effect: force the next run regardless
+const F_EAGER = 1 << 6; // slot: this computed is eager (has a puller)
 
 // #lzspecedgeindex: width at which an edge list promotes from linear-scan dedup
 // to a hash index. Measured, not inherited — see the note on `edgeInsert`.
@@ -797,9 +797,7 @@ function createContext(opts = {}) {
       throw new DisposedNodeError(id);
     }
     if (kinds[id] !== KIND_CELL) {
-      throw new Error(
-        `set on a non-source handle (id ${id}); writes require a Source cell`,
-      );
+      throw new Error(`set on a non-source handle (id ${id}); writes require a Source cell`);
     }
     setCellAny(id, value);
   }
@@ -1377,8 +1375,7 @@ function createContext(opts = {}) {
     // #lzcellkernel: a `computedRippleWhen` slot carries a custom guard in the
     // `slotEquals` side table (true = equal = suppress); everything else uses the
     // natural `defaultEqual`. Guarded by size so an ordinary computed pays nothing.
-    const unchanged =
-      isMemo && hadValue && slotGuardEqual(id, node.value, result);
+    const unchanged = isMemo && hadValue && slotGuardEqual(id, node.value, result);
     // Clear dirty/forceRecompute for the next cycle. Use `&=` (not assignment
     // from `f`) so F_IN_PROGRESS — set by the caller and cleared by its finally
     // — stays set for the duration of the recompute (cycle detection).
