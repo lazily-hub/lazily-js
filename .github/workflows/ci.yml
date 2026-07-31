@@ -215,3 +215,17 @@ jobs:
             echo "::error::rung 4 skipped — the canonical corpus was not found, so it checked nothing"
             exit 1; }
           exit 0
+
+      # The gate that keeps every step above honest (#lzcheckcireachguard). It
+      # compares `make check`'s prerequisite closure against the run: bodies in
+      # this file and fails on any target CI does not reach. Comments inside run:
+      # bodies are stripped first — a naive grep for "make check" reported all
+      # nine bindings as covered and every one of those hits was a comment.
+      - name: CI-reachability guard (#lzcheckcireachguard)
+        run: |
+          out=$(./scripts/check-ci-reach.sh 2>&1) || { echo "$out"; echo "::error::a make check gate is unreachable from CI"; exit 1; }
+          echo "$out"
+          echo "$out" | grep -q "check-ci-reach: OK" || {
+            echo "::error::the CI-reachability guard exited 0 without reaching its verdict"
+            exit 1
+          }
