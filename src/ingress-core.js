@@ -219,8 +219,15 @@ export function receiptChannel(receipt) {
       return IngressReceiptChannel.Accepted;
     case "dropped":
       return IngressReceiptChannel.Dropped;
-    default:
+    case "error":
       return IngressReceiptChannel.Error;
+    // Receipts are minted only by `IngressCore._pushReceipt` in this module, so
+    // the outcome vocabulary is closed and internal — nothing decodes one off a
+    // wire. The old `default: return Error` meant a receipt shape this module
+    // no longer mints (or one a caller hand-rolled) was routed to the error
+    // channel and counted as a delivery failure that never happened.
+    default:
+      throw new TypeError(`unknown ingress receipt outcome kind: ${String(receipt.outcome.kind)}`);
   }
 }
 
@@ -916,10 +923,18 @@ export class IngressCore {
           scope.windowValue = null;
           scope.windowDepth = 0;
           break;
-        default:
-          // Conflate *is* the bound; Spill degrades to it until a durable tail
-          // is wired, exactly as RelayCell does.
+        // Conflate *is* the bound; Spill degrades to it until a durable tail
+        // is wired, exactly as RelayCell does.
+        case Overflow.Conflate:
+        case Overflow.Spill:
           break;
+        // `policy.overflow` is caller-supplied in-process configuration, not a
+        // field decoded from a peer, so an unrecognised value has no
+        // forward-compat reading. It used to land in the Conflate/Spill arm
+        // above and silently conflate, which is the one outcome that never
+        // reports backpressure — a mis-spelled policy read as a working bound.
+        default:
+          throw new TypeError(`unknown IngressCore overflow policy: ${String(policy.overflow)}`);
       }
     }
 

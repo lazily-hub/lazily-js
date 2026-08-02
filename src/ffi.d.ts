@@ -38,11 +38,19 @@ export interface RecvBytesResult {
   payload: Uint8Array;
 }
 
-/** The IPC message-kind discriminant for `message`. */
+/** The IPC message-kind discriminant for `message`. A message this build does
+ *  not recognise classifies as `LazilyFfiMessageKind.Unknown` — a declared enum
+ *  member, because the C ABI classifies by returning an int and has to be able
+ *  to say "not one of mine". It is a classification, not an acceptance:
+ *  `encodeMessage` still refuses such a message. */
 export function kindOf(message: IpcMessage): LazilyFfiMessageKind;
 /** Encode an IPC message to canonical JSON wire bytes (never throws). */
 export function encodeMessage(message: IpcMessage): EncodeResult;
-/** Decode canonical JSON wire bytes to an IPC message (never throws). */
+/** Decode canonical JSON wire bytes to an IPC message (never throws). A
+ *  malformed frame or an unknown wire tag is reported as
+ *  `LazilyFfiStatus.InvalidMessage` with a `null` message — a JavaScript
+ *  exception cannot cross a C ABI, so failure moves to the status channel
+ *  rather than being lost. */
 export function decodeMessage(payload: Uint8Array | string): DecodeResult;
 /** Validate wire bytes without materializing the message. */
 export function validateMessage(payload: Uint8Array | string): LazilyFfiStatus;

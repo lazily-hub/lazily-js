@@ -162,9 +162,20 @@ export class WebRtcSink {
       filtered = IpcMessage.crdtSync(
         message.crdtSync.filterReadable(this.#permissions, this.#peer),
       );
-    } else {
+    } else if (message.isControl) {
       // Reliable-sync control frames carry no node content; filtering is identity.
       filtered = message;
+    } else {
+      // This chain is the ONLY place per-peer read permissions are applied to
+      // outbound content, and the old terminal `else` handed anything it did not
+      // recognise straight to the wire unfiltered. `IpcMessage` rejects unknown
+      // kinds at construction, so today the set really is closed — but the
+      // failure mode of getting that wrong is a permission bypass, not a
+      // rendering glitch, so a kind that is neither content nor control has to
+      // stop here rather than default to "no filtering needed".
+      throw new TypeError(
+        `refusing to send unfiltered IpcMessage kind: ${String(message && message.kind)}`,
+      );
     }
     let frame;
     try {
@@ -622,7 +633,18 @@ export class RtcPeerChannel {
       } else if (ArrayBuffer.isView(data)) {
         this.#inbox.push(new Uint8Array(data.buffer, data.byteOffset, data.byteLength));
       } else {
-        this.#inbox.push(new Uint8Array(data));
+        // The constructor asks for `binaryType = "arraybuffer"`, but that is a
+        // request to the peer implementation, not a guarantee: a channel that
+        // ignores it (or a polyfill/shim that defaults to Blob) delivers a Blob
+        // here. `new Uint8Array(blob)` does not throw and does not copy — it
+        // yields a ZERO-LENGTH array — so the old fallback turned every frame on
+        // such a channel into a silent empty read that decoded as "nothing
+        // arrived". Blob is async-only and cannot be drained from a synchronous
+        // listener, so there is no lenient reading to fall back to.
+        throw new TypeError(
+          `WebRTC data-channel frame is neither ArrayBuffer, string, nor ArrayBufferView: ` +
+            `${Object.prototype.toString.call(data)}`,
+        );
       }
     });
   }

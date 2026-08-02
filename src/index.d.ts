@@ -27,6 +27,11 @@ export class ShmBlobRef {
   readonly backend: BlobBackendKindValue;
   withBackend(backend: BlobBackendKindValue): ShmBlobRef;
   toWire(): ShmBlobRefWire;
+  /** An ABSENT `backend` decodes as `shm` — `toWire` omits the key for `shm`,
+   *  so the pre-pluggable-backend wire form stays byte-identical and keeps
+   *  decoding. An unknown backend STRING is refused: a descriptor names memory
+   *  this process must map, so a name with no mapper is an error, not a
+   *  forward-compat hint. */
   static fromWire(value: ShmBlobRefWire): ShmBlobRef;
 }
 

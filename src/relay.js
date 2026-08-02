@@ -158,6 +158,16 @@ export class RelayCell {
         case Overflow.Conflate:
         case Overflow.Spill:
           break;
+        // `overflow` is an in-process policy cell the CALLER writes, not a
+        // decoded wire field, so there is no forward-compat peer to be lenient
+        // toward. Without this arm an unrecognised value fell out of the switch
+        // into the merge below and silently behaved as Conflate — a relay
+        // configured `"drop_oldest"` (snake case) or a typo'd policy looked
+        // bounded and quietly conflated instead.
+        default:
+          throw new TypeError(
+            `unknown RelayCell overflow policy: ${String(this.ctx.get(this.policy.overflow))}`,
+          );
       }
     }
     this._mergeIntoHead(op);

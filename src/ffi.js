@@ -52,6 +52,15 @@ export function kindOf(message) {
   if (message.kind === "OutboxAck") {
     return LazilyFfiMessageKind.OutboxAck;
   }
+  // INTENTIONALLY LENIENT. `Unknown` is a declared member of the
+  // `LazilyFfiMessageKind` enum in schemas/ffi.json, not a missing case: the C
+  // ABI classifies a frame by returning an int, and a function that can only
+  // return an int has to have a value meaning "not one of mine". Throwing here
+  // would also break the shape `encodeMessage` depends on — it calls `kindOf`
+  // BEFORE rejecting, so an invalid message still reports a kind alongside its
+  // `InvalidMessage` status, exactly as `lazily_ffi_ipc_message_kind_json` does.
+  // Consequence of the default: an unrecognised message is classified, never
+  // silently accepted — `isUnknownKind` still refuses to encode or enqueue it.
   return LazilyFfiMessageKind.Unknown;
 }
 
@@ -93,6 +102,16 @@ export function decodeMessage(payload) {
   try {
     return { status: LazilyFfiStatus.Ok, message: IpcMessage.decodeJson(payload) };
   } catch {
+    // INTENTIONALLY LENIENT — this is the ABI contract, not a swallowed error.
+    // A JavaScript exception cannot cross a C ABI, so every
+    // `lazily_ffi_*_json` entry point reports failure as a `LazilyFfiStatus`
+    // int and the JS shim has to present the identical surface: the browser
+    // shim and the real `.so` must be substitutable for the same caller.
+    // `IpcMessage.decodeJson` is itself strict (it throws on an unknown tag or
+    // malformed body), so the distinction is preserved rather than lost — it is
+    // relocated from the exception channel to the status channel, and the
+    // message is `null`, so a caller that ignores `status` gets no frame at all
+    // rather than a half-decoded one.
     return { status: LazilyFfiStatus.InvalidMessage, message: null };
   }
 }

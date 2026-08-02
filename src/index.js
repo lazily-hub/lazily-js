@@ -141,6 +141,18 @@ export class ShmBlobRef {
       generation: object.generation,
       epoch: object.epoch,
       checksum: object.checksum,
+      // INTENTIONALLY LENIENT — but only about ABSENCE, not about vocabulary.
+      // `backend` was added by the pluggable-backend work; every descriptor
+      // minted before it (and every conformance fixture pinning the older wire
+      // form) carries no `backend` key at all, and `toWire` still OMITS the key
+      // for `shm` so the two forms stay byte-identical. An absent key therefore
+      // has exactly one meaning — POSIX shared memory — and decoding it as
+      // anything else, or refusing it, would break every older peer.
+      //
+      // An unknown backend STRING is a different question and is NOT accepted:
+      // the constructor throws on it. A descriptor names memory this process has
+      // to map, so guessing a mapper for a name we do not implement would hand
+      // back the wrong bytes rather than an error.
       backend: object.backend ?? BlobBackendKind.Shm,
     });
   }
@@ -1610,6 +1622,19 @@ export class SyncDriver {
           else this.stalledSince = now;
         }
         // Ignore → drop
+      } else {
+        // The chain covers all five `IpcMessage` kinds, and the constructor
+        // rejects any sixth, so nothing well-formed reaches here. What DID
+        // reach here was anything else a caller's `source.recv()` handed back —
+        // a plain wire object that was never decoded, a message from a
+        // different protocol, a stub returning `{}`. Every `is*` getter is then
+        // `undefined`, the value falls out of the chain, and the driver reports
+        // a tick with no inbound progress: an un-decoded stream looks exactly
+        // like an idle one. `source` is an in-process interface, not a peer, so
+        // there is no version skew to be lenient about.
+        throw new DriverError(
+          new TypeError(`source produced a non-IpcMessage value: ${String(msg && msg.kind)}`),
+        );
       }
     }
 
@@ -2338,6 +2363,16 @@ function terminalStatusOf(outcome, reason) {
         return CommandStatus.Superseded;
       case "timed_out":
         return CommandStatus.TimedOut;
+      // INTENTIONALLY LENIENT. `reason` is the receipt's free-form `reason`
+      // string — `CausalReceipt` validates the OUTCOME against an enum but
+      // deliberately leaves `reason` an arbitrary nullable string, because it
+      // carries the authority's own words for a rejection. The three cases above
+      // are the ones that refine a rejection into a MORE SPECIFIC terminal
+      // status; every other reason (including `null`, and including a reason
+      // vocabulary a newer authority invents) still means the command was
+      // rejected, so the default is the general case, not a fallback. The
+      // consequence is a coarser status, never a wrong terminality: `outcome`
+      // — which IS enum-checked — is what decided this is terminal at all.
       default:
         return CommandStatus.Rejected;
     }

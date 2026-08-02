@@ -322,6 +322,15 @@ export class TextCrdt {
   // Each TextOp is a plain {id, ch, origin, deleted} of {counter, peer} ids. A
   // whole-state snapshot is `deltaSince({})`.
   deltaSince(theirVv) {
+    // INTENTIONALLY LENIENT. `theirVv` is a version vector a REMOTE replica
+    // sent, and a version vector is sparse by construction: a peer omits every
+    // author it has never heard from, which is why `deltaSince({})` is the
+    // documented spelling of "send me everything". The `?? 0` is the identity of
+    // that vector, not a guess — counters start at 1, so a missing entry and an
+    // entry of 0 are the same statement ("seen nothing from this peer") and the
+    // consequence is that every op by an unknown author is included in the
+    // delta. Rejecting a sparse vector would make first contact impossible and
+    // would make a peer's silence about a third replica look like an error.
     const seen = (id) => id.counter <= (theirVv[id.peer] ?? 0);
     const wire = (id) => (id ? { counter: id.counter, peer: id.peer } : null);
     const out = [];

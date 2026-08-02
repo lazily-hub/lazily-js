@@ -71,6 +71,23 @@ export function buildStateEvent(documentHashValue, type, fields, eventSuffix) {
  * @returns {{ routeReadiness?: string, routePaneId?: string, latestTransportPatchId?: string, latestTransportPhase?: string, proofMarkers: number } | null}
  */
 export function projectionSummary(projection) {
+  // INTENTIONALLY LENIENT, in every branch below. The argument is JSON minted
+  // by a DIFFERENT PROCESS — the Rust `DocumentStateProjection` that agent-doc
+  // publishes over FFI — and this function's only consumer is an editor status
+  // line. The version of the Rust side is not pinned to the version of this
+  // package: a newer agent-doc adds sections and fields, an older one has not
+  // grown them yet, and a projection observed mid-handshake legitimately has
+  // `route` populated and `transport` still empty.
+  //
+  // The consequence of each default is that the corresponding field is reported
+  // as absent (`undefined`, or `0` markers) and `compactProjectionSummary`
+  // renders `unknown`/`-` for it. Nothing is invented and nothing is acted on:
+  // the status line degrades field-by-field instead of an editor throwing on a
+  // status refresh. Only a non-object projection is refused outright, as `null`.
+  //
+  // This is the one place in this package where an unrecognised shape is
+  // absorbed on purpose; the decode paths that produce VALUES (`IpcMessage`,
+  // `ShmBlobRef`, the CRDT ops) all fail closed instead.
   if (!projection || typeof projection !== "object") return null;
   const route = projection.route ?? {};
   const transport = projection.transport ?? {};

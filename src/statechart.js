@@ -17,6 +17,9 @@
 const HISTORY_SHALLOW = "shallow";
 const HISTORY_DEEP = "deep";
 
+/** The `State.kind` enum of `lazily-spec/schemas/statechart.json`. */
+const STATE_KINDS = new Set(["atomic", "compound", "parallel", "history", "final"]);
+
 function assertObject(value, name) {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
     throw new TypeError(`${name} must be an object`);
@@ -93,6 +96,34 @@ function parseState(id, raw) {
     kind = "compound";
   } else {
     kind = "atomic";
+  }
+
+  // `kind` is inferred above from the structural fields (`history`, `parallel`,
+  // `initial`), which is what `schemas/statechart.json` specifies when the field
+  // is omitted. An explicit `kind` therefore has to AGREE with the inference —
+  // it is a redundant restatement, not a second way to declare structure.
+  // Before this check the only value ever compared was `"final"`, so a chart
+  // written as `{"kind": "parallel"}` (without `parallel: true`) parsed as a
+  // silent `atomic` leaf and every transition into it entered nothing. A chart
+  // is compute, not protocol — nothing on the far side of a wire mints these
+  // strings — so an unrecognised or contradictory `kind` is an authoring bug
+  // and is rejected rather than absorbed.
+  if (obj.kind !== undefined && obj.kind !== null) {
+    if (!STATE_KINDS.has(obj.kind)) {
+      throw new TypeError(
+        `state ${id}: unknown kind \`${obj.kind}\` ` +
+          `(expected one of ${[...STATE_KINDS].join(", ")})`,
+      );
+    }
+    // `final` is the one kind carrying no structural field of its own, so it is
+    // the only value allowed to differ from the inferred kind (always `atomic`).
+    const compatible = obj.kind === kind || (obj.kind === "final" && kind === "atomic");
+    if (!compatible) {
+      throw new TypeError(
+        `state ${id}: declared kind \`${obj.kind}\` contradicts its structure ` +
+          `(inferred \`${kind}\`)`,
+      );
+    }
   }
 
   const entry = parseActionList(obj.entry, `state ${id} entry`);
@@ -196,6 +227,30 @@ export class ChartDef {
     }
     if (root === null) {
       throw new TypeError("chart has no root (parent-less state)");
+    }
+
+    // Every state id a chart names has to exist. `ChartDef.kind` answers
+    // `"atomic"` for an id it does not hold, so before this check a typo'd
+    // transition target, `initial`, `default`, or `parent` resolved to a
+    // phantom atomic leaf: the transition was ACCEPTED, the configuration moved
+    // to a state that is in no `states` map, and no entry/exit action ran. The
+    // reference set is closed — a chart is compute, not protocol, and both
+    // definition paths (`fromChart`, `ChartBuilder`) hand over the complete map
+    // — so a dangling id is an authoring bug, never a newer peer's vocabulary.
+    for (const def of states.values()) {
+      const refs = [
+        ["parent", def.parent],
+        ["initial", def.initial],
+        ["default", def.default],
+      ];
+      for (const [event, t] of def.transitions) {
+        refs.push([`on.${event} target`, t.target]);
+      }
+      for (const [label, ref] of refs) {
+        if (ref !== null && ref !== undefined && !states.has(ref)) {
+          throw new TypeError(`state ${def.id}: ${label} references unknown state \`${ref}\``);
+        }
+      }
     }
 
     const depth = new Map();

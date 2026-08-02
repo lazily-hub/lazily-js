@@ -45,7 +45,11 @@ export function buildStateEvent(
   eventSuffix: string,
 ): StateBackboneEvent;
 
-/** Reduce a `DocumentStateProjection` JSON object into editor status fields. */
+/** Reduce a `DocumentStateProjection` JSON object into editor status fields.
+ *  DELIBERATELY LENIENT: the projection is minted by another process whose
+ *  version is not pinned to this package's, so unknown sections are ignored and
+ *  missing or wrongly-typed fields summarize as absent rather than throwing.
+ *  Only a non-object projection is refused, as `null`. */
 export function projectionSummary(projection: unknown): ProjectionSummary | null;
 
 /** Render the compact editor-visible state projection summary. */

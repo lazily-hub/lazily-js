@@ -417,8 +417,16 @@ export class LosslessTreeCrdt {
           this.#frontier.contains(k.prevLeft) &&
           this.#frontier.contains(k.prevRight)
         );
+      // `false` here means "dependencies have not arrived yet", so the op is
+      // parked in the buffered list and retried. An UNKNOWN op type answered
+      // `false` too, which parked it FOREVER: it never became ready, never
+      // applied, never surfaced, and the buffered list grew without bound while
+      // the two replicas quietly diverged. Silently dropping an op is the one
+      // failure a CRDT cannot absorb — convergence is the whole contract — so
+      // an op type outside `lazily-spec/schemas/lossless-tree-delta.json` is
+      // rejected by name rather than treated as perpetually-not-ready.
       default:
-        return false;
+        throw new TypeError(`unknown lossless-tree op type: ${String(k.type)}`);
     }
   }
 
@@ -483,6 +491,15 @@ export class LosslessTreeCrdt {
       case "MergeLeaves":
         this.#applyMerge(k.left, k.right, op.id);
         break;
+      // The switch had no default at all, so an op type this replica does not
+      // implement fell straight out of it and was then RECORDED in the frontier
+      // as applied — the worst of both worlds: the peer is told the op landed
+      // while none of its effect exists locally. Local ops are minted by this
+      // class and remote ops are gated by the dependency check above, so the
+      // vocabulary is closed on both paths; mirror the encoder
+      // (`treeUpdateToWire`), which has always thrown on an unknown op kind.
+      default:
+        throw new TypeError(`unknown lossless-tree op type: ${String(k.type)}`);
     }
   }
 

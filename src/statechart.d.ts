@@ -44,14 +44,19 @@ export type GuardMap = Record<string, boolean>;
  *
  * `kind` is inferred when not stated: `history` when `history` is set;
  * `parallel` when `parallel` is true; `compound` when the state has an
- * `initial`; otherwise `atomic`.
+ * `initial`; otherwise `atomic`. A STATED `kind` must agree with that
+ * inference (`final` excepted, since it has no structural field of its own);
+ * an unknown or contradictory `kind` is rejected rather than absorbed.
  */
 export class ChartDef {
   private constructor();
   /** Parse and validate the declarative chart form. Throws on malformed
-   *  charts and unsupported features (`run` actions, `{expr: …}` guards). */
+   *  charts, unsupported features (`run` actions, `{expr: …}` guards), an
+   *  unknown or contradictory state `kind`, and any `parent` / `initial` /
+   *  `default` / transition target naming a state the chart does not define. */
   static fromChart(value: ChartJson): ChartDef;
-  /** Structural kind of a state node (defaults to `atomic` if unknown). */
+  /** Structural kind of a state node. Every id a validated chart names exists,
+   *  so the `atomic` fallback is reachable only for an id from outside it. */
   kind(id: string): StateKind;
   /** `true` for active-leaf kinds (atomic / final). */
   isLeaf(id: string): boolean;
