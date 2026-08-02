@@ -294,6 +294,98 @@ test("msgpack byte payloads are arrays of integers, not `bin`", () => {
   assert.throws(() => decodeMsgpackValue(withBin), /not msgpack `bin`/);
 });
 
+// protocol.md § NodeId / PeerId: `NodeId`/`PeerId` are `u64` "serialized as bare
+// JSON numbers", and "JavaScript/TypeScript peers must keep values at or below
+// `Number.MAX_SAFE_INTEGER` (2^53)". That bound was enforced but never pinned,
+// and an enforced-but-untested rule is one refactor from silently regressing
+// into the worst available failure: `JSON.parse` does not throw on
+// `9007199254740993`, it returns `9007199254740992`. A corrupted node id that
+// decodes cleanly is undetectable downstream.
+//
+// The rule is testable without source-text access precisely because the
+// rounding lands out of range: every integer literal above 2^53 - 1 parses to a
+// double >= 2^53, and `Number.isSafeInteger` is false for all of those. So the
+// damage is its own evidence.
+//
+// Both codecs must answer identically. A binding that refuses a frame under
+// `msgpack` and quietly mangles the same frame under `json` would be lying in
+// the REFERENCE codec, which is the one every other binding is checked against.
+const UNREPRESENTABLE = "9007199254740993"; // 2^53 + 1
+
+const outOfRangeFrames = {
+  "Snapshot.epoch": `{"Snapshot":{"epoch":${UNREPRESENTABLE},"nodes":[],"edges":[],"roots":[]}}`,
+  "Snapshot.nodes[].node": `{"Snapshot":{"epoch":1,"nodes":[{"node":${UNREPRESENTABLE},"type_tag":"i32","state":"Opaque"}],"edges":[],"roots":[]}}`,
+  "Snapshot.edges[].dependent": `{"Snapshot":{"epoch":1,"nodes":[],"edges":[{"dependent":${UNREPRESENTABLE},"dependency":1}],"roots":[]}}`,
+  "Snapshot.roots[]": `{"Snapshot":{"epoch":1,"nodes":[],"edges":[],"roots":[${UNREPRESENTABLE}]}}`,
+  "NodeState.SharedBlob.offset": `{"Snapshot":{"epoch":1,"nodes":[{"node":1,"type_tag":"b","state":{"SharedBlob":{"offset":${UNREPRESENTABLE},"len":1,"generation":1,"epoch":1,"checksum":1}}}],"edges":[],"roots":[]}}`,
+  "Delta.base_epoch": `{"Delta":{"base_epoch":${UNREPRESENTABLE},"epoch":2,"ops":[]}}`,
+  "Delta.ops[].node": `{"Delta":{"base_epoch":1,"epoch":2,"ops":[{"Invalidate":{"node":${UNREPRESENTABLE}}}]}}`,
+  "CrdtSync.frontier[].peer": `{"CrdtSync":{"frontier":[[${UNREPRESENTABLE},{"wall_time":5,"logical":0,"peer":1}]],"ops":[]}}`,
+  "CrdtSync.stamp.wall_time": `{"CrdtSync":{"frontier":[[1,{"wall_time":${UNREPRESENTABLE},"logical":0,"peer":1}]],"ops":[]}}`,
+  "CrdtSync.stamp.logical": `{"CrdtSync":{"frontier":[[1,{"wall_time":5,"logical":${UNREPRESENTABLE},"peer":1}]],"ops":[]}}`,
+  "CrdtSync.ops[].node": `{"CrdtSync":{"frontier":[],"ops":[{"node":${UNREPRESENTABLE},"key":null,"stamp":{"wall_time":5,"logical":0,"peer":1},"state":{"Inline":[1]}}]}}`,
+  "ResyncRequest.from_epoch": `{"ResyncRequest":{"from_epoch":${UNREPRESENTABLE}}}`,
+  "OutboxAck.through_epoch": `{"OutboxAck":{"through_epoch":${UNREPRESENTABLE}}}`,
+};
+
+test("json decode refuses an id this runtime cannot represent, in every integer position", () => {
+  // Pin the premise first: the raw parse really does round silently, so this
+  // test is guarding against something rather than restating what JSON.parse
+  // already refuses.
+  assert.equal(JSON.parse(`{"n":${UNREPRESENTABLE}}`).n, 9007199254740992);
+
+  for (const [position, frame] of Object.entries(outOfRangeFrames)) {
+    assert.throws(
+      () => IpcMessage.decodeJson(frame),
+      /safe[- ]integer/,
+      `${position} should refuse an unrepresentable id rather than round it`,
+    );
+  }
+});
+
+test("msgpack decode gives the same answer as json for an unrepresentable id", () => {
+  // Same values, encoded as msgpack by hand so the frame never passes through
+  // this binding's own encoder (which would refuse to build it in the first
+  // place). The two codecs have to agree: refusing under one and rounding
+  // under the other is the split this test exists to prevent.
+  const packStr = (s) => {
+    const bytes = new TextEncoder().encode(s);
+    return [0xa0 | bytes.length, ...bytes];
+  };
+  const packU64 = (hi, lo) => [
+    0xcf,
+    (hi >>> 24) & 0xff,
+    (hi >>> 16) & 0xff,
+    (hi >>> 8) & 0xff,
+    hi & 0xff,
+    (lo >>> 24) & 0xff,
+    (lo >>> 16) & 0xff,
+    (lo >>> 8) & 0xff,
+    lo & 0xff,
+  ];
+  // 2^53 + 1 == 0x0020000000000001
+  const frame = Uint8Array.from([
+    0x81,
+    ...packStr("ResyncRequest"),
+    0x81,
+    ...packStr("from_epoch"),
+    ...packU64(0x00200000, 0x00000001),
+  ]);
+  assert.throws(() => IpcMessage.decodeMsgpack(frame), /safe[- ]integer/);
+});
+
+test("the largest representable id is accepted by both codecs", () => {
+  // The boundary matters in both directions: a guard that refused everything
+  // large would also pass the two tests above while breaking real frames.
+  const frame = `{"ResyncRequest":{"from_epoch":${Number.MAX_SAFE_INTEGER}}}`;
+  const message = IpcMessage.decodeJson(frame);
+  assert.equal(message.resyncRequest.fromEpoch, Number.MAX_SAFE_INTEGER);
+  assert.equal(
+    IpcMessage.decodeMsgpack(message.encodeMsgpack()).resyncRequest.fromEpoch,
+    Number.MAX_SAFE_INTEGER,
+  );
+});
+
 // `assert.deepEqual` throws rather than returning a verdict, and the fixture
 // pins a boolean. Wrap it so the fixture's own `true` is what the runner is
 // compared against (`#lzconsumednotasserted`) instead of an assertion that
