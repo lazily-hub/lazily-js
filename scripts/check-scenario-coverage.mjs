@@ -144,18 +144,24 @@ const opened = new Set(
 );
 
 // The corpus-wide fixed resolution order, identical in every binding:
-//   1. `id` if present   2. else `name` if present   3. else `#<n>` (0-based).
+//   1. `id` if present   2. else `name` if present.
+//
+// There is no third step (#lzspecscenarioids). The positional `#<n>` fallback
+// let this guard identify a scenario BY POSITION, which silently rebinds to a
+// different scenario when the corpus array is reordered — the ledger says "index
+// 1 was replayed", this reader looks at whatever now sits at index 1, and the two
+// agree with each other about the wrong thing. An unidentified scenario is a
+// problem to report, not an id to invent.
 function resolveId(scenario, index) {
-  if (scenario === null || typeof scenario !== "object" || Array.isArray(scenario)) {
-    return { id: `#${index}`, fallback: true };
+  const identifier = (value) =>
+    typeof value === "string" || typeof value === "number" ? String(value).trim() : "";
+  if (scenario !== null && typeof scenario === "object" && !Array.isArray(scenario)) {
+    const id = identifier(scenario.id);
+    if (id !== "") return { id, unidentified: false };
+    const name = identifier(scenario.name);
+    if (name !== "") return { id: name, unidentified: false };
   }
-  if (scenario.id !== undefined && scenario.id !== null) {
-    return { id: String(scenario.id), fallback: false };
-  }
-  if (scenario.name !== undefined && scenario.name !== null) {
-    return { id: String(scenario.name), fallback: false };
-  }
-  return { id: `#${index}`, fallback: true };
+  return { id: `#${index}`, unidentified: true };
 }
 
 function corpusFixtures() {
@@ -171,7 +177,7 @@ function corpusFixtures() {
   return found.sort();
 }
 
-// fixture -> ordered [{ id, fallback }], for every corpus fixture that carries a
+// fixture -> ordered [{ id, unidentified }], for every corpus fixture that carries a
 // `scenarios` array. Read from DISK, never from the ledger: the ledger is what
 // the run claims, and the corpus is what it has to account for.
 const corpusScenarios = new Map();
@@ -203,7 +209,6 @@ let problems = 0;
 let covered = 0;
 let total = 0;
 let excusedOk = 0;
-const positional = [];
 const checkedFixtures = [];
 
 for (const [fixture, ids] of [...corpusScenarios].sort()) {
@@ -226,9 +231,18 @@ for (const [fixture, ids] of [...corpusScenarios].sort()) {
     seen.add(id);
   }
 
-  for (const { id, fallback } of ids) {
+  for (const { id, unidentified } of ids) {
     total += 1;
-    if (fallback) positional.push(`${fixture} ${id}`);
+    if (unidentified) {
+      fail([
+        `ERROR: '${fixture}' scenario at ${id} carries neither \`id\` nor \`name\`.`,
+        "       The ledger would record it by POSITION, which silently rebinds on a",
+        "       corpus reorder. Give it a stable id upstream in lazily-spec",
+        "       (#lzspecscenarioids).",
+      ]);
+      problems += 1;
+      continue;
+    }
     const key = `${fixture}\t${id}`;
     const excuse = excusedByFixture.get(key);
     const didReplay = replayed.has(key);
@@ -314,21 +328,6 @@ for (const entry of EXCUSED_SCENARIOS) {
   }
 }
 
-// The positional fallback is REPORTED, never silently accepted. It exists so this
-// rung is not blocked on a shared-corpus edit — `collections/mergecell_algebra.json`
-// distinguishes its scenarios only by `policy` — and this output is what keeps the
-// corpus gap visible so it can be fixed upstream in lazily-spec.
-if (positional.length > 0) {
-  console.error(
-    `NOTE: ${positional.length} scenario(s) have neither \`id\` nor \`name\` and were` +
-      " identified by POSITION, which is not stable under a corpus reorder:",
-  );
-  for (const entry of positional) console.error(`      ${entry}`);
-  console.error(
-    "      Fixing that is an upstream lazily-spec change (add `id`/`name`), out of scope here.",
-  );
-}
-
 if (problems > 0) {
   console.error(
     `scenario replay FAILED: ${problems} problem(s); ${covered}/${total} scenarios replayed` +
@@ -365,6 +364,6 @@ if (covered < MIN_SCENARIOS) {
 
 console.error(
   `scenario replay OK: ${covered}/${total} scenarios REPLAYED across ${checkedFixtures.length}` +
-    ` opened scenario-bearing fixtures (${excusedOk} excused, ${positional.length} identified by` +
-    " position; runtime ledger — these scenarios were really run)",
+    ` opened scenario-bearing fixtures (${excusedOk} excused;` +
+    " runtime ledger — these scenarios were really run)",
 );

@@ -62,7 +62,7 @@
 //
 // So this recorder also registers every element of a `scenarios` array against
 // its fixture, resolving the scenario's id in the corpus-wide fixed order
-// (`id`, else `name`, else the positional index spelled `#<n>`), and exposes a
+// (`id`, else `name` — there is no positional fallback, #lzspecscenarioids), and exposes a
 // channel the runner marks a replay through. The registration is what lets the
 // runner mark WITHOUT naming its own fixture, exactly as `blockOwner` does for
 // keys — a runner that names the fixture is making a claim, and a claim rots.
@@ -196,18 +196,35 @@ if (out || walkOut) {
   //
   //   1. `id` if present
   //   2. else `name` if present
-  //   3. else the positional index, spelled `#<n>` (0-based)
   //
-  // The corpus is not uniform — the three `stdlib` fixtures identify a scenario
-  // by `id`, twenty-eight identify by `name`, and
-  // `collections/mergecell_algebra.json` carries no identifier at all. Step 3
-  // exists so this rung is not blocked on a shared-corpus edit; the guard
-  // REPORTS every positional fallback rather than accepting it silently, and
-  // that visibility is what makes the corpus gap fixable upstream later.
+  // There is no third step (#lzspecscenarioids). It used to fall back to the
+  // positional index spelled `#<n>`, which let the ledger record a scenario BY
+  // POSITION — and a positional entry silently rebinds to a DIFFERENT scenario
+  // when the corpus array is reordered, with nothing turning red: the guard
+  // compares "index 1 was replayed" against whatever now sits at index 1 and
+  // agrees with itself. The fallback was load-bearing for exactly one fixture,
+  // `collections/mergecell_algebra.json`, whose scenarios were distinguishable
+  // only by `policy`; they now carry ids, and lazily-spec's
+  // `scenario-identity-check` keeps every scenario identified. A hole with no
+  // users is one waiting to become load-bearing again, so an unidentified
+  // scenario throws here instead.
+  //
+  // A BLANK id is refused for the same reason: accepting it would file every
+  // blank-id scenario in the corpus under one ledger entry, which reads as
+  // "replayed" the moment any one of them runs.
+  const identifier = (value) =>
+    typeof value === "string" || typeof value === "number" ? String(value).trim() : "";
   const scenarioId = (scenario, index) => {
-    if (scenario.id !== undefined && scenario.id !== null) return String(scenario.id);
-    if (scenario.name !== undefined && scenario.name !== null) return String(scenario.name);
-    return `#${index}`;
+    const id = identifier(scenario.id);
+    if (id !== "") return id;
+    const name = identifier(scenario.name);
+    if (name !== "") return name;
+    throw new Error(
+      `scenario at index ${index} carries neither \`id\` nor \`name\`. The replay ledger ` +
+        "would have to record it by POSITION, where inserting a scenario ahead of it " +
+        "silently rebinds that entry to a different scenario. Give it a stable id " +
+        "upstream in lazily-spec (#lzspecscenarioids).",
+    );
   };
 
   // Keys that IDENTIFY or narrate a scenario rather than drive one
