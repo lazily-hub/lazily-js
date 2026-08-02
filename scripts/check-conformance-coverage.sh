@@ -136,6 +136,28 @@ for known in "${KNOWN_UNCOVERED[@]:-}"; do
   fi
 done
 
+# ---- The evidence channel guards itself ----
+#
+# Everything above asks "did the suite open fixture X?" and answers it out of the
+# manifest; nothing yet asks whether the manifest is describing THIS corpus. A
+# recorded id that resolves to no file under $SPEC_DIR means the recorder dropped
+# or interleaved writes, or the evidence file is left over from a run against a
+# different corpus — and coverage computed from it is wrong in both directions:
+# the count is inflated by ids nobody can resolve, and a fixture the suite
+# stopped opening can hide behind them. The scenario ledger in
+# check-scenario-coverage.mjs already makes this check on its own ids; this is
+# the fixture-manifest half.
+while IFS= read -r id; do
+  [ -n "$id" ] || continue
+  if [ ! -f "$SPEC_DIR/$id" ]; then
+    echo "ERROR: manifest records '$id', which names no file in $SPEC_DIR." >&2
+    echo "       The recorder is dropping or interleaving writes, or this evidence" >&2
+    echo "       file was written against a different corpus; coverage computed from" >&2
+    echo "       this manifest cannot be trusted." >&2
+    missing=$((missing + 1))
+  fi
+done <<< "$OPENED"
+
 if [ "$missing" -gt 0 ]; then
   echo "conformance coverage FAILED: $missing problem(s)" >&2
   exit 1
