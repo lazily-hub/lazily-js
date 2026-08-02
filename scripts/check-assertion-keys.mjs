@@ -94,8 +94,23 @@ function fail(lines) {
   for (const line of lines) console.error(line);
 }
 
+// A missing corpus is a legitimate local state (no sibling checkout) and an
+// illegitimate CI state (#lzvacuousrun) — the same split rungs 1 and 4 make. Every
+// check below reasons about keys of blocks the run REACHED, so an absent corpus
+// reports OK over nothing at all. This mirrors how the missing MANIFEST below is
+// already treated: missing evidence, not evidence of absence.
 if (!existsSync(SPEC_DIR)) {
+  if (process.env.CI) {
+    fail([
+      `ERROR: canonical corpus not found at ${SPEC_DIR}, and CI is set.`,
+      "       Under CI this is missing EVIDENCE, not evidence of absence: the checkout",
+      "       is wrong, not the corpus. Exiting 0 here would report assertion-key",
+      "       coverage OK having examined zero fixtures (#lzvacuousrun).",
+    ]);
+    process.exit(1);
+  }
   console.error(`SKIP: canonical corpus not found at ${SPEC_DIR} (clone the lazily-spec sibling)`);
+  console.error("      Local checkout only — this would be a hard failure under CI.");
   process.exit(0);
 }
 

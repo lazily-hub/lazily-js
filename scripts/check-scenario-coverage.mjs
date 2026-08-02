@@ -87,8 +87,27 @@ function fail(lines) {
   for (const line of lines) console.error(line);
 }
 
+// A missing corpus is a legitimate local state (no sibling checkout) and an
+// illegitimate CI state (#lzvacuousrun). Skipping under CI is the vacuous green
+// this rung exists to prevent: every check below walks the scenarios of fixtures
+// the run OPENED, so an absent corpus reports OK over nothing at all — zero
+// opened fixtures means zero unreplayed scenarios and zero stale excuses, so
+// nothing else here can contradict it. This mirrors how a missing MANIFEST is
+// already treated below: missing evidence, not evidence of absence. Locally it
+// stays a skip, because a contributor without the sibling is not making a false
+// claim.
 if (!existsSync(SPEC_DIR)) {
+  if (process.env.CI) {
+    fail([
+      `ERROR: canonical corpus not found at ${SPEC_DIR}, and CI is set.`,
+      "       Under CI this is missing EVIDENCE, not evidence of absence: the checkout",
+      "       is wrong, not the corpus. Exiting 0 here would report scenario replay OK",
+      "       having compared zero scenarios (#lzvacuousrun).",
+    ]);
+    process.exit(1);
+  }
   console.error(`SKIP: canonical corpus not found at ${SPEC_DIR} (clone the lazily-spec sibling)`);
+  console.error("      Local checkout only — this would be a hard failure under CI.");
   process.exit(0);
 }
 
@@ -315,6 +334,32 @@ if (problems > 0) {
     `scenario replay FAILED: ${problems} problem(s); ${covered}/${total} scenarios replayed` +
       ` across ${checkedFixtures.length} opened fixture(s)`,
   );
+  process.exit(1);
+}
+
+// ---- Positive-evidence floor (#lzvacuousrun) ----
+// Every check above walks the scenarios of OPENED fixtures. Zero opened fixtures
+// means zero scenarios, which means zero unreplayed scenarios and zero stale
+// excuses, which reports OK having compared nothing. The loop cannot distinguish
+// "nothing is wrong" from "nothing was examined", so assert the magnitude before
+// claiming green. Do not lower MIN_SCENARIOS to fix a red run — a drop here means
+// a scenario dispatch stopped matching or the ledger detached, which is the
+// finding.
+const MIN_SCENARIOS = Number(process.env.MIN_SCENARIOS ?? "110");
+if (total === 0) {
+  fail([
+    "ERROR: ZERO scenarios were found across the opened fixtures.",
+    "       Every check above is vacuously green over an empty population: no",
+    "       scenario can go unreplayed when none was examined (#lzvacuousrun).",
+  ]);
+  process.exit(1);
+}
+if (covered < MIN_SCENARIOS) {
+  fail([
+    `ERROR: only ${covered} distinct scenarios were REPLAYED, expected >= ${MIN_SCENARIOS}.`,
+    "       A scenario dispatch stopped matching, or the ledger detached mid-run.",
+    "       Do not lower MIN_SCENARIOS to fix this.",
+  ]);
   process.exit(1);
 }
 
