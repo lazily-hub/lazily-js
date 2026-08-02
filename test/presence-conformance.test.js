@@ -38,9 +38,13 @@ test("PresenceCell", () => {
   const obs = observe(ctx, cell.presentCell);
   for (const step of fx.steps) {
     const op = step.op;
+    // No closing arm (#lzscenariobodyskip): the presence corpus union also
+    // carries `set`, so an unmatched spelling drove nothing and `present` was
+    // then compared against untouched state.
     if (op.type === "heartbeat") cell.heartbeat(op.peer, op.value, op.now);
     else if (op.type === "evict") cell.evict(op.peer, op.now);
     else if (op.type === "tick") cell.tick(op.now);
+    else throw new Error(`unknown PresenceCell op type in fixture: ${op.type}`);
     assertKey(step.expected, "present", cell.present());
     checkInval(ctx, obs, step, "present");
   }
@@ -53,8 +57,11 @@ test("AwarenessCell", () => {
   const obs = observe(ctx, cell.presentCell);
   for (const step of fx.steps) {
     const op = step.op;
+    // No closing arm (#lzscenariobodyskip): an unmatched spelling skipped the op
+    // and left `present` asserted against untouched state.
     if (op.type === "set") cell.set(op.peer, op.value, op.now);
     else if (op.type === "tick") cell.tick(op.now);
+    else throw new Error(`unknown AwarenessCell op type in fixture: ${op.type}`);
     assertKey(step.expected, "present", cell.present());
     checkInval(ctx, obs, step, "present");
   }
@@ -67,8 +74,11 @@ test("EphemeralCell", () => {
   const obs = observe(ctx, cell.valueCell);
   for (const step of fx.steps) {
     const op = step.op;
+    // No closing arm (#lzscenariobodyskip): an unmatched spelling skipped the op
+    // and left `value` asserted against untouched state.
     if (op.type === "set") cell.set(op.value, op.now, op.ttl);
     else if (op.type === "tick") cell.tick(op.now);
+    else throw new Error(`unknown EphemeralCell op type in fixture: ${op.type}`);
     assertKey(step.expected, "value", cell.value());
     checkInval(ctx, obs, step, "value");
   }

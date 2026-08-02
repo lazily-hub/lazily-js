@@ -252,6 +252,12 @@ test("msgpack frames round-trip through the cross-language binary default", () =
       // identity. Both lists therefore carry `key`.
       assertKey(block, "first_op_encoded_field_names", sortedFieldNames(body.ops[0]), where);
       assertKey(block, "second_op_encoded_field_names", sortedFieldNames(body.ops[1]), where);
+    } else {
+      // The chain had no closing arm (#lzscenariobodyskip): `Delta` legitimately
+      // carries no per-element field-name expectation, but an unrecognised tag
+      // took the same silent path, so the named-field rule would go unchecked
+      // for a variant nobody noticed was missing an arm.
+      assert.equal(tag, "Delta", `${where}: unknown IpcMessage envelope tag ${tag}`);
     }
 
     assertValues(block, roundTripped, where);

@@ -78,11 +78,20 @@ function reencodedNode(scenario, message) {
     // defect was a msgpack encoder writing `key: null` while json omitted it.
     wire = decodeMsgpackValue(encodeMsgpackValue(wire));
   }
-  return scenario.field === "snapshot" ? wire.Snapshot.nodes[0] : wire.Delta.ops[0].NodeAdd;
+  // The ternary's false arm assumed `node_add` (#lzscenariobodyskip): an
+  // unrecognised `field` read the DELTA branch, so the re-encode half of the
+  // contract would have been asserted about a frame the scenario never named.
+  if (scenario.field === "snapshot") return wire.Snapshot.nodes[0];
+  if (scenario.field === "node_add") return wire.Delta.ops[0].NodeAdd;
+  throw new Error(`unknown scenario field in fixture: ${scenario.field}`);
 }
 
 function decodedKey(scenario, message) {
   if (scenario.field === "snapshot") return message.snapshot.nodes[0].key;
+  // Same fail-open on the decode half (#lzscenariobodyskip).
+  if (scenario.field !== "node_add") {
+    throw new Error(`unknown scenario field in fixture: ${scenario.field}`);
+  }
   const op = message.delta.ops[0];
   assert.ok(op instanceof DeltaOpNodeAdd, "the fixture declares a NodeAdd op");
   return op.key;

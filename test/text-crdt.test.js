@@ -310,6 +310,12 @@ function runTextCrdtScenario(scenario) {
       replicas.get(y).applyDelta(toY);
     } else if (step.op) {
       applyTextCrdtOp(replicas.get(step.on ?? "a"), step, label);
+    } else {
+      // The chain had no closing arm (#lzscenariobodyskip): the step's shape IS
+      // its discriminator, so a step naming none of these keys was silently
+      // skipped and the scenario's `expect` block compared against a replica the
+      // step never touched.
+      throw new Error(`${label}: unrecognized textcrdt step: ${JSON.stringify(step)}`);
     }
   }
 

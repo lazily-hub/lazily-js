@@ -177,6 +177,13 @@ function runSeqCrdtScenario(scenario) {
       replicas.get(step.merge.into).merge(replicas.get(step.merge.from), step.now);
     } else if (step.op) {
       applyOp(replicas.get(step.on ?? "a"), step);
+    } else {
+      // The chain had no closing arm (#lzscenariobodyskip): the step's shape IS
+      // its discriminator here, so a step naming none of these keys — a renamed
+      // or newly-added step form — was silently skipped and the scenario's
+      // `expect` block was then compared against a replica the step never
+      // touched.
+      throw new Error(`unrecognized seqcrdt step: ${JSON.stringify(step)}`);
     }
   }
 

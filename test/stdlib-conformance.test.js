@@ -32,9 +32,15 @@ function replayTimer(steps) {
         assert.ok(error instanceof TimerError);
         actual = { outcome: "unavailable", reason: error.reason };
       }
-    } else {
+    } else if (step.op === "observe") {
       assert.ok(timer);
       actual = timer.observe(step.now);
+    } else {
+      // The `else` assumed `observe` (#lzscenariobodyskip): the stdlib corpus
+      // `op` union also spells poll/receipt/advance/register_recheck/dispose, so
+      // any other op would have been replayed as an observation and its
+      // `expect` block compared against the wrong call.
+      throw new Error(`unknown stdlib timer op in fixture: ${step.op}`);
     }
     assertBlock(step.expect, actual);
   }
@@ -47,16 +53,23 @@ function replayTimeout(steps) {
     if (step.op === "start") {
       timeout = new Timeout(step.now, step.duration);
       actual = { outcome: "pending", deadline: timeout.deadline };
-    } else {
+    } else if (step.op === "poll") {
       let operationCalls = 0;
       let cancellationCalls = 0;
       actual = timeout.poll(
         step.now,
         () => {
           operationCalls += 1;
+          // The fall-through assumed `pending` (#lzscenariobodyskip): an
+          // unrecognised `operation` spelling made the operation report pending,
+          // which silently changes WHICH outcome the `expect` block is compared
+          // against.
           if (step.operation === "completed") return TimeoutOperation.completed(step.value);
           if (step.operation === "unavailable") return TimeoutOperation.unavailable();
-          return TimeoutOperation.pending();
+          if (step.operation === "pending" || step.operation === undefined) {
+            return TimeoutOperation.pending();
+          }
+          throw new Error(`unknown stdlib timeout operation in fixture: ${step.operation}`);
         },
         () => {
           cancellationCalls += 1;
@@ -68,6 +81,11 @@ function replayTimeout(steps) {
         operation_calls: operationCalls,
         cancellation_calls: cancellationCalls,
       };
+    } else {
+      // The chain had no closing arm (#lzscenariobodyskip): an unmatched `op`
+      // left `actual` undefined, and `assertBlock` was then handed nothing to
+      // compare the fixture's `expect` block against.
+      throw new Error(`unknown stdlib timeout op in fixture: ${step.op}`);
     }
     assertBlock(step.expect, actual);
   }
@@ -92,8 +110,13 @@ function replayBarrier(steps) {
       actual = barrier.advance(step.revision, step.predicate);
     } else if (step.op === "dispose") {
       actual = barrier.dispose();
-    } else {
+    } else if (step.op === "receipt") {
       actual = barrier.receipt(step.key);
+    } else {
+      // The `else` assumed `receipt` (#lzscenariobodyskip): any other spelling
+      // read a receipt instead of driving the op the fixture named, so the step's
+      // `expect` block was compared against a different observation entirely.
+      throw new Error(`unknown stdlib revision-barrier op in fixture: ${step.op}`);
     }
     if (step.op === "observe") actual = { ...actual, cancellation_calls: calls };
     assertBlock(step.expect, actual);

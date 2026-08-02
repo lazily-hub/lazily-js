@@ -27,6 +27,23 @@ function observe(ctx, cell) {
   return slot;
 }
 
+/**
+ * Read the step's `now` after checking the op the fixture actually named.
+ *
+ * Every runner in this file drove `tick(step.op.now)` unconditionally and never
+ * read `op.type` at all (#lzscenariobodyskip). The temporal corpus spells only
+ * `tick` today, so the omission was invisible — but a fixture that grew an
+ * `arm`, a `reset` or a `set` would have been replayed as a run of clock ticks,
+ * and the `fired`/`count`/`state` expectations would have been compared against
+ * a timeline the fixture never described. The discriminator is now consumed.
+ */
+function tickNow(step, what) {
+  if (step.op.type !== "tick") {
+    throw new Error(`unknown ${what} op type in fixture: ${step.op.type}`);
+  }
+  return step.op.now;
+}
+
 test("TimerCell single-shot", () => {
   const fx = loadFixture("timer_single_shot.json");
   const ctx = new Context();
@@ -34,7 +51,7 @@ test("TimerCell single-shot", () => {
   const observed = observe(ctx, timer.firedCell);
 
   for (const step of fx.steps) {
-    assert.equal(timer.tick(step.op.now), step.returns, "fire edge");
+    assert.equal(timer.tick(tickNow(step, "TimerCell")), step.returns, "fire edge");
     assertKey(step.expected, "fired", timer.hasFired());
     assertKeyWith(step.expected, "value", (want) => {
       // The corpus spells the fired unit payload `"()"`; this binding materialises
@@ -60,7 +77,7 @@ test("IntervalCell periodic", () => {
   const observed = observe(ctx, iv.countCell);
 
   for (const step of fx.steps) {
-    assert.equal(iv.tick(step.op.now), step.returns, "fire edge");
+    assert.equal(iv.tick(tickNow(step, "IntervalCell")), step.returns, "fire edge");
     assertKey(step.expected, "count", iv.count());
     assertKey(step.expected, "next_fire", iv.nextFire());
 
@@ -79,7 +96,7 @@ test("CronCell pattern", () => {
   const observed = observe(ctx, cron.countCell);
 
   for (const step of fx.steps) {
-    assert.equal(cron.tick(step.op.now), step.returns, "fire edge");
+    assert.equal(cron.tick(tickNow(step, "CronCell")), step.returns, "fire edge");
     assertKey(step.expected, "count", cron.count());
     assertKey(step.expected, "next_fire", cron.nextFire());
 
@@ -98,7 +115,7 @@ test("DeadlineCell expiry", () => {
   const observed = observe(ctx, d.expiredCell);
 
   for (const step of fx.steps) {
-    assert.equal(d.tick(step.op.now), step.returns, "expiry edge");
+    assert.equal(d.tick(tickNow(step, "DeadlineCell")), step.returns, "expiry edge");
     const state = d.state();
     assertKey(step.expected, "state", state.state);
     assertKey(step.expected, "value", state.value, "value preserved");

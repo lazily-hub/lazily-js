@@ -35,7 +35,17 @@ const LEAF_KIND = {
 
 function nodeSeed(spec) {
   if (typeof spec.element === "string") return { type: "element", kind: spec.element };
-  if (spec.leaf) return { type: "leaf", leafKind: LEAF_KIND[spec.leaf.kind], text: spec.leaf.text };
+  if (spec.leaf) {
+    // A table miss used to yield `undefined` and be seeded as a leaf with no
+    // kind (#lzscenariobodyskip) — the render assertions mostly do not look at
+    // leaf kind, so an unknown spelling produced a tree that still compared
+    // equal. The lookup is now checked.
+    const leafKind = LEAF_KIND[spec.leaf.kind];
+    if (leafKind === undefined) {
+      throw new Error(`unknown leaf kind in fixture: ${spec.leaf.kind}`);
+    }
+    return { type: "leaf", leafKind, text: spec.leaf.text };
+  }
   throw new Error(`node spec has neither element nor leaf: ${JSON.stringify(spec)}`);
 }
 

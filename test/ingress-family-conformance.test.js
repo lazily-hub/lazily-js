@@ -192,8 +192,21 @@ function expectedAdmission(raw) {
       return { kind, from: raw.from, to: raw.to };
     case IngressAdmissionKind.Dropped:
       return { kind, reason: member(IngressDropReason, raw.reason, "drop reason") };
-    default:
+    case IngressAdmissionKind.Blocked:
+      // The one genuinely payload-less admission: the tag IS the whole outcome.
       return { kind };
+    default:
+      // This dispatch runs on an EXPECTED value, so a silent default did not skip
+      // an assertion — it changed which one ran (#lzscenariobodyskip). The old
+      // `default: return { kind }` compared only the admission tag and dropped
+      // whatever payload the fixture carried (`delivered_through`, `gap_from`,
+      // `from`/`to`, `reason`), so a NEW admission kind added to the enum would
+      // have been "asserted" by a check that looks at nothing but its own name.
+      // `member()` above only proves the spelling is in the enum, not that this
+      // runner knows what to compare for it.
+      return assert.fail(
+        `unhandled expected admission kind \`${kind}\` — its payload would go uncompared`,
+      );
   }
 }
 

@@ -44,6 +44,13 @@ test("TumblingCountWindow", () => {
   const w = new TumblingCountWindow(ctx, fx.config.n, sum);
   const obs = observe(ctx, w.outputCell);
   for (const step of fx.steps) {
+    // `op.type` was never read (#lzscenariobodyskip): every step was pushed
+    // whatever the fixture named it, and the windowing corpus union carries
+    // push/flush/tick — a count fixture that grew a `tick` would have been
+    // replayed as a value push.
+    if (step.op.type !== "push") {
+      throw new Error(`unknown TumblingCountWindow op type in fixture: ${step.op.type}`);
+    }
     assert.equal(w.push(step.op.value), step.returns, "emit");
     check(ctx, obs, step, w.output());
   }
@@ -56,10 +63,13 @@ test("TumblingTimeWindow", () => {
   const obs = observe(ctx, w.outputCell);
   for (const step of fx.steps) {
     let e;
+    // The `else` assumed `tick` (#lzscenariobodyskip): a `flush` — which this
+    // corpus also spells — would have advanced the clock instead.
     if (step.op.type === "push") {
       w.push(step.op.now, step.op.value);
       e = null;
-    } else e = w.tick(step.op.now);
+    } else if (step.op.type === "tick") e = w.tick(step.op.now);
+    else throw new Error(`unknown TumblingTimeWindow op type in fixture: ${step.op.type}`);
     assert.equal(e, step.returns, "emit");
     check(ctx, obs, step, w.output());
   }
@@ -71,6 +81,10 @@ test("SlidingWindow", () => {
   const w = new SlidingWindow(ctx, fx.config.size, fx.config.slide, sum);
   const obs = observe(ctx, w.outputCell);
   for (const step of fx.steps) {
+    // `op.type` was never read (#lzscenariobodyskip): see TumblingCountWindow.
+    if (step.op.type !== "push") {
+      throw new Error(`unknown SlidingWindow op type in fixture: ${step.op.type}`);
+    }
     assert.equal(w.push(step.op.value), step.returns, "emit");
     check(ctx, obs, step, w.output());
   }
@@ -82,7 +96,12 @@ test("SessionWindow", () => {
   const w = new SessionWindow(ctx, fx.config.gap, sum);
   const obs = observe(ctx, w.outputCell);
   for (const step of fx.steps) {
-    const e = step.op.type === "push" ? w.push(step.op.now, step.op.value) : w.flush(step.op.now);
+    // The ternary's false arm assumed `flush` (#lzscenariobodyskip): a `tick`
+    // would have been replayed as a session flush.
+    let e;
+    if (step.op.type === "push") e = w.push(step.op.now, step.op.value);
+    else if (step.op.type === "flush") e = w.flush(step.op.now);
+    else throw new Error(`unknown SessionWindow op type in fixture: ${step.op.type}`);
     assert.equal(e, step.returns, "emit");
     check(ctx, obs, step, w.output());
   }

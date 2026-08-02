@@ -35,7 +35,15 @@ function loadFixture(name) {
 const CLIENT_VARIANTS = new Set(["join", "offer", "answer", "ice", "relay", "leave"]);
 
 function decodeFrame(direction, wire) {
-  return direction === "client" ? ClientMessage.fromWire(wire) : ServerMessage.fromWire(wire);
+  // The ternary's false arm assumed `server` (#lzscenariobodyskip): any
+  // `direction` this runner does not know — a typo, or a third direction the
+  // corpus grows — silently ran the SERVER codec. In the round-trip test that
+  // changes which decoder the frame is asserted against; in the negative-fixture
+  // test it changes which codec is expected to reject, so a client-only refusal
+  // could be satisfied by the server codec throwing for an unrelated reason.
+  if (direction === "client") return ClientMessage.fromWire(wire);
+  if (direction === "server") return ServerMessage.fromWire(wire);
+  throw new Error(`unknown frame direction in fixture: ${direction}`);
 }
 
 test("signaling frames.json round-trips every variant byte-for-byte", () => {

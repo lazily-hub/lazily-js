@@ -38,6 +38,10 @@ test("HealthCell", () => {
   const obs = observe(ctx, h.healthCell);
   for (const step of fx.steps) {
     const op = step.op;
+    // `op.type` was never read (#lzscenariobodyskip): every step was driven as a
+    // `set` whatever the fixture named, so a corpus that added a second health
+    // op would have been silently replayed as a run of `set`s.
+    if (op.type !== "set") throw new Error(`unknown HealthCell op type in fixture: ${op.type}`);
     h.set(op.name, op.up, op.critical);
     assertKey(step.expected, "health", h.health());
     checkInval(ctx, obs, step, "health");
@@ -50,6 +54,10 @@ test("ReadinessCell", () => {
   const r = new ReadinessCell(ctx);
   const obs = observe(ctx, r.readyCell);
   for (const step of fx.steps) {
+    // `op.type` was never read (#lzscenariobodyskip): see HealthCell above.
+    if (step.op.type !== "set") {
+      throw new Error(`unknown ReadinessCell op type in fixture: ${step.op.type}`);
+    }
     r.set(step.op.name, step.op.ready);
     assertKey(step.expected, "ready", r.ready());
     checkInval(ctx, obs, step, "ready");
@@ -63,10 +71,14 @@ test("DiscoveryCell", () => {
   const obs = observe(ctx, d.discoveryCell);
   for (const step of fx.steps) {
     const op = step.op;
+    // No closing arm (#lzscenariobodyskip): the service corpus union also carries
+    // `replay` and `set`, so an unmatched spelling skipped the op AND its
+    // `returns` comparison, leaving `discovery` asserted against untouched state.
     if (op.type === "register") d.register(op.service, op.endpoint, op.peer);
     else if (op.type === "deregister") d.deregister(op.service);
     else if (op.type === "evict") d.evict(op.peer);
     else if (op.type === "resolve") assert.equal(d.resolve(op.service), step.returns);
+    else throw new Error(`unknown DiscoveryCell op type in fixture: ${op.type}`);
     assertKey(step.expected, "discovery", d.discovery());
     checkInval(ctx, obs, step, "discovery");
   }
@@ -79,9 +91,12 @@ test("ServiceRegistry", () => {
   const obs = observe(ctx, reg.projectionCell);
   for (const step of fx.steps) {
     const op = step.op;
+    // No closing arm (#lzscenariobodyskip): an unmatched spelling left the
+    // projection assertion comparing the fixture against untouched state.
     if (op.type === "register") reg.register(op.service, op.endpoint);
     else if (op.type === "deregister") reg.deregister(op.service);
     else if (op.type === "replay") reg.replay();
+    else throw new Error(`unknown ServiceRegistry op type in fixture: ${op.type}`);
     assertKey(step.expected, "projection", reg.projection());
     checkInval(ctx, obs, step, "projection");
   }

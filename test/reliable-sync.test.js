@@ -630,8 +630,12 @@ const stamp = (o) => new WireStamp({ wallTime: o.wall_time, logical: o.logical, 
 function foldOrSet(ops, order = (o) => o) {
   const set = new OrSet();
   for (const op of order([...ops])) {
+    // No closing arm (#lzscenariobodyskip): an unmatched `op.op` folded NOTHING
+    // into the set, and `present`/`tags` were then asserted against a set the
+    // fixture's op list never reached.
     if (op.op === "add") set.add(op.tag);
     else if (op.op === "remove") set.removeObserved(op.observed_tags);
+    else throw new Error(`unknown OR-set op in fixture: ${op.op}`);
   }
   return set;
 }
@@ -771,8 +775,10 @@ test("reliable-sync: liveness_orset_lww.json", () => {
     for (const o of ops) {
       if (o.register_kind === "orset") {
         if (!sets.has(o.key)) sets.set(o.key, new OrSet());
+        // The `else` assumed `remove` (#lzscenariobodyskip).
         if (o.op === "add") sets.get(o.key).add(o.tag);
-        else sets.get(o.key).removeObserved(o.observed_tags ?? []);
+        else if (o.op === "remove") sets.get(o.key).removeObserved(o.observed_tags ?? []);
+        else assert.fail(`${agg.name}: unknown OR-set op \`${o.op}\``);
       } else if (o.register_kind === "lww") {
         const existing = regs.get(o.key);
         if (existing) existing.set(stamp(o.stamp), o.value);
