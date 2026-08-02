@@ -9,15 +9,20 @@
 // never exercises a codec, so a binding could carve out a MUST-level codec and
 // stay green on every rung.
 //
-// lazily-js implements the `json` half. `msgpack` is an explicit carve-out
-// (declared in bin/interop-peer.mjs and now in
-// scripts/check-conformance-coverage.sh), so codec/frame_roundtrip_msgpack.json
-// is listed as known-uncovered rather than silently ignored.
+// lazily-js implements BOTH halves as of #lzmsgpackseven: `json` in
+// `IpcMessage.encodeJson`/`decodeJson`, `msgpack` in
+// `encodeMsgpack`/`decodeMsgpack` over src/msgpack-codec.js. Neither fixture is
+// in KNOWN_UNCOVERED any more.
 //
 // The runner decodes `wire`, RE-ENCODES the decoded message, decodes again, and
 // checks every `expect` key against that second decode. Asserting against the
 // fixture literal would prove nothing: the literal never passed through an
 // encoder.
+//
+// The msgpack half additionally introspects the ENCODED BYTES schema-lessly.
+// The named-field rule is a property of the encoding, so it is invisible to any
+// assertion over a decoded `IpcMessage`: a positional encoder round-trips every
+// value below correctly and is still unreadable by a conforming peer.
 
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
@@ -40,12 +45,15 @@ import {
   IpcValueInline,
   NodeStateOpaque,
   NodeStatePayload,
+  Snapshot,
+  decodeMsgpackValue,
 } from "../src/index.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const specFixtures = join(here, "..", "..", "lazily-spec", "conformance");
 
 const JSON_FIXTURE = "codec/frame_roundtrip_json.json";
+const MSGPACK_FIXTURE = "codec/frame_roundtrip_msgpack.json";
 
 function loadCodecFixture(name) {
   const path = join(specFixtures, name);
@@ -173,6 +181,117 @@ test("json frames round-trip through the reference codec", () => {
     replayed += 1;
   }
   assert.equal(replayed, 3, "one scenario per IpcMessage variant");
+});
+
+// Sorted own-key names of a schema-lessly decoded map. Sorted because a
+// MessagePack map's key order is encoder-defined (§ Frame codecs,
+// `byte_canonical: false`) — comparing insertion order would pin a property no
+// conforming peer owes anyone.
+function sortedFieldNames(value) {
+  assert.ok(
+    value !== null && typeof value === "object" && !Array.isArray(value),
+    "expected a named-field map, got " + (Array.isArray(value) ? "an array" : typeof value),
+  );
+  return Object.keys(value).sort();
+}
+
+test("msgpack frames round-trip through the cross-language binary default", () => {
+  const fixture = loadCodecFixture(MSGPACK_FIXTURE);
+  assert.equal(fixture.codec, "msgpack");
+
+  const meta = fixture.assertions;
+  assertKey(meta, "codec", "msgpack", "assertions");
+  assertKey(meta, "self_describing", true, "assertions");
+  // The reason this fixture pins decoded values instead of golden bytes.
+  assertKey(meta, "byte_canonical", false, "assertions");
+  assertKey(meta, "required_of_binding", "MUST", "assertions");
+  assertKey(meta, "role", "cross_language_binary_default", "assertions");
+  assertKey(meta, "scenario_count", fixture.scenarios.length, "assertions");
+  excuseKey(
+    meta,
+    "note",
+    "prose: restates the named-field rule that `encoded_body_field_names` below asserts executably",
+  );
+
+  let replayed = 0;
+  for (const scenario of scenarios(fixture)) {
+    const where = scenario.id;
+    const source = IpcMessage.fromWire(scenario.wire);
+    assert.equal(source.kind, scenario.variant, `${where}: fixture variant vs decoded frame`);
+
+    const bytes = source.encodeMsgpack();
+    const roundTripped = IpcMessage.decodeMsgpack(bytes);
+
+    // Schema-less view of the bytes actually produced. This is the only way to
+    // see the named-field rule: a positional encoder passes every value
+    // assertion below and fails here.
+    const generic = decodeMsgpackValue(bytes);
+    assert.ok(
+      generic !== null && typeof generic === "object" && !Array.isArray(generic),
+      `${where}: IpcMessage is externally tagged — a one-entry map`,
+    );
+    const envelopeKeys = Object.keys(generic);
+    assert.equal(envelopeKeys.length, 1, `${where}: external tag is a one-entry map`);
+    const tag = envelopeKeys[0];
+    const body = generic[tag];
+
+    const block = scenario.expect;
+    assertKey(block, "round_trip_equals_source", deepEqual(roundTripped, source), where);
+    assertKey(block, "encoded_envelope_key", tag, where);
+    assertKey(block, "encoded_body_field_names", sortedFieldNames(body), where);
+
+    if (tag === "Snapshot") {
+      // `NodeSnapshot.key` is optional and OMITTED when absent in a
+      // self-describing codec — the rule that lets a pre-`key` decoder read a
+      // post-`key` frame. It has to hold under msgpack exactly as under json,
+      // which is the whole point of encoding named fields.
+      assertKey(block, "first_node_encoded_field_names", sortedFieldNames(body.nodes[0]), where);
+    } else if (tag === "CrdtSync") {
+      // `CrdtOp` differs deliberately: it ALWAYS writes `key` (null when
+      // unset), because an anti-entropy op's addressing is part of its merge
+      // identity. Both lists therefore carry `key`.
+      assertKey(block, "first_op_encoded_field_names", sortedFieldNames(body.ops[0]), where);
+      assertKey(block, "second_op_encoded_field_names", sortedFieldNames(body.ops[1]), where);
+    }
+
+    assertValues(block, roundTripped, where);
+    replayed += 1;
+  }
+  assert.equal(replayed, 3, "one scenario per IpcMessage variant");
+});
+
+// Byte payloads are ARRAYS OF INTEGERS on this wire, never MessagePack `bin`.
+// That is what the reference encoder produces (`rmp_serde` serializes `Vec<u8>`
+// through serde's default seq impl) and what its decoder accepts, so a codec
+// that emits or accepts `bin` in a byte-payload position is outside the wire it
+// claims. No fixture can pin this — the corpus is written in the reference JSON
+// form, where the distinction does not exist.
+test("msgpack byte payloads are arrays of integers, not `bin`", () => {
+  const message = IpcMessage.snapshot(
+    Snapshot.fromWire({
+      epoch: 1,
+      nodes: [{ node: 1, type_tag: "i32", state: { Payload: [1, 2, 3] } }],
+      edges: [],
+      roots: [1],
+    }),
+  );
+  const bytes = message.encodeMsgpack();
+  // 0xc4/0xc5/0xc6 are the `bin` family headers. None may appear as a value
+  // header; the payload rides as a 3-element array of fixints instead.
+  const tree = decodeMsgpackValue(bytes);
+  assert.deepEqual(tree.Snapshot.nodes[0].state.Payload, [1, 2, 3]);
+
+  // Hand-built `bin 8` frame in the same position: rejected, not tolerated.
+  const withBin = Uint8Array.from([
+    0x81,
+    ...[0xa8, ...new TextEncoder().encode("Snapshot")],
+    0xc4,
+    0x03,
+    1,
+    2,
+    3,
+  ]);
+  assert.throws(() => decodeMsgpackValue(withBin), /not msgpack `bin`/);
 });
 
 // `assert.deepEqual` throws rather than returning a verdict, and the fixture

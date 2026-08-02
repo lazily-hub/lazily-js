@@ -38,14 +38,6 @@ fi
 # because the fixture is never opened and the gap is already reported on this line.
 KNOWN_UNCOVERED=(
   "arena_blob.json"
-  # msgpack is a protocol.md MUST that lazily-js does not implement
-  # (#lzmsgpackparity). The gap was already declared, but only in
-  # bin/interop-peer.mjs's `carve_outs` — a place no parity surface reads. It
-  # belongs here, beside every other declared gap: the `json` half of the
-  # codec obligation IS replayed (test/codec.test.js), so this entry names
-  # exactly what is missing rather than the whole obligation. Closing it
-  # means encoding/decoding IpcMessage as a named-field MessagePack map.
-  "codec/frame_roundtrip_msgpack.json"
   "reliable-sync/coalesce_bounds_outbox.json"
   "reliable-sync/liveness_lease_eviction.json"
 )

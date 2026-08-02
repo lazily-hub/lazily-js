@@ -441,6 +441,7 @@ export class IpcMessage {
   readonly isControl: boolean;
   toWire(): unknown;
   encodeJson(): Uint8Array;
+  encodeMsgpack(): Uint8Array;
   static snapshot(snapshot: Snapshot): IpcMessage;
   static delta(delta: Delta): IpcMessage;
   static crdtSync(crdtSync: CrdtSync): IpcMessage;
@@ -448,7 +449,16 @@ export class IpcMessage {
   static outboxAckMessage(ack: OutboxAck): IpcMessage;
   static fromWire(value: unknown): IpcMessage;
   static decodeJson(data: Uint8Array | string): IpcMessage;
+  static decodeMsgpack(data: Uint8Array | readonly number[]): IpcMessage;
 }
+
+// Frame codec `msgpack` (protocol.md § Frame codecs): the reference value tree
+// packed as named-field MessagePack maps. Byte payloads are arrays of integers,
+// never MessagePack `bin`. `decodeMsgpackValue` is the schema-less view used to
+// observe the named-field rule, which no assertion over a decoded message can
+// see.
+export function encodeMsgpackValue(value: unknown): Uint8Array;
+export function decodeMsgpackValue(bytes: Uint8Array | readonly number[]): unknown;
 
 // Reliable sync protocol (#lzsync).
 export const ResyncAction: {
@@ -635,6 +645,7 @@ export const PROTOCOL_MAJOR_VERSION: 1;
 
 export const Codec: {
   readonly Json: "json";
+  readonly Msgpack: "msgpack";
   readonly Bincode: "bincode";
   readonly Postcard: "postcard";
 };

@@ -1,3 +1,7 @@
+import { decodeMsgpackValue, encodeMsgpackValue } from "./msgpack-codec.js";
+
+export { decodeMsgpackValue, encodeMsgpackValue };
+
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
 
@@ -1104,6 +1108,16 @@ export class IpcMessage {
     return textEncoder.encode(JSON.stringify(this.toWire()));
   }
 
+  // `msgpack`, the cross-language binary default (protocol.md § Frame codecs).
+  // The SAME value tree `encodeJson` serializes, packed as named-field
+  // MessagePack maps: the external tags, the field names, and both NodeKey
+  // rules (`NodeSnapshot`/`NodeAdd` omit an absent key, `CrdtOp` always writes
+  // it, `null` when unset) are therefore identical to the reference codec by
+  // construction rather than by a second transcription of the same shape.
+  encodeMsgpack() {
+    return encodeMsgpackValue(this.toWire());
+  }
+
   static snapshot(snapshot) {
     return new IpcMessage("Snapshot", snapshot);
   }
@@ -1146,6 +1160,10 @@ export class IpcMessage {
     const text = data instanceof Uint8Array ? textDecoder.decode(data) : String(data);
     return IpcMessage.fromWire(JSON.parse(text));
   }
+
+  static decodeMsgpack(data) {
+    return IpcMessage.fromWire(decodeMsgpackValue(data));
+  }
 }
 
 // Capability negotiation (protocol.md § Capability Negotiation). Every
@@ -1157,6 +1175,10 @@ export const PROTOCOL_MAJOR_VERSION = 1;
 
 export const Codec = Object.freeze({
   Json: "json",
+  // The cross-language binary default. Implemented as the spec wire
+  // (`IpcMessage.encodeMsgpack`), not as some MessagePack framing that happens
+  // to use the token.
+  Msgpack: "msgpack",
   Bincode: "bincode",
   Postcard: "postcard",
 });

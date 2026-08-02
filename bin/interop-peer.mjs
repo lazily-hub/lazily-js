@@ -77,11 +77,16 @@ class InteropPeer {
       version: "0.29.1",
       protocol_version: PROTOCOL_VERSION,
       features: ["distributed_crdt", ...STDLIB_FEATURES],
-      codecs: ["json"],
+      // `msgpack` moves out of `carve_outs` and into `codecs` with
+      // #lzmsgpackseven: src/msgpack-codec.js packs the reference value tree as
+      // named-field MessagePack maps — the wire the token names, not merely a
+      // MessagePack framing — and test/codec.test.js replays
+      // codec/frame_roundtrip_msgpack.json through it.
+      codecs: ["json", "msgpack"],
       channels: [],
       channel_variants: {},
       platform_profile: "portable",
-      carve_outs: ["msgpack", "transport_links"],
+      carve_outs: ["transport_links"],
     };
   }
 
