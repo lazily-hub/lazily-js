@@ -344,7 +344,10 @@ if (problems > 0) {
 // claiming green. Do not lower MIN_SCENARIOS to fix a red run — a drop here means
 // a scenario dispatch stopped matching or the ledger detached, which is the
 // finding.
-const MIN_SCENARIOS = Number(process.env.MIN_SCENARIOS ?? "110");
+// Raised 110 -> 118 when codec/blob_backend_discriminator.json landed
+// (#lzblobbackendstrict): its eight scenarios took the observed run from 118 to
+// 126, so the floor moves by the same eight and keeps the margin it had.
+const MIN_SCENARIOS = Number(process.env.MIN_SCENARIOS ?? "118");
 if (total === 0) {
   fail([
     "ERROR: ZERO scenarios were found across the opened fixtures.",

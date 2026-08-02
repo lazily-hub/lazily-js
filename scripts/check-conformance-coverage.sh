@@ -170,7 +170,9 @@ fi
 # from "nothing was examined", so assert the magnitude explicitly before
 # reporting OK. Do not lower these to fix a red run — a drop here means the
 # corpus or the recorder shrank, which is the finding.
-MIN_FIXTURES="${MIN_FIXTURES:-130}"
+# Raised 130 -> 131 when codec/blob_backend_discriminator.json landed
+# (#lzblobbackendstrict) and took the observed run from 135 to 136 opened.
+MIN_FIXTURES="${MIN_FIXTURES:-131}"
 if [ "$total" -eq 0 ]; then
   echo "ERROR: the corpus at $SPEC_DIR listed ZERO fixtures." >&2
   echo "       Every check above is vacuously green over an empty population." >&2

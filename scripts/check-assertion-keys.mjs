@@ -324,13 +324,15 @@ if (problems > 0) {
 // prints OK. That is the same hole MIN_FIXTURES and MIN_SCENARIOS close one and
 // two rungs up; this is the assertion-key rung of the same ladder.
 //
-// 520 = calibrated below the observed run at the time of writing, which asserted
-// 547 of 575 present keys across 128 key-bearing fixtures. Deliberately set under
-// the real number so ordinary corpus churn does not trip it, and far enough above
-// zero that a detached recorder cannot slip through. NEVER lower this to make the
-// gate green: a drop means keys stopped being reached or stopped being asserted,
-// and that is the finding, not the floor.
-const MIN_ASSERTED_KEYS = Number(process.env.MIN_ASSERTED_KEYS ?? "520");
+// 535 = calibrated below the observed run, which asserts 562 of 596 present keys.
+// Deliberately set under the real number so ordinary corpus churn does not trip
+// it, and far enough above zero that a detached recorder cannot slip through.
+// (Was 520 against an observed 547/575; codec/blob_backend_discriminator.json
+// added 15 asserted keys, #lzblobbackendstrict, so the floor moves by 15 and
+// keeps the same margin.) NEVER lower this to make the gate green: a drop means
+// keys stopped being reached or stopped being asserted, and that is the finding,
+// not the floor.
+const MIN_ASSERTED_KEYS = Number(process.env.MIN_ASSERTED_KEYS ?? "535");
 if (present.size === 0) {
   fail([
     "ERROR: the manifest recorded ZERO tracked assertion keys.",
