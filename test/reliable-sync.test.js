@@ -13,7 +13,7 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 import { assertKey, assertKeyWith } from "./support/assert-key.js";
-import { recordScenario, scenarios } from "./support/scenario.js";
+import { scenarios } from "./support/scenario.js";
 
 import {
   Delta,
@@ -56,13 +56,17 @@ function loadFixture(name) {
 // Several fixtures here are replayed by NAME rather than by iteration, which is
 // exactly the shape #lzscenariocoverage exists for: `liveness_orset_lww.json`
 // carries four scenarios and this runner picked three, so the fourth simply never
-// ran while both the coverage guard and the key guard stayed green. Marking the
-// ledger inside the selector means every by-name pick is accounted for and a
-// scenario nobody selects is reported.
+// ran while both the coverage guard and the key guard stayed green.
+//
+// The SELECTION deliberately does not book (#lzscenariobodyskip). `.name` is a
+// label read, and the `find` above walks past every scenario ahead of the match —
+// booking here would credit each of those, and would credit a scenario this
+// runner selected and then did nothing with. The booking rides on the scenario's
+// payload instead, so it happens when the caller actually replays what it picked.
 const scenario = (fx, name) => {
   const found = fx.scenarios.find((s) => s.name === name);
   assert.ok(found, `fixture has no scenario named ${name}`);
-  return recordScenario(found);
+  return found;
 };
 const msg = (wire) => IpcMessage.fromWire(wire);
 

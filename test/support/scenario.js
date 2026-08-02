@@ -58,21 +58,26 @@ export function recordScenario(scenario) {
 }
 
 /**
- * Iterate a fixture's scenarios, recording each one as it is yielded.
+ * Iterate a fixture's scenarios.
  *
- * This is the form to prefer: recording is automatic, so a new runner cannot
- * forget it, and a `break` out of the loop leaves the remaining scenarios
- * unrecorded — which is exactly true. A `continue` inside the body does NOT undo
- * the record, so a runner that means to skip a scenario must iterate
- * `fixture.scenarios` by hand and call `recordScenario` past the skip.
+ * Yielding is NOT recording (#lzscenariobodyskip). This helper used to book each
+ * scenario as it handed it over, which cannot tell a loop body that ran from one
+ * that `continue`d — both just come back for the next item — so a skipped
+ * scenario booked itself and rung 4 stayed silent about the very thing it exists
+ * to catch. lazily-py proved that empirically against this contract's own probe.
+ *
+ * The booking now rides on the scenario OBJECT, installed by the recorder in
+ * `conformance-manifest.cjs`: reading any payload key (`steps`, `ops`, `expect`,
+ * `frames`, …) books it, while `id`/`name`/`description` stay silent so a
+ * dispatch chain that reads the label and matches no arm records nothing. That
+ * makes booking intrinsic rather than a call a runner has to remember — a
+ * `break` leaves the rest unbooked, a `continue` past the payload leaves that one
+ * unbooked, and iterating `fixture.scenarios` by hand behaves identically.
  */
 export function* scenarios(fixture) {
   const list = fixture?.scenarios;
   if (!Array.isArray(list)) {
     throw new TypeError(`scenarios(): fixture has no \`scenarios\` array (got ${typeof list})`);
   }
-  for (const scenario of list) {
-    recordScenario(scenario);
-    yield scenario;
-  }
+  yield* list;
 }

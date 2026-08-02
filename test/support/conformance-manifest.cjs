@@ -210,10 +210,64 @@ if (out || walkOut) {
     return `#${index}`;
   };
 
+  // Keys that IDENTIFY or narrate a scenario rather than drive one
+  // (#lzscenariobodyskip). Reading only these is looking at the label, not
+  // replaying: a dispatch chain that reads `scenario.name`, matches no arm and
+  // falls through has replayed nothing, and a by-name lookup walks past every
+  // scenario ahead of the match. Booking on those reads would let exactly the
+  // skip this rung exists to catch hide behind the helper.
+  //
+  // No scenario in the corpus carries only these, so every scenario is reachable
+  // through some payload key; one that stopped being reachable would be reported
+  // as unreplayed, which is the correct answer for a scenario nothing can enter.
+  const SCENARIO_LABEL_KEYS = new Set([
+    "comment",
+    "description",
+    "id",
+    "label",
+    "name",
+    "note",
+    "notes",
+    "reason",
+    "why",
+  ]);
+
+  // Booking rides on the first read of a scenario's PAYLOAD, never on the yield
+  // that handed it over (#lzscenariobodyskip). A generator cannot tell a loop
+  // body that ran from one that `continue`d — both just come back for the next
+  // item — so booking at the yield calls a skipped scenario covered, which is
+  // the defect. The steps/ops/frames/expect of a scenario are only read by a
+  // runner about to replay it.
+  //
+  // Accessors, not a Proxy, for the same reasons `instrumentBlock` uses them:
+  // the identity the ledger keys on stays the fixture's own object, so
+  // `recordScenario` and `structuredClone` both keep working, and the booking
+  // is intrinsic to the scenario rather than to the helper that handed it out —
+  // a runner that iterates `fixture.scenarios` by hand books exactly the same.
   const registerScenarios = (rel, list) => {
     list.forEach((scenario, index) => {
       if (!isPlainObject(scenario)) return;
-      scenarioOwner.set(scenario, `${rel}\t${scenarioId(scenario, index)}`);
+      const id = `${rel}\t${scenarioId(scenario, index)}`;
+      scenarioOwner.set(scenario, id);
+      for (const [key, value] of Object.entries(scenario)) {
+        if (SCENARIO_LABEL_KEYS.has(key)) continue;
+        Object.defineProperty(scenario, key, {
+          enumerable: true,
+          configurable: true,
+          get() {
+            scenarioRecords.add(id);
+            return value;
+          },
+          set(next) {
+            Object.defineProperty(scenario, key, {
+              enumerable: true,
+              configurable: true,
+              writable: true,
+              value: next,
+            });
+          },
+        });
+      }
     });
   };
 
@@ -240,11 +294,16 @@ if (out || walkOut) {
         }
         continue;
       }
+      walk(rel, value);
+      if (keyOut && TRACKED.has(key) && isPlainObject(value)) instrumentBlock(rel, key, value);
+      // AFTER the descent, never before: registration installs payload accessors
+      // on each scenario, and the walk above reads every one of those keys. Doing
+      // this first books the whole array as replayed at parse time — the recorder
+      // recording itself, which is the same self-crediting mistake the raw-entries
+      // note at the top of this loop exists to prevent.
       if (key === "scenarios" && Array.isArray(value) && scenarioOut) {
         registerScenarios(rel, value);
       }
-      walk(rel, value);
-      if (keyOut && TRACKED.has(key) && isPlainObject(value)) instrumentBlock(rel, key, value);
     }
   };
 
