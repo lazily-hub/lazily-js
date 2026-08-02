@@ -311,8 +311,49 @@ if (problems > 0) {
   process.exit(1);
 }
 
+// ---- Positive-evidence floor (#lzvacuousrun) ----
+// Every check above walks the keys the recorder actually saw. An empty manifest
+// population satisfies all of it at once: zero present keys means zero unread
+// keys, zero read-but-unasserted keys, and zero stale excuses, and the loop
+// reports "OK: 0/0" having compared nothing. The missing-corpus and
+// missing-manifest branches above only catch the two coarsest shapes of that —
+// no sibling checkout, and a manifest file that is absent or byte-empty. A
+// manifest that is present and NON-empty but short (the recorder detached
+// partway, a test file stopped being collected, `TRACKED` stopped matching the
+// block names the corpus uses) walks a small-but-nonzero population and still
+// prints OK. That is the same hole MIN_FIXTURES and MIN_SCENARIOS close one and
+// two rungs up; this is the assertion-key rung of the same ladder.
+//
+// 520 = calibrated below the observed run at the time of writing, which asserted
+// 547 of 575 present keys across 128 key-bearing fixtures. Deliberately set under
+// the real number so ordinary corpus churn does not trip it, and far enough above
+// zero that a detached recorder cannot slip through. NEVER lower this to make the
+// gate green: a drop means keys stopped being reached or stopped being asserted,
+// and that is the finding, not the floor.
+const MIN_ASSERTED_KEYS = Number(process.env.MIN_ASSERTED_KEYS ?? "520");
+if (present.size === 0) {
+  fail([
+    "ERROR: the manifest recorded ZERO tracked assertion keys.",
+    "       Every check above is vacuously green over an empty population — no key",
+    "       can go unconsumed when none was observed (#lzvacuousrun). The recorder",
+    "       ran without seeing a fixture parse, or no tracked block name",
+    `       (${[...TRACKED].join(", ")}) matched what the corpus carries. Neither is coverage.`,
+  ]);
+  process.exit(1);
+}
+if (consumed < MIN_ASSERTED_KEYS) {
+  fail([
+    `ERROR: only ${consumed} assertion keys were ASSERTED, expected >= ${MIN_ASSERTED_KEYS}.`,
+    "       A runner stopped comparing values, a test file stopped being collected,",
+    "       or the recorder detached mid-run. Do not lower MIN_ASSERTED_KEYS to fix",
+    "       this — the drop is the finding.",
+  ]);
+  process.exit(1);
+}
+
 console.error(
   `assertion-key consumption OK: ${consumed}/${present.size} fixture assertion keys ASSERTED against` +
     ` their own fixture value by the suite (${declaredHere} excused in-runner,` +
-    ` ${excused.size} declared unconsumed; runtime manifest — these values were really compared)`,
+    ` ${excused.size} declared unconsumed; floor ${MIN_ASSERTED_KEYS};` +
+    ` runtime manifest — these values were really compared)`,
 );
