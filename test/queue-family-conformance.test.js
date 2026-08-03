@@ -26,7 +26,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
-import { assertKey, assertKeyWith } from "./support/assert-key.js";
+import { assertKey, assertKeyWith, subBlock } from "./support/assert-key.js";
 
 import { Context } from "../src/reactive.js";
 import { AsyncContext } from "../src/reactive-async.js";
@@ -336,20 +336,25 @@ async function replayQueue(flavor, name) {
     const after = {};
     for (const [kind, drive] of Object.entries(drivers)) after[kind] = await drive();
     if ("invalidates" in expected) {
-      assertKeyWith(expected, "invalidates", (invalidates) => {
-        for (const kind of Object.keys(invalidates)) {
-          assert.equal(
-            result.invalidates[kind],
-            invalidates[kind],
-            `${where(i)}: invalidates.${kind}`,
-          );
-          assert.equal(
-            after[kind] > before[kind],
-            invalidates[kind],
-            `${where(i)}: reader ${kind} recomputation (want ${invalidates[kind]})`,
-          );
-        }
-      });
+      // Descended (#lzsubblockkeyset): the child tracker owns every reader kind
+      // the fixture declares, so a kind added upstream is unconsumed rather than
+      // skipped by a loop over today's keys.
+      const invalidates = subBlock(expected, "invalidates");
+      for (const kind of Object.keys(invalidates)) {
+        assertKeyWith(
+          invalidates,
+          kind,
+          (want) => {
+            assert.equal(result.invalidates[kind], want, `${where(i)}: invalidates.${kind}`);
+            assert.equal(
+              after[kind] > before[kind],
+              want,
+              `${where(i)}: reader ${kind} recomputation (want ${want})`,
+            );
+          },
+          where(i),
+        );
+      }
     }
   }
   return steps.length;
@@ -412,11 +417,11 @@ async function replayTopic(flavor, name) {
     assertKey(expected, "elements", topic.elements(), `${where(i)}: elements`);
     assertKey(expected, "subscriptions", topic.subscriptions(), `${where(i)}: subscriptions`);
     if ("reads" in expected) {
-      await assertKeyWith(expected, "reads", async (reads) => {
-        for (const [id, stream] of Object.entries(reads)) {
-          assert.deepEqual(await topic.readStream(id), stream, `${where(i)}: reads.${id}`);
-        }
-      });
+      // Descended (#lzsubblockkeyset).
+      const reads = subBlock(expected, "reads");
+      for (const id of Object.keys(reads)) {
+        assertKey(reads, id, await topic.readStream(id), `${where(i)}: reads.${id}`);
+      }
     }
     assertKey(expected, "invalidates", result.invalidates, `${where(i)}: invalidates`);
     if ("returns" in step) assert.equal(result.returns, step.returns, `${where(i)}: returns`);

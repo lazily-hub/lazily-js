@@ -135,6 +135,14 @@ const excusedInRunner = new Map();
 // cannot do for itself: notice that the verification never ran at all.
 const dischargedInRunner = new Map();
 const verifiedFixtures = new Set();
+// Rung 3b (#lzsubblockkeyset). `objectValued` is declared off the CORPUS BYTES by
+// the recorder at parse time — it is a fact about the fixture, not a claim by a
+// runner. `keySetChecked` is the runner side: the key was consumed by a
+// comparison that binds its whole key set (a deep equality, a descent, or an
+// explicit key-set assertion) rather than by a closure that may have named a few
+// sub-fields and stopped.
+const objectValued = new Set();
+const keySetChecked = new Set();
 for (const line of readFileSync(KEY_MANIFEST, "utf8").split("\n")) {
   if (line.trim() === "") continue;
   const [fixture, block, key, tag, reason] = line.split("\t");
@@ -144,6 +152,8 @@ for (const line of readFileSync(KEY_MANIFEST, "utf8").split("\n")) {
   else if (tag === "X") excusedInRunner.set(id, reason ?? "");
   else if (tag === "D") dischargedInRunner.set(id, reason ?? "");
   else if (tag === "V") verifiedFixtures.add(fixture);
+  else if (tag === "O") objectValued.add(id);
+  else if (tag === "K") keySetChecked.add(id);
   else present.add(id);
 }
 
@@ -224,6 +234,7 @@ let stale = 0;
 let consumed = 0;
 let declaredHere = 0;
 let dischargedHere = 0;
+let objectUnchecked = 0;
 for (const entry of [...present].sort()) {
   const [fixture, block, key] = entry.split("\t");
   const runnerExcuse = excusedInRunner.get(entry);
@@ -267,6 +278,29 @@ for (const entry of [...present].sort()) {
   }
   if (runnerExcuse !== undefined) {
     declaredHere += 1;
+    continue;
+  }
+
+  // Rung 3b: an object-valued key consumed WITHOUT a key-set check
+  // (#lzsubblockkeyset). The key reports consumed and asserted, and a sub-field
+  // added upstream is compared by nothing — the null form one level down, inside
+  // an assertion key rather than beside one. Reported before the asserted branch
+  // because "asserted" is precisely the state that hides it.
+  if (
+    objectValued.has(entry) &&
+    !keySetChecked.has(entry) &&
+    (asserted.has(entry) || read.has(entry))
+  ) {
+    fail([
+      `ERROR: assertion key '${key}' in ${block} of '${fixture}' has a JSON OBJECT value and`,
+      "       was CONSUMED WITHOUT A KEY-SET CHECK. Something compared named sub-fields of",
+      "       this object; a field added to it upstream would be compared against nothing",
+      "       while this key still reports asserted. Consume it with subBlock(block, key)",
+      "       and assert the members, or with assertKeySet(block, key, observed) when the",
+      "       object is a vocabulary — or excuse/discharge it with a reason.",
+    ]);
+    objectUnchecked += 1;
+    problems += 1;
     continue;
   }
 
@@ -368,7 +402,8 @@ for (const entry of DECLARED_UNCONSUMED) {
 if (problems > 0) {
   console.error(
     `assertion-key consumption FAILED: ${problems} problem(s), ${unread} unread key(s),` +
-      ` ${unasserted} read-but-unasserted key(s), ${stale} stale excuse(s)`,
+      ` ${unasserted} read-but-unasserted key(s), ${objectUnchecked} object-valued key(s)` +
+      ` consumed without a key-set check, ${stale} stale excuse(s)`,
   );
   process.exit(1);
 }
@@ -400,10 +435,14 @@ if (problems > 0) {
 // `verifyProse` comparison — unhid `note` in the two frame_roundtrip fixtures,
 // and turned `nodeid_exact_range.json`'s `outcomes` from an excuse into a
 // key-set assertion, so the observed run goes to 573/612 and the floor moves by
-// the same six.) NEVER lower this to make the gate green: a drop means keys
-// stopped being reached or stopped being asserted, and that is the finding, not
-// the floor.
-const MIN_ASSERTED_KEYS = Number(process.env.MIN_ASSERTED_KEYS ?? "546");
+// the same six. Was 546 against an observed 573/612; #lzsubblockkeyset bound
+// every object-valued assertion key's CONTENTS to a child tracker, so the ~124
+// object-valued keys this suite consumes now contribute their own sub-keys to
+// the population — the observed run goes to 970/1011 and the floor moves with
+// it, keeping the same margin.) NEVER lower this to make the gate green: a drop
+// means keys stopped being reached or stopped being asserted, and that is the
+// finding, not the floor.
+const MIN_ASSERTED_KEYS = Number(process.env.MIN_ASSERTED_KEYS ?? "940");
 if (present.size === 0) {
   fail([
     "ERROR: the manifest recorded ZERO tracked assertion keys.",
@@ -420,6 +459,28 @@ if (consumed < MIN_ASSERTED_KEYS) {
     "       A runner stopped comparing values, a test file stopped being collected,",
     "       or the recorder detached mid-run. Do not lower MIN_ASSERTED_KEYS to fix",
     "       this — the drop is the finding.",
+  ]);
+  process.exit(1);
+}
+
+// The same floor for rung 3b (#lzsubblockkeyset). The object-valued check walks
+// only the keys the recorder DECLARED object-valued, so deleting the one line
+// that emits the `O` record makes every object-valued key vacuously compliant
+// and this guard prints OK having examined none of them — the exact vacuity
+// shape MIN_ASSERTED_KEYS and MIN_BLOCKS close on the rungs either side.
+//
+// 130 = calibrated below the observed run, which declares 151 object-valued keys
+// across the corpus this suite replays. NEVER lower it to make the gate green: a
+// drop means fixtures stopped being opened or the recorder stopped declaring the
+// shape, and that is the finding.
+const MIN_OBJECT_VALUED_KEYS = Number(process.env.MIN_OBJECT_VALUED_KEYS ?? "130");
+if (objectValued.size < MIN_OBJECT_VALUED_KEYS) {
+  fail([
+    `ERROR: only ${objectValued.size} assertion keys were declared OBJECT-VALUED, expected >= ${MIN_OBJECT_VALUED_KEYS}.`,
+    "       That declaration is read off the corpus bytes at parse time, so a drop means",
+    "       the recorder stopped emitting it or the fixtures carrying object-valued keys",
+    "       stopped being opened. Either way the key-set rung above is now green over a",
+    "       population it never examined (#lzvacuousrun).",
   ]);
   process.exit(1);
 }
@@ -576,6 +637,13 @@ console.error(
   `assertion-block bind OK: ${declaredBlocks.size}/${declaredBlocks.size} assertion blocks carried by` +
     ` opened fixtures were instrumented (${blockExcuses.size} declared unbindable; floor ${MIN_BLOCKS};` +
     ` content-keyed, so a runner's block NAME cannot satisfy it)`,
+);
+
+console.error(
+  `object-valued assertion key OK: ${keySetChecked.size}/${objectValued.size} keys whose fixture value` +
+    ` is a JSON OBJECT were consumed by a KEY-SET check — a deep equality, a descent into a child` +
+    ` tracker, or an explicit key-set assertion (floor ${MIN_OBJECT_VALUED_KEYS}; the rest are` +
+    ` excused or discharged with a reason)`,
 );
 
 console.error(

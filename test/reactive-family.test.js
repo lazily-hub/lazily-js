@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
-import { assertKey, assertKeyWith, excuseKey } from "./support/assert-key.js";
+import { assertKey, assertKeyWith, excuseKey, subBlock } from "./support/assert-key.js";
 
 import { Context } from "../src/reactive.js";
 import { SourceMap, EntryKind, ReactiveMap, ComputedMap } from "../src/reactive-family.js";
@@ -81,12 +81,21 @@ test("ComputedMap materialization conformance: observational_transparency.json",
   assert.equal(lazy.presentCount(), 0, "lazy defers all slots at build");
 
   // observe_canonical / eager_lazy_observationally_equivalent: identical values.
-  assertKeyWith(expected, "observe", (observe) => {
-    for (const [key, value] of Object.entries(observe)) {
-      assert.equal(eager.get(ctx, key), value, `eager observe[${key}]`);
-      assert.equal(lazy.getOrInsertWith(ctx, key, factory), value, `lazy observe[${key}]`);
-    }
-  });
+  // Descended (#lzsubblockkeyset): the child tracker owns every key the
+  // fixture observes, so one added upstream is reported as unconsumed rather
+  // than skipped by a loop that only ever visits today's keys.
+  const observe = subBlock(expected, "observe");
+  for (const key of Object.keys(observe)) {
+    assertKeyWith(
+      observe,
+      key,
+      (value) => {
+        assert.equal(eager.get(ctx, key), value, `eager observe[${key}]`);
+        assert.equal(lazy.getOrInsertWith(ctx, key, factory), value, `lazy observe[${key}]`);
+      },
+      "observe",
+    );
+  }
 
   // Rebuild a fresh lazy map to observe only the `reads` sequence.
   const ctx2 = new Context();
@@ -128,11 +137,13 @@ test("ComputedMap materialization conformance: deferral_not_deallocation.json", 
   // materialize_preserves_observe, stated over the whole map: the fixture's
   // `observe` block is the canonical value of EVERY key, and this runner only
   // ever compared the keys the `reads` sequence happens to touch.
-  assertKeyWith(expected, "observe", (observe) => {
-    for (const [key, value] of Object.entries(observe)) {
-      assert.equal(eager.get(ctx, key), value, `eager observe[${key}]`);
-    }
-  });
+  // Descended (#lzsubblockkeyset): the child tracker owns every key the
+  // fixture observes, so one added upstream is reported as unconsumed rather
+  // than skipped by a loop that only ever visits today's keys.
+  const observe = subBlock(expected, "observe");
+  for (const key of Object.keys(observe)) {
+    assertKey(observe, key, eager.get(ctx, key), `eager observe[${key}]`);
+  }
 
   const lazy = new ComputedMap(ctx);
   const sizes = [];
@@ -205,12 +216,14 @@ test("materialization conformance: entry_kind_orthogonal_to_mode.json", () => {
       "eager_present",
     ),
   );
-  assertKeyWith(expected, "observe", (observe) => {
-    for (const [key, value] of Object.entries(observe)) {
-      const got = cellKeys.includes(key) ? eagerCells.get(ctxE, key) : eagerSlots.get(ctxE, key);
-      assert.equal(got, value, `eager observe[${key}]`);
-    }
-  });
+  // Descended (#lzsubblockkeyset): the child tracker owns every key the
+  // fixture observes, so one added upstream is reported as unconsumed rather
+  // than skipped by a loop that only ever visits today's keys.
+  const observeEager = subBlock(expected, "observe");
+  for (const key of Object.keys(observeEager)) {
+    const got = cellKeys.includes(key) ? eagerCells.get(ctxE, key) : eagerSlots.get(ctxE, key);
+    assertKey(observeEager, key, got, `eager observe[${key}]`);
+  }
 
   // Lazy build: cells present at build (always materialized); slots deferred.
   const ctxL = new Context();
@@ -233,14 +246,13 @@ test("materialization conformance: entry_kind_orthogonal_to_mode.json", () => {
       "lazy_present_after_reads",
     ),
   );
-  assertKeyWith(expected, "observe", (observe) => {
-    for (const [key, value] of Object.entries(observe)) {
-      const got = cellKeys.includes(key)
-        ? lazyCells.get(ctxL, key)
-        : lazySlots.getOrInsertWith(ctxL, key, lookup);
-      assert.equal(got, value, `lazy observe[${key}]`);
-    }
-  });
+  const observeLazy = subBlock(expected, "observe");
+  for (const key of Object.keys(observeLazy)) {
+    const got = cellKeys.includes(key)
+      ? lazyCells.get(ctxL, key)
+      : lazySlots.getOrInsertWith(ctxL, key, lookup);
+    assertKey(observeLazy, key, got, `lazy observe[${key}]`);
+  }
 });
 
 // The fixture `kind` reader is forward-compatible: it accepts the current wire

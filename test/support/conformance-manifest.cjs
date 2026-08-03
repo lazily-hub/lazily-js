@@ -90,7 +90,9 @@ if (out || walkOut) {
   const marker = `${path.sep}lazily-spec${path.sep}conformance${path.sep}`;
   const opened = new Set();
   // `fixture\tblock\tkey\tP` present, `...\tR` read, `...\tA` asserted,
-  // `...\tX\t<reason>` excused.
+  // `...\tX\t<reason>` excused, `...\tD\t<names>` discharged as prose,
+  // `...\tO` the fixture's value is a JSON OBJECT, `...\tK` its KEY SET was
+  // checked (#lzsubblockkeyset).
   const keyRecords = new Set();
   // `bound\t<digest>` for every assertion block this run instrumented, keyed by
   // the block's CONTENT and never by its `block` name: runners and fixtures
@@ -257,6 +259,14 @@ if (out || walkOut) {
     for (const [key, value] of Object.entries(object)) {
       if (declared === null && isProse(key, value)) continue;
       keyRecords.add(`${rel}\t${block}\t${key}\tP`);
+      // The SHAPE of the fixture's own value, declared off the corpus bytes at
+      // parse time and never from anything a runner says (#lzsubblockkeyset).
+      // An object-valued assertion key is the one shape whose contents can drift
+      // without any rung noticing: the key itself reports consumed and asserted
+      // while a check that named five sub-fields compares the sixth against
+      // nothing — the null form one level down, INSIDE an assertion key rather
+      // than beside one. The guard pairs this record with the `K` mark below.
+      if (isPlainObject(value)) keyRecords.add(`${rel}\t${block}\t${key}\tO`);
       Object.defineProperty(object, key, {
         enumerable: true,
         configurable: true,
@@ -470,6 +480,38 @@ if (out || walkOut) {
           live.excusedIds.add(`${block}\t${key}`);
         }
         return true;
+      },
+
+      // ---- Object-valued keys (#lzsubblockkeyset) ----
+      //
+      // `descend` binds an object-valued key's VALUE as a tracked block in its
+      // own right, named `<block>.<key>`. Every rung above then applies to the
+      // sub-keys exactly as it applies to a top-level one: a sub-key the runner
+      // never reads is NEVER CONSUMED, and one it reads without comparing is
+      // READ BUT NEVER ASSERTED. That is the whole point — the tracker holds the
+      // sub-block's key set, so a field added upstream fails rather than being
+      // compared against nothing, and no call site has to remember a field count.
+      //
+      // Instrumenting LAZILY, at the descent rather than at parse time, is
+      // deliberate: binding every object-valued key of every parsed fixture
+      // would manufacture presence records for sub-keys of keys a runner
+      // legitimately consumes whole (a deep equality over the object compares
+      // every one of them without ever reading them individually), and those
+      // would then report as unconsumed. The obligation is created by the
+      // runner asking for it.
+      descend(object, key) {
+        const id = this.owner(object);
+        if (id === null) return null;
+        if (!keyRecords.has(`${id}\t${key}\tP`)) return null;
+        // Through the block's own accessor, so the descent counts as the read.
+        const child = object[key];
+        if (!isPlainObject(child)) return null;
+        const [rel, block] = id.split("\t");
+        // Idempotent: a fixture replayed by two tests descends twice, and
+        // re-instrumenting would install accessors over accessors.
+        if (blockOwner.get(child) === undefined) instrumentBlock(rel, `${block}.${key}`, child);
+        keyRecords.add(`${id}\t${key}\tK`);
+        return child;
       },
 
       // ---- Prose-key discharge ledger (#lzprosekeyconvention) ----

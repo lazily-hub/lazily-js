@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
-import { assertKey, assertKeyWith } from "./support/assert-key.js";
+import { assertKey, subBlock } from "./support/assert-key.js";
 
 import { Context } from "../src/reactive.js";
 import {
@@ -33,9 +33,11 @@ function check(ctx, obs, step, out) {
   assertKey(step.expected, "output", out, "output");
   const wasCached = ctx.isSet(obs);
   ctx.get(obs);
-  assertKeyWith(step.expected, "invalidates", (want) => {
-    assert.equal(!wasCached, want.output, "invalidation");
-  });
+  // Descended, not probed by name (#lzsubblockkeyset): the child tracker owns
+  // every projection `invalidates` declares, so a second one added upstream is
+  // reported as unconsumed rather than compared by nothing.
+  const invalidates = subBlock(step.expected, "invalidates");
+  assertKey(invalidates, "output", !wasCached, "invalidation");
 }
 
 test("TumblingCountWindow", () => {

@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
-import { assertKey, assertKeyWith, excuseKey } from "./support/assert-key.js";
+import { assertKey, assertKeyWith, excuseKey, subBlock } from "./support/assert-key.js";
 
 import { AsyncContext } from "../src/reactive-async.js";
 import {
@@ -84,12 +84,21 @@ test("async ComputedMap conformance: observational_transparency.json", async () 
   assert.equal(lazy.presentCount(), 0, "lazy defers all slots at build");
 
   // Eventual transparency: drive each slot; resolved value = canonical.
-  await assertKeyWith(expected, "observe", async (observe) => {
-    for (const [key, value] of Object.entries(observe)) {
-      assert.equal(await eager.resolve(key), value, `eager resolve[${key}]`);
-      assert.equal(await lazy.resolve(key, factory), value, `lazy resolve[${key}]`);
-    }
-  });
+  // Descended (#lzsubblockkeyset): the child tracker owns every key the
+  // fixture observes, so one added upstream is reported as unconsumed rather
+  // than skipped by a loop that only ever visits today's keys.
+  const observe = subBlock(expected, "observe");
+  for (const key of Object.keys(observe)) {
+    await assertKeyWith(
+      observe,
+      key,
+      async (value) => {
+        assert.equal(await eager.resolve(key), value, `eager resolve[${key}]`);
+        assert.equal(await lazy.resolve(key, factory), value, `lazy resolve[${key}]`);
+      },
+      "observe",
+    );
+  }
 
   const ctx2 = new AsyncContext();
   const lazy2 = new AsyncComputedMap(ctx2);
@@ -147,14 +156,13 @@ test("async conformance: entry_kind_orthogonal_to_mode.json (SourceMap + Compute
       "eager_present",
     ),
   );
-  await assertKeyWith(expected, "observe", async (observe) => {
-    for (const [key, value] of Object.entries(observe)) {
-      const got = cellKeys.includes(key)
-        ? await eagerCells.resolve(key)
-        : await eagerSlots.resolve(key);
-      assert.equal(got, value, `eager resolve[${key}]`);
-    }
-  });
+  const observe = subBlock(expected, "observe");
+  for (const key of Object.keys(observe)) {
+    const got = cellKeys.includes(key)
+      ? await eagerCells.resolve(key)
+      : await eagerSlots.resolve(key);
+    assertKey(observe, key, got, `eager resolve[${key}]`);
+  }
 
   const ctxL = new AsyncContext();
   const lazyCells = new AsyncSourceMap(ctxL);

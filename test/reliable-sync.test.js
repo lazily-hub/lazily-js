@@ -343,6 +343,13 @@ test("reliable-sync: resync_gap_converge.json", () => {
   }
 
   for (const key of Object.keys(sc.expect)) {
+    if (key === "converged_nodes") {
+      // The whole-object deep equality IS the key-set check, in both directions
+      // (#lzsubblockkeyset): a node the fixture declares and this run never
+      // converged, and one this run grew that the fixture omits, each fail here.
+      assertKey(sc.expect, key, stateWire(state), `drop_suffix_then_resync_converges: ${key}`);
+      continue;
+    }
     assertKeyWith(sc.expect, key, (expected) => {
       const where = `drop_suffix_then_resync_converges: ${key}`;
       switch (key) {
@@ -351,9 +358,6 @@ test("reliable-sync: resync_gap_converge.json", () => {
           break;
         case "resync_requests_emitted":
           assert.equal(requests, expected, where);
-          break;
-        case "converged_nodes":
-          assert.deepEqual(stateWire(state), expected, where);
           break;
         case "equals_no_drop_receiver":
           assert.equal(
@@ -410,14 +414,17 @@ test("reliable-sync: idempotent_redelivery.json", () => {
       assert.equal(coord.lastEpoch, frame.last_epoch_after);
     }
     for (const key of Object.keys(sc.expect)) {
+      if (key === "state_after") {
+        // Whole-object deep equality against the fixture's own map IS the
+        // key-set check, in both directions (#lzsubblockkeyset).
+        assertKey(sc.expect, key, stateWire(state), `${name}: ${key}`);
+        continue;
+      }
       assertKeyWith(sc.expect, key, (expected) => {
         const where = `${name}: ${key}`;
         switch (key) {
           case "final_last_epoch":
             assert.equal(coord.lastEpoch, expected, where);
-            break;
-          case "state_after":
-            assert.deepEqual(stateWire(state), expected, where);
             break;
           case "net_effect_unchanged":
             assert.equal(

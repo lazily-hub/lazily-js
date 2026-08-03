@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
-import { assertKey, assertKeyWith } from "./support/assert-key.js";
+import { assertKey } from "./support/assert-key.js";
 
 import { WorkQueueCell } from "../src/queue.js";
 import { Context } from "../src/reactive.js";
@@ -65,16 +65,22 @@ function runFixture(fixture) {
 
     assert.deepEqual(result.returns, step.returns, `step ${i}: returns`);
     for (const probe of Object.values(probes)) ctx.get(probe.node);
-    assertKeyWith(step.expected, "invalidates", (invalidates) => {
-      assert.deepEqual(result.invalidates, invalidates, `step ${i}: invalidates`);
-      for (const [kind, invalidated] of Object.entries(invalidates)) {
-        assert.equal(
-          probes[kind].count > countsBefore[kind],
-          invalidated,
-          `step ${i}: reactive reader ${kind} recomputation`,
-        );
-      }
-    });
+    // The whole-object equality IS the key-set check, in both directions
+    // (#lzsubblockkeyset): a reader kind the fixture adds and the report omits,
+    // and one the report grows that the fixture omits, each fail here.
+    const invalidates = assertKey(
+      step.expected,
+      "invalidates",
+      result.invalidates,
+      `step ${i}: invalidates`,
+    );
+    for (const [kind, invalidated] of Object.entries(invalidates)) {
+      assert.equal(
+        probes[kind].count > countsBefore[kind],
+        invalidated,
+        `step ${i}: reactive reader ${kind} recomputation`,
+      );
+    }
     assertKey(step.expected, "pending", queue.pendingItems(), `step ${i}: pending`);
     assertKey(step.expected, "in_flight", queue.inFlightDeliveries(), `step ${i}: in_flight`);
     assertKey(step.expected, "dead_letters", queue.deadLetterItems(), `step ${i}: dead_letters`);

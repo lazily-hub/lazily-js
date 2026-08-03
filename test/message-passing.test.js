@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
-import { assertKey, assertKeyWith } from "./support/assert-key.js";
+import { assertKey, assertKeyWith, excuseKey, subBlock } from "./support/assert-key.js";
 import { scenarios } from "./support/scenario.js";
 
 import {
@@ -17,7 +17,6 @@ import {
   CommandMessage,
   CommandPolicy,
   CommandProjection,
-  CommandProjectionImage,
   CommandRpcClient,
   CommandStatus,
   CommandSubmit,
@@ -54,10 +53,14 @@ function foldFrame(projection, frame) {
 }
 
 function assertProjection(projection, expect) {
-  assertKeyWith(expect, "projection", (wire) => {
-    const want = CommandProjectionImage.fromWire(wire);
-    assert.deepEqual(projection.toImage().toWire(), want.toWire());
-  });
+  // Against the fixture's OWN wire object, not a `fromWire(...).toWire()`
+  // round-trip of it (#lzsubblockkeyset). The round-trip was the defect in
+  // miniature: a field the corpus grows that this binding's image does not model
+  // is dropped by `fromWire`, so both sides of the old comparison lost it
+  // together and the suite stayed green over an unmodelled projection field. A
+  // deep equality against the fixture value is a key-set check in both
+  // directions, and it is what makes that field fail.
+  assertKey(expect, "projection", projection.toImage().toWire());
 }
 
 function submitFixture(commandId, generation) {
@@ -254,10 +257,9 @@ test("terminal conflict fails closed fixture", () => {
       `conflict_command_id ${id} names no command in the folded projection`,
     );
   });
-  assertKeyWith(fx.expect, "projection_before_conflict", (wire) => {
-    const before = CommandProjectionImage.fromWire(wire);
-    assert.deepEqual(p.toImage().toWire(), before.toWire());
-  });
+  // Against the fixture's own wire object, for the reason in `assertProjection`
+  // (#lzsubblockkeyset).
+  assertKey(fx.expect, "projection_before_conflict", p.toImage().toWire());
 });
 
 test("cancel preempts nonterminal scenarios", () => {
@@ -303,17 +305,39 @@ test("rpc call waits for terminal", () => {
   if (!fixturesPresent()) return;
   const fx = load("rpc_call_waits_for_terminal.json");
   const p = new CommandProjection();
-  assertKeyWith(fx.expect, "rpc", (rpc) => {
-    const commandId = rpc.command_id;
-    const resolvesAt = rpc.resolves_after_frame_index;
-    const unresolved = rpc.unresolved_after_frame_indices;
-    fx.frames.forEach((frame, i) => {
-      foldFrame(p, frame);
-      const resolved = p.terminalFor(commandId) !== null;
-      if (unresolved.includes(i)) assert.equal(resolved, false, `frame ${i} must not resolve`);
-      if (i === resolvesAt) assert.equal(resolved, true, `frame ${i} must resolve`);
-    });
+  // Descended (#lzsubblockkeyset): `rpc` used to be an opaque object read for
+  // the three fields this runner knows, so a fourth added upstream would have
+  // driven nothing while `rpc` still reported asserted. The child tracker now
+  // owns every field, and the one that is an INPUT rather than an observation is
+  // declared as such instead of being read in silence.
+  const rpc = subBlock(fx.expect, "rpc");
+  excuseKey(
+    rpc,
+    "command_id",
+    "names the command the two frame-index expectations are ABOUT; it selects the subject " +
+      "of `resolves_after_frame_index` and `unresolved_after_frame_indices`, both asserted " +
+      "below, rather than being a value this run produces",
+  );
+  const resolvedAt = [];
+  fx.frames.forEach((frame, i) => {
+    foldFrame(p, frame);
+    if (p.terminalFor(rpc.command_id) !== null) resolvedAt.push(i);
   });
+  assertKeyWith(rpc, "unresolved_after_frame_indices", (unresolved) => {
+    for (const i of unresolved) {
+      assert.equal(resolvedAt.includes(i), false, `frame ${i} must not resolve`);
+    }
+  });
+  assertKeyWith(rpc, "resolves_after_frame_index", (at) => {
+    assert.equal(resolvedAt.includes(at), true, `frame ${at} must resolve`);
+  });
+  // `terminal_status` was carried by this fixture and read by NOTHING until the
+  // descent above made it visible (#lzsubblockkeyset). "The call resolved" and
+  // "the call resolved as APPLIED" are different claims, and only the second one
+  // separates a completed rpc from a rejected or cancelled one.
+  const terminal = p.terminalFor(rpc.command_id);
+  assert.ok(terminal !== null, "the rpc command never reached a terminal status");
+  assertKey(rpc, "terminal_status", terminal.status, "terminal status");
   assertProjection(p, fx.expect);
 });
 

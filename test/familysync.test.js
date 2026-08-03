@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
-import { assertKey, assertKeyWith } from "./support/assert-key.js";
+import { assertKey, assertKeyWith, subBlock } from "./support/assert-key.js";
 import { scenarios } from "./support/scenario.js";
 
 import { CrdtSync } from "../src/index.js";
@@ -92,11 +92,12 @@ test("family-granularity sync: materialize on ingest (#lzfamilysync)", () => {
       `[${name}] present count`,
     );
 
-    assertKeyWith(expect, "target_values", (values) => {
-      for (const [key, want] of Object.entries(values)) {
-        assert.equal(target.familyValueLww(namespace, key), want, `[${name}] value for ${key}`);
-      }
-    });
+    // Descended (#lzsubblockkeyset): the child tracker owns every key the
+    // fixture names, so one added upstream is unconsumed rather than skipped.
+    const values = subBlock(expect, "target_values");
+    for (const key of Object.keys(values)) {
+      assertKey(values, key, target.familyValueLww(namespace, key), `[${name}] value for ${key}`);
+    }
 
     const countTrue = target
       .familyKeys(namespace)

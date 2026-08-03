@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
-import { assertKey, assertKeyWith } from "./support/assert-key.js";
+import { assertKey, subBlock } from "./support/assert-key.js";
 
 import { TopicCell, TopicDurability } from "../src/queue.js";
 import { Context } from "../src/reactive.js";
@@ -72,23 +72,32 @@ function runFixture(fixture) {
     assertKey(expected, "elements", topic.elements(), `step ${i}: elements`);
     assertKey(expected, "subscriptions", topic.subscriptions(), `step ${i}: subscriptions`);
     if ("reads" in expected) {
-      assertKeyWith(expected, "reads", (reads) => {
-        for (const [id, stream] of Object.entries(reads)) {
-          assert.deepEqual(topic.readStream(id), stream, `step ${i}: reads.${id}`);
-        }
-      });
+      // Descended (#lzsubblockkeyset): the child tracker owns every subscriber
+      // the fixture lists, so one added upstream is unconsumed rather than
+      // skipped by a loop that visits only today's keys.
+      const reads = subBlock(expected, "reads");
+      for (const id of Object.keys(reads)) {
+        assertKey(reads, id, topic.readStream(id), `step ${i}: reads.${id}`);
+      }
     }
     for (const probe of probes.values()) ctx.get(probe.node);
-    assertKeyWith(expected, "invalidates", (invalidates) => {
-      assert.deepEqual(result.invalidates, invalidates, `step ${i}: invalidates`);
-      for (const [id, invalidated] of Object.entries(invalidates)) {
-        assert.equal(
-          probeFor(id).count > countsBefore.get(id),
-          invalidated,
-          `step ${i}: reactive subscriber reader ${id} recomputation`,
-        );
-      }
-    });
+    // The whole-object equality IS the key-set check, in both directions
+    // (#lzsubblockkeyset): a subscriber the fixture adds and this report omits,
+    // and one the report grows that the fixture omits, each fail here. The probe
+    // loop below then reads the same object the comparison consumed.
+    const invalidates = assertKey(
+      expected,
+      "invalidates",
+      result.invalidates,
+      `step ${i}: invalidates`,
+    );
+    for (const [id, invalidated] of Object.entries(invalidates)) {
+      assert.equal(
+        probeFor(id).count > countsBefore.get(id),
+        invalidated,
+        `step ${i}: reactive subscriber reader ${id} recomputation`,
+      );
+    }
     if ("returns" in step) assert.equal(result.returns, step.returns, `step ${i}: returns`);
   }
 }

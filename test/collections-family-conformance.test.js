@@ -18,7 +18,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
-import { assertKey, assertKeyWith } from "./support/assert-key.js";
+import { assertKey, assertKeyWith, subBlock } from "./support/assert-key.js";
 
 import { Context } from "../src/reactive.js";
 import { AsyncContext } from "../src/reactive-async.js";
@@ -233,11 +233,12 @@ async function replay(FlavorCls, fixtureName) {
     }
 
     if ("values" in expected) {
-      assertKeyWith(expected, "values", (values) => {
-        for (const [key, want] of Object.entries(values)) {
-          assert.equal(ops.value(flavor, key), want, `${where(i)}: value for ${key} diverged`);
-        }
-      });
+      // Descended (#lzsubblockkeyset): the child tracker owns every key the
+      // fixture lists, so one added upstream is unconsumed rather than skipped.
+      const values = subBlock(expected, "values");
+      for (const key of Object.keys(values)) {
+        assertKey(values, key, ops.value(flavor, key), `${where(i)}: value for ${key} diverged`);
+      }
     }
 
     // The invalidation matrix, read from expected.invalidates - where the
@@ -251,60 +252,81 @@ async function replay(FlavorCls, fixtureName) {
 
     // Every comparison the matrix drives happens INSIDE the callback, so the
     // fixture's own value reaches all three (#lzconsumednotasserted).
-    await assertKeyWith(expected, "invalidates", async (invalidates) => {
-      const dirty = new Set(invalidates.value ?? []);
-      const survivors = new Set(gotOrder);
-      for (const [key, drive] of valueReaders) {
-        if (!survivors.has(key)) {
-          continue; // removed by this op: no entry left to read
+    // The matrix is DESCENDED rather than probed by name (#lzsubblockkeyset).
+    // The three projections below used to be read off an opaque object, so a
+    // fourth one added upstream would have been driven by nothing while
+    // `invalidates` still reported asserted. The child tracker now owns them:
+    // an unrecognised projection is reported as unconsumed.
+    const invalidates = subBlock(expected, "invalidates");
+    if ("value" in invalidates) {
+      await assertKeyWith(invalidates, "value", async (want) => {
+        const dirty = new Set(want);
+        const survivors = new Set(gotOrder);
+        for (const [key, drive] of valueReaders) {
+          if (!survivors.has(key)) {
+            continue; // removed by this op: no entry left to read
+          }
+          const recomputed = (await drive()) !== baseline.get(key);
+          if (dirty.has(key)) {
+            assert.ok(
+              recomputed,
+              `${where(i)}: value reader for ${key} should have been invalidated`,
+            );
+          } else {
+            assert.ok(
+              !recomputed,
+              `${where(i)}: value reader for ${key} should have stayed cached - ` +
+                "per-entry independence is the whole point",
+            );
+          }
         }
-        const recomputed = (await drive()) !== baseline.get(key);
-        if (dirty.has(key)) {
-          assert.ok(
-            recomputed,
-            `${where(i)}: value reader for ${key} should have been invalidated`,
-          );
-        } else {
-          assert.ok(
-            !recomputed,
-            `${where(i)}: value reader for ${key} should have stayed cached - ` +
-              "per-entry independence is the whole point",
-          );
-        }
-      }
-
-      assert.equal(
-        (await membership()) !== membershipBase,
-        Boolean(invalidates.membership),
-        `${where(i)}: membership reader invalidation mismatch - ` +
-          "a pure reorder must NOT invalidate set-identity readers",
+      });
+    }
+    if ("membership" in invalidates) {
+      await assertKeyWith(invalidates, "membership", async (want) =>
+        assert.equal(
+          (await membership()) !== membershipBase,
+          Boolean(want),
+          `${where(i)}: membership reader invalidation mismatch - ` +
+            "a pure reorder must NOT invalidate set-identity readers",
+        ),
       );
-      assert.equal(
-        (await order()) !== orderBase,
-        Boolean(invalidates.order),
-        `${where(i)}: order reader invalidation mismatch`,
+    }
+    if ("order" in invalidates) {
+      await assertKeyWith(invalidates, "order", async (want) =>
+        assert.equal(
+          (await order()) !== orderBase,
+          Boolean(want),
+          `${where(i)}: order reader invalidation mismatch`,
+        ),
       );
-    });
+    }
 
     // Handle stability: the law separating an atomic move from a remove +
     // re-mint. A reorder keeps the entry's node, so dependents and lineage
     // survive.
     if ("handle_stable" in expected) {
-      assertKeyWith(expected, "handle_stable", (stability) => {
-        for (const [key, wantStable] of Object.entries(stability)) {
-          const after = ops.handle(flavor, key);
-          const before = handlesBefore.get(key);
-          if (wantStable) {
-            assert.ok(
-              before !== undefined && after === before,
-              `${where(i)}: handle for ${key} must survive the move - ` +
-                "a reorder that re-mints is a remove + insert, not a move",
-            );
-          } else {
-            assert.ok(after !== before, `${where(i)}: handle for ${key} should have changed`);
-          }
-        }
-      });
+      const stability = subBlock(expected, "handle_stable");
+      for (const key of Object.keys(stability)) {
+        assertKeyWith(
+          stability,
+          key,
+          (wantStable) => {
+            const after = ops.handle(flavor, key);
+            const before = handlesBefore.get(key);
+            if (wantStable) {
+              assert.ok(
+                before !== undefined && after === before,
+                `${where(i)}: handle for ${key} must survive the move - ` +
+                  "a reorder that re-mints is a remove + insert, not a move",
+              );
+            } else {
+              assert.ok(after !== before, `${where(i)}: handle for ${key} should have changed`);
+            }
+          },
+          where(i),
+        );
+      }
     }
   }
 

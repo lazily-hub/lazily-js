@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
-import { assertKey, assertKeyWith } from "./support/assert-key.js";
+import { assertKey, subBlock } from "./support/assert-key.js";
 
 import { Context } from "../src/reactive.js";
 import { MembershipCell } from "../src/membership.js";
@@ -41,11 +41,12 @@ test("MembershipCell lifecycle", () => {
     else throw new Error(`unknown op ${op.type}`);
 
     const exp = step.expected;
-    assertKeyWith(exp, "states", (states) => {
-      for (const [peer, want] of Object.entries(states)) {
-        assert.equal(m.state(Number(peer)), want, `state of peer ${peer}`);
-      }
-    });
+    // Descended (#lzsubblockkeyset): the child tracker owns every peer the
+    // fixture names, so one added upstream is unconsumed rather than skipped.
+    const states = subBlock(exp, "states");
+    for (const peer of Object.keys(states)) {
+      assertKey(states, peer, m.state(Number(peer)), `state of peer ${peer}`);
+    }
     assertKey(exp, "alive_set", m.peerSet(), "alive_set");
 
     const wasCached = ctx.isSet(observed);

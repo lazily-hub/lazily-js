@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
-import { assertKey, assertKeyWith } from "./support/assert-key.js";
+import { assertKey, assertKeyWith, subBlock } from "./support/assert-key.js";
 
 import { Context } from "../src/reactive.js";
 import { CronCell, DeadlineCell, IntervalCell, TimerCell } from "../src/temporal.js";
@@ -64,9 +64,10 @@ test("TimerCell single-shot", () => {
 
     const wasCached = ctx.isSet(observed);
     ctx.get(observed);
-    assertKeyWith(step.expected, "invalidates", (want) => {
-      assert.equal(!wasCached, want.fired, "invalidation");
-    });
+    // Descended, not probed by name (#lzsubblockkeyset): the child tracker owns
+    // every projection `invalidates` declares.
+    const invalidates = subBlock(step.expected, "invalidates");
+    assertKey(invalidates, "fired", !wasCached, "invalidation");
   }
 });
 
@@ -83,9 +84,9 @@ test("IntervalCell periodic", () => {
 
     const wasCached = ctx.isSet(observed);
     ctx.get(observed);
-    assertKeyWith(step.expected, "invalidates", (want) => {
-      assert.equal(!wasCached, want.count, "invalidation");
-    });
+    // Descended (#lzsubblockkeyset).
+    const invalidates = subBlock(step.expected, "invalidates");
+    assertKey(invalidates, "count", !wasCached, "invalidation");
   }
 });
 
@@ -102,9 +103,9 @@ test("CronCell pattern", () => {
 
     const wasCached = ctx.isSet(observed);
     ctx.get(observed);
-    assertKeyWith(step.expected, "invalidates", (want) => {
-      assert.equal(!wasCached, want.count, "invalidation");
-    });
+    // Descended (#lzsubblockkeyset).
+    const invalidates = subBlock(step.expected, "invalidates");
+    assertKey(invalidates, "count", !wasCached, "invalidation");
   }
 });
 
@@ -122,8 +123,8 @@ test("DeadlineCell expiry", () => {
 
     const wasCached = ctx.isSet(observed);
     ctx.get(observed);
-    assertKeyWith(step.expected, "invalidates", (want) => {
-      assert.equal(!wasCached, want.state, "invalidation");
-    });
+    // Descended (#lzsubblockkeyset).
+    const invalidates = subBlock(step.expected, "invalidates");
+    assertKey(invalidates, "state", !wasCached, "invalidation");
   }
 });

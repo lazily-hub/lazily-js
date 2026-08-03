@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
-import { assertKey, assertKeyWith } from "./support/assert-key.js";
+import { assertKey, assertKeyWith, subBlock } from "./support/assert-key.js";
 
 import { SourceMap, SourceTree, reconcileCollections } from "../src/collections.js";
 
@@ -45,11 +45,14 @@ test("collection conformance: cellmap_atomic_move.json", () => {
       );
     }
     if ("values" in expected) {
-      assertKeyWith(expected, "values", (values) => {
-        for (const [key, value] of Object.entries(values)) {
-          assert.equal(map.get(key), value, `${step.op.type}: value[${key}]`);
-        }
-      });
+      // Descended (#lzsubblockkeyset): the child tracker owns every key the
+      // fixture lists under `values`, so one added upstream is reported as
+      // unconsumed instead of being iterated past by a loop that only ever
+      // visits what the fixture happens to carry today.
+      const values = subBlock(expected, "values");
+      for (const key of Object.keys(values)) {
+        assertKey(values, key, map.get(key), `${step.op.type}: value[${key}]`);
+      }
     }
     assertKey(expected, "invalidates", report, `${step.op.type}: invalidates`);
     if ("handle_stable" in expected) {
@@ -57,15 +60,15 @@ test("collection conformance: cellmap_atomic_move.json", () => {
       // asserted the FIXTURE said `true` — so a fixture claiming a handle must
       // NOT survive would have failed on its own value rather than on the
       // library's behaviour.
-      assertKeyWith(expected, "handle_stable", (stability) => {
-        for (const [key, stable] of Object.entries(stability)) {
-          assert.equal(
-            map.handle(key) === handlesBefore[key],
-            stable,
-            `${step.op.type}: handle[${key}] stability`,
-          );
-        }
-      });
+      const stability = subBlock(expected, "handle_stable");
+      for (const key of Object.keys(stability)) {
+        assertKey(
+          stability,
+          key,
+          map.handle(key) === handlesBefore[key],
+          `${step.op.type}: handle[${key}] stability`,
+        );
+      }
     }
   }
 });
@@ -83,11 +86,10 @@ test("collection conformance: cellmap_independence.json", () => {
       assertSameSet(map.keys(), membership, step.op.type),
     );
     if ("values" in expected) {
-      assertKeyWith(expected, "values", (values) => {
-        for (const [key, value] of Object.entries(values)) {
-          assert.equal(map.get(key), value, `${step.op.type}: value[${key}]`);
-        }
-      });
+      const values = subBlock(expected, "values");
+      for (const key of Object.keys(values)) {
+        assertKey(values, key, map.get(key), `${step.op.type}: value[${key}]`);
+      }
     }
     assertKey(expected, "invalidates", report, `${step.op.type}: invalidates`);
   }

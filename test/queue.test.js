@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
-import { assertKey, assertKeyWith } from "./support/assert-key.js";
+import { assertKey, assertKeyWith, subBlock } from "./support/assert-key.js";
 
 import { QueueCell, QueuePopError, QueuePushError, VecDequeStorage } from "../src/queue.js";
 import { Context } from "../src/reactive.js";
@@ -132,20 +132,25 @@ function runFixture(fixture) {
     // asserted (fixtures that focus on one reader kind only declare that one).
     for (const probe of Object.values(probes)) ctx.get(probe.node);
     if ("invalidates" in step.expected) {
-      assertKeyWith(step.expected, "invalidates", (invalidates) => {
-        for (const kind of Object.keys(invalidates)) {
-          assert.equal(
-            result.invalidates[kind],
-            invalidates[kind],
-            `step ${i}: invalidates.${kind}`,
-          );
-          assert.equal(
-            probes[kind].count > countsBefore[kind],
-            invalidates[kind],
-            `step ${i}: reactive reader ${kind} recomputation`,
-          );
-        }
-      });
+      // Descended (#lzsubblockkeyset): the child tracker owns every reader kind
+      // the fixture declares, so a kind added upstream is reported as unconsumed
+      // rather than skipped by a loop that visits only today's keys.
+      const invalidates = subBlock(step.expected, "invalidates");
+      for (const kind of Object.keys(invalidates)) {
+        assertKeyWith(
+          invalidates,
+          kind,
+          (want) => {
+            assert.equal(result.invalidates[kind], want, `step ${i}: invalidates.${kind}`);
+            assert.equal(
+              probes[kind].count > countsBefore[kind],
+              want,
+              `step ${i}: reactive reader ${kind} recomputation`,
+            );
+          },
+          `step ${i}`,
+        );
+      }
     }
   }
 }

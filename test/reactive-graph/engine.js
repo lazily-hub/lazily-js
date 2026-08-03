@@ -45,7 +45,7 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { assertKeyWith } from "../support/assert-key.js";
+import { assertKeyWith, excuseKey, subBlock } from "../support/assert-key.js";
 import { recordScenario } from "../support/scenario.js";
 import { ComputeFailedError, DisposedNodeError } from "./models.js";
 
@@ -351,7 +351,35 @@ async function replaySteps(model, steps, label, assertFn, divergences, tail) {
       // key asserted (#lzconsumednotasserted). Binding `expect[key]` by hand would
       // mark it read and prove nothing, which is exactly the shape this routes
       // around.
+      // The MAP-valued expectations are DESCENDED rather than probed inside the
+      // callback (#lzsubblockkeyset). Each is an object of id -> expectation, so
+      // the key's own value carries a key set the tracker can hold: the child
+      // block owns every id the fixture names, and an id added upstream is
+      // reported as unconsumed instead of being walked past by a loop that only
+      // ever visits today's keys.
+      const projections = {
+        computes_of: (id) => instance.computesOf(id),
+        read: (id) => readOr(id),
+        readable: (id) => alive(id),
+        dependents_of: (id) => instance.dependentsOf(id),
+        dependencies_of: (id) => instance.dependenciesOf(id),
+        scope_owned_count: (name) => instance.scopeOwned(name),
+      };
       for (const key of Object.keys(expect).sort()) {
+        if (key in projections) {
+          const want = subBlock(expect, key);
+          for (const id of Object.keys(want).sort()) {
+            const got = await projections[key](id);
+            assertKeyWith(
+              want,
+              id,
+              (wantOne) =>
+                check(where, key, id, () => assertFn.equal(got, wantOne, `${where}: ${key} ${id}`)),
+              where,
+            );
+          }
+          continue;
+        }
         await assertKeyWith(expect, key, async (want) => {
           switch (key) {
             case "note":
@@ -373,28 +401,6 @@ async function replaySteps(model, steps, label, assertFn, divergences, tail) {
               break;
             }
 
-            case "computes_of":
-              // Cumulative invocations of the node's compute since the start of
-              // the scenario, creation included -- the only caller-observable
-              // difference between an eager signal and the lazy memo backing it.
-              for (const id of Object.keys(want).sort()) {
-                const got = instance.computesOf(id);
-                check(where, "computes_of", id, () =>
-                  assertFn.equal(got, want[id], `${where}: computes_of ${id}`),
-                );
-              }
-              break;
-
-            case "read":
-              // A map of id -> expected value, each read fresh after the op.
-              for (const id of Object.keys(want).sort()) {
-                const got = await readOr(id);
-                check(where, "read", id, () =>
-                  assertFn.equal(got, want[id], `${where}: read ${id}`),
-                );
-              }
-              break;
-
             case "error":
               check(where, "error", null, () => {
                 if (want === null) {
@@ -414,34 +420,6 @@ async function replaySteps(model, steps, label, assertFn, divergences, tail) {
                   );
                 }
               });
-              break;
-
-            case "readable":
-              // A map of id -> whether the node must still be observable.
-              for (const id of Object.keys(want).sort()) {
-                const got = await alive(id);
-                check(where, "readable", id, () =>
-                  assertFn.equal(got, want[id], `${where}: readable ${id}`),
-                );
-              }
-              break;
-
-            case "dependents_of":
-              for (const id of Object.keys(want).sort()) {
-                const got = instance.dependentsOf(id);
-                check(where, "dependents_of", id, () =>
-                  assertFn.equal(got, want[id], `${where}: dependents_of ${id}`),
-                );
-              }
-              break;
-
-            case "dependencies_of":
-              for (const id of Object.keys(want).sort()) {
-                const got = instance.dependenciesOf(id);
-                check(where, "dependencies_of", id, () =>
-                  assertFn.equal(got, want[id], `${where}: dependencies_of ${id}`),
-                );
-              }
               break;
 
             case "observed_by":
@@ -468,15 +446,6 @@ async function replaySteps(model, steps, label, assertFn, divergences, tail) {
                   `${where}: cleanup_order`,
                 ),
               );
-              break;
-
-            case "scope_owned_count":
-              for (const name of Object.keys(want).sort()) {
-                const got = instance.scopeOwned(name);
-                check(where, "scope_owned_count", name, () =>
-                  assertFn.equal(got, want[name], `${where}: scope_owned_count ${name}`),
-                );
-              }
               break;
 
             default:
@@ -510,67 +479,100 @@ async function replaySteps(model, steps, label, assertFn, divergences, tail) {
         }
       }
 
+      // Both tail expectations are object-valued, so both are DESCENDED
+      // (#lzsubblockkeyset). The `Object.keys(...)` fail-closed lists above say
+      // which sub-keys this runner knows; the child trackers are what make an
+      // unknown one fail even if those lists are edited to admit it and nothing
+      // is then written to drive it.
       if ("final_state" in tail) {
-        await assertKeyWith(tail, "final_state", async (finalState) => {
-          for (const id of Object.keys(finalState.dependents_of ?? {}).sort()) {
-            const got = instance.dependentsOf(id);
-            observation.degrees[id] = got;
-            check(where, "final.dependents_of", id, () =>
-              assertFn.equal(got, finalState.dependents_of[id], `${where}: dependents_of ${id}`),
+        const finalState = subBlock(tail, "final_state");
+        for (const key of ["dependents_of", "readable", "read"]) {
+          if (!(key in finalState)) continue;
+          const want = subBlock(finalState, key);
+          for (const id of Object.keys(want).sort()) {
+            const got =
+              key === "dependents_of"
+                ? instance.dependentsOf(id)
+                : key === "readable"
+                  ? await alive(id)
+                  : await readOr(id);
+            if (key === "dependents_of") observation.degrees[id] = got;
+            else if (key === "readable") observation.readable[id] = got;
+            else observation.reads[id] = got;
+            assertKeyWith(
+              want,
+              id,
+              (wantOne) =>
+                check(where, `final.${key}`, id, () =>
+                  assertFn.equal(got, wantOne, `${where}: ${key} ${id}`),
+                ),
+              where,
             );
           }
-          for (const id of Object.keys(finalState.readable ?? {}).sort()) {
-            const got = await alive(id);
-            observation.readable[id] = got;
-            check(where, "final.readable", id, () =>
-              assertFn.equal(got, finalState.readable[id], `${where}: readable ${id}`),
-            );
-          }
-          for (const id of Object.keys(finalState.read ?? {}).sort()) {
-            const got = await readOr(id);
-            observation.reads[id] = got;
-            check(where, "final.read", id, () =>
-              assertFn.equal(got, finalState.read[id], `${where}: read ${id}`),
-            );
-          }
-        });
+        }
       }
 
       if ("after_publish" in tail) {
-        await assertKeyWith(tail, "after_publish", async (publish) => {
-          if (publish?.op) {
-            const before = instance.runLog.length;
-            await instance.set(publish.op.id, publish.op.value);
-            await instance.settle();
-            observation.afterPublishObserved = instance.runLog.slice(before);
+        const publish = subBlock(tail, "after_publish");
+        if (publish.op) {
+          // `op` DRIVES the tail rather than being compared against it: it names
+          // the write to publish. Declared rather than left silent, so the tail
+          // has no sub-key nothing accounts for (#lzsubblockkeyset).
+          excuseKey(
+            publish,
+            "op",
+            "names the write this tail publishes (an INPUT that drives the run), not a value " +
+              "the run can compare; everything it produces is asserted by observed_by, read " +
+              "and dependents_of below",
+          );
+          const before = instance.runLog.length;
+          const write = publish.op;
+          await instance.set(write.id, write.value);
+          await instance.settle();
+          observation.afterPublishObserved = instance.runLog.slice(before);
+          if ("observed_by" in publish) {
+            assertKeyWith(
+              publish,
+              "observed_by",
+              (want) =>
+                check(where, "after_publish.observed_by", null, () =>
+                  assertFn.deepEqual(
+                    observation.afterPublishObserved,
+                    want ?? [],
+                    `${where}: after_publish observed_by`,
+                  ),
+                ),
+              where,
+            );
+          } else {
             check(where, "after_publish.observed_by", null, () =>
               assertFn.deepEqual(
                 observation.afterPublishObserved,
-                publish.observed_by ?? [],
+                [],
                 `${where}: after_publish observed_by`,
               ),
             );
-            // Reads before degrees: a lazy binding re-registers edges when it
-            // recomputes, and the degree assertion below counts them.
-            for (const id of Object.keys(publish.read ?? {}).sort()) {
-              const got = await readOr(id);
-              observation.afterPublishReads[id] = got;
-              check(where, "after_publish.read", id, () =>
-                assertFn.equal(got, publish.read[id], `${where}: after_publish read ${id}`),
-              );
-            }
-            for (const id of Object.keys(publish.dependents_of ?? {}).sort()) {
-              const got = instance.dependentsOf(id);
-              check(where, "after_publish.dependents_of", id, () =>
-                assertFn.equal(
-                  got,
-                  publish.dependents_of[id],
-                  `${where}: after_publish dependents_of ${id}`,
-                ),
+          }
+          // Reads before degrees: a lazy binding re-registers edges when it
+          // recomputes, and the degree assertion below counts them.
+          for (const key of ["read", "dependents_of"]) {
+            if (!(key in publish)) continue;
+            const want = subBlock(publish, key);
+            for (const id of Object.keys(want).sort()) {
+              const got = key === "read" ? await readOr(id) : instance.dependentsOf(id);
+              if (key === "read") observation.afterPublishReads[id] = got;
+              assertKeyWith(
+                want,
+                id,
+                (wantOne) =>
+                  check(where, `after_publish.${key}`, id, () =>
+                    assertFn.equal(got, wantOne, `${where}: after_publish ${key} ${id}`),
+                  ),
+                where,
               );
             }
           }
-        });
+        }
       }
     }
   } finally {

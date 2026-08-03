@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
-import { assertKey, assertKeyWith } from "./support/assert-key.js";
+import { assertKey, subBlock } from "./support/assert-key.js";
 
 import { Context } from "../src/reactive.js";
 import {
@@ -37,9 +37,9 @@ function replay(ctx, fx, cell, drive) {
     assertKey(step.expected, "output", cell.output(), "output");
     const wasCached = ctx.isSet(observed);
     ctx.get(observed);
-    assertKeyWith(step.expected, "invalidates", (want) => {
-      assert.equal(!wasCached, want.output, "invalidation");
-    });
+    // Descended, not probed by name (#lzsubblockkeyset).
+    const invalidates = subBlock(step.expected, "invalidates");
+    assertKey(invalidates, "output", !wasCached, "invalidation");
   }
 }
 

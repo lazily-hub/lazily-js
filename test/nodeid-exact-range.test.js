@@ -30,6 +30,7 @@ import test from "node:test";
 
 import {
   assertKey,
+  assertKeySet,
   assertKeyWith,
   excuseKey,
   proseKey,
@@ -274,18 +275,14 @@ test("NodeId exact-representation bound is enforced by refusal, never rounding",
 
   // The vocabulary, not the glosses. A third outcome added upstream would land
   // in neither arm of the dispatch above, and the set difference is what says so.
-  assertKeyWith(
-    block,
-    "outcomes",
-    (outcomes) => {
-      assert.deepStrictEqual(
-        [...observedOutcomes].sort(),
-        Object.keys(outcomes).sort(),
-        `${where}: the outcomes replayed and the outcomes declared differ`,
-      );
-    },
-    where,
-  );
+  //
+  // Through the tracker's key-set entry point rather than a hand-rolled
+  // `Object.keys` inside `assertKeyWith` (#lzsubblockkeyset). The comparison is
+  // the same one; what changes is that the TRACKER now knows this object-valued
+  // key was checked by its key set. A site that reached for `assertKeyWith` here
+  // instead — comparing named sub-fields and stopping — is failed by the
+  // finish-time guard rather than reporting asserted over a silent hole.
+  assertKeySet(block, "outcomes", observedOutcomes, where);
 
   verifyProse(fixture);
 });

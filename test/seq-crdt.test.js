@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
-import { assertKey, assertKeyWith, excuseKey } from "./support/assert-key.js";
+import { assertKey, assertKeyWith, excuseKey, subBlock } from "./support/assert-key.js";
 import { scenarios } from "./support/scenario.js";
 
 import { SeqCrdt } from "../src/seq-crdt.js";
@@ -214,11 +214,15 @@ function runSeqCrdtScenario(scenario) {
         assertKey(expect, "len", replicas.get(defaultTarget).order().length, scenario.name);
         break;
       case "get":
-        assertKeyWith(expect, "get", (want) => {
-          for (const [id, v] of Object.entries(want)) {
-            assert.equal(replicas.get(defaultTarget).get(id), v, scenario.name);
+        {
+          // Descended (#lzsubblockkeyset): the child tracker owns every id the
+          // fixture names, so one added upstream is unconsumed rather than
+          // skipped by a loop over today's keys.
+          const want = subBlock(expect, "get");
+          for (const id of Object.keys(want)) {
+            assertKey(want, id, replicas.get(defaultTarget).get(id), scenario.name);
           }
-        });
+        }
         break;
       case "orders_equal":
         assertKeyWith(expect, "orders_equal", (pairs) => {
@@ -235,29 +239,41 @@ function runSeqCrdtScenario(scenario) {
         });
         break;
       case "order_on":
-        assertKeyWith(expect, "order_on", (want) => {
-          for (const [r, ord] of Object.entries(want)) {
-            assert.deepEqual(replicas.get(r).order(), ord, scenario.name);
+        {
+          const want = subBlock(expect, "order_on");
+          for (const r of Object.keys(want)) {
+            assertKey(want, r, replicas.get(r).order(), scenario.name);
           }
-        });
+        }
         break;
       case "get_on":
-        assertKeyWith(expect, "get_on", (want) => {
-          for (const [r, kv] of Object.entries(want)) {
-            for (const [id, v] of Object.entries(kv)) {
-              assert.equal(replicas.get(r).get(id), v, scenario.name);
+        {
+          // Descended twice: replica, then id.
+          const want = subBlock(expect, "get_on");
+          for (const r of Object.keys(want)) {
+            const kv = subBlock(want, r);
+            for (const id of Object.keys(kv)) {
+              assertKey(kv, id, replicas.get(r).get(id), scenario.name);
             }
           }
-        });
+        }
         break;
       case "not_contains_on":
-        assertKeyWith(expect, "not_contains_on", (want) => {
-          for (const [r, ids] of Object.entries(want)) {
-            for (const id of ids) {
-              assert.equal(replicas.get(r).contains(id), false, scenario.name);
-            }
+        {
+          const want = subBlock(expect, "not_contains_on");
+          for (const r of Object.keys(want)) {
+            assertKeyWith(
+              want,
+              r,
+              (ids) => {
+                for (const id of ids) {
+                  assert.equal(replicas.get(r).contains(id), false, scenario.name);
+                }
+              },
+              scenario.name,
+            );
           }
-        });
+        }
         break;
       default:
         assert.fail(`${scenario.name}: unknown seqcrdt expectation \`${key}\``);

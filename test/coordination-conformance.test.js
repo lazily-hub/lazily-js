@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
-import { assertKey, assertKeyWith } from "./support/assert-key.js";
+import { assertKey, subBlock } from "./support/assert-key.js";
 
 import { Context } from "../src/reactive.js";
 import {
@@ -32,9 +32,12 @@ function observe(ctx, cell) {
 function checkInval(ctx, obs, step, reader) {
   const wasCached = ctx.isSet(obs);
   ctx.get(obs);
-  assertKeyWith(step.expected, "invalidates", (want) => {
-    assert.equal(!wasCached, want[reader], `${reader} invalidation`);
-  });
+  // The `invalidates` sub-block, descended rather than probed by name
+  // (#lzsubblockkeyset): the child tracker owns every projection the corpus
+  // declares, so a second one added upstream is reported as unconsumed instead
+  // of being compared by nothing while this key still reports asserted.
+  const invalidates = subBlock(step.expected, "invalidates");
+  assertKey(invalidates, reader, !wasCached, `${reader} invalidation`);
 }
 
 test("LeaseCell", () => {

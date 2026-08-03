@@ -53,6 +53,23 @@ function fetch(block, key, verb) {
   return block[key];
 }
 
+const isPlainObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+
+/**
+ * Mark an object-valued key's KEY SET as checked (#lzsubblockkeyset).
+ *
+ * A deep equality against the fixture's own object IS a key-set check, in both
+ * directions and by construction: a sub-field added upstream is absent from the
+ * observation and the comparison fails. So the two deep-equality entry points
+ * discharge the obligation themselves. `assertKeyWith` cannot — its check is an
+ * opaque closure that may compare five named sub-fields and stop, which is
+ * exactly the defect — so it never marks, and the finish-time guard in
+ * `scripts/check-assertion-keys.mjs` names any object-valued key that reached it.
+ */
+function markKeySet(block, key, value) {
+  if (isPlainObject(value)) mark(block, key, "K");
+}
+
 /**
  * Assert `actual` deep-equals the fixture's own value for `key`, and mark the key
  * asserted. This is the entry point to prefer: the value under comparison comes
@@ -61,6 +78,7 @@ function fetch(block, key, verb) {
 export function assertKey(block, key, actual, where) {
   const want = fetch(block, key, "assertKey");
   mark(block, key, "A");
+  markKeySet(block, key, want);
   assert.deepStrictEqual(actual, want, label(block, key, where));
   return want;
 }
@@ -89,8 +107,103 @@ export function assertBlock(block, actual, where) {
   if (block === null || typeof block !== "object") {
     throw new TypeError(`assertBlock: expected an assertion block object, got ${typeof block}`);
   }
-  for (const key of Object.keys(block)) mark(block, key, "A");
+  // The spread is shallow, so an object-valued key is compared as the fixture's
+  // OWN nested object and `deepStrictEqual` recurses into it — a key-set check
+  // for every sub-key, in both directions (#lzsubblockkeyset).
+  for (const key of Object.keys(block)) {
+    mark(block, key, "A");
+    markKeySet(block, key, block[key]);
+  }
   assert.deepStrictEqual(actual, { ...block }, where ?? "fixture block");
+}
+
+// ---- Object-valued keys (#lzsubblockkeyset) ----
+//
+// An assertion key whose VALUE is a JSON object is the null form one level down,
+// INSIDE an assertion key rather than beside one. Every rung above binds the KEY;
+// nothing binds what is under it. A check that reads `descriptor.offset`,
+// `.len`, `.generation`, `.epoch` and `.checksum` marks `descriptor` consumed and
+// asserted while a sixth field planted upstream is compared against nothing — the
+// suite stays green, and a per-call-site field count only moves the obligation to
+// a place each site has to remember.
+//
+// So the TRACKER holds an object-valued key's key set, the way it already holds
+// the block's, through the two entry points below. Neither is optional: the guard
+// in `scripts/check-assertion-keys.mjs` fails any object-valued key that was
+// consumed through neither (nor excused, nor discharged as prose), so a call site
+// that reaches for `assertKeyWith` on an object value gets a red suite instead of
+// a silent hole.
+
+/**
+ * Consume an object-valued key by DESCENDING into it: returns the fixture's own
+ * sub-object, bound as a tracked block in its own right.
+ *
+ * The child owns the drop/finish check for every key beneath it, so an
+ * unconsumed sub-key fails exactly the way an unconsumed top-level key does.
+ * Assert its members with the same helpers — `assertKey(child, "offset", ...)`.
+ */
+export function subBlock(block, key, where) {
+  const want = fetch(block, key, "subBlock");
+  if (!isPlainObject(want)) {
+    throw new TypeError(
+      `subBlock(${label(block, key, where)}): the fixture's value is not a JSON object ` +
+        `(${Array.isArray(want) ? "array" : typeof want}). There is no sub-block to descend into; ` +
+        "assert it with assertKey/assertKeyWith.",
+    );
+  }
+  // The descent IS this key's assertion: what the key carries is now owned by a
+  // tracked block of its own, and every rung applies to the members. Marking it
+  // asserted here is not a shortcut — the child's own unconsumed/unasserted
+  // checks are strictly stronger than any comparison the parent could make.
+  mark(block, key, "A");
+  const rec = recorder();
+  if (rec === null) return want;
+  const child = rec.descend(block, key);
+  if (child === null) {
+    throw new Error(
+      `subBlock('${key}'): this object is not a tracked assertion block of a parsed corpus ` +
+        "fixture. A descent into a copy (structuredClone, a spread, a hand-built stand-in) " +
+        "binds nothing, and the sub-keys would then be checked by nothing at all.",
+    );
+  }
+  return child;
+}
+
+/**
+ * Consume an object-valued key by comparing its KEY SET against the set the run
+ * actually produced — the tokens the replay loop really dispatched on, not a
+ * runner-side transcription of the fixture's own list.
+ *
+ * Set equality in BOTH directions: a fixture token nothing replayed and a
+ * replayed token the fixture omits are each a failure. This is the entry point
+ * for a key whose value is a VOCABULARY mapped to English glosses, where the
+ * glosses carry nothing comparable and the names are the assertion.
+ */
+export function assertKeySet(block, key, observed, where) {
+  const want = fetch(block, key, "assertKeySet");
+  if (!isPlainObject(want)) {
+    throw new TypeError(
+      `assertKeySet(${label(block, key, where)}): the fixture's value is not a JSON object ` +
+        `(${Array.isArray(want) ? "array" : typeof want}); there is no key set to compare.`,
+    );
+  }
+  if (observed === null || typeof observed[Symbol.iterator] !== "function") {
+    throw new TypeError(
+      `assertKeySet(${label(block, key, where)}): the observed key set must be iterable ` +
+        "(a Set or an array of the tokens this run really produced).",
+    );
+  }
+  mark(block, key, "A");
+  mark(block, key, "K");
+  const declared = Object.keys(want).sort();
+  const seen = [...new Set([...observed].map(String))].sort();
+  assert.deepStrictEqual(
+    seen,
+    declared,
+    `${label(block, key, where)}: the key set this run produced and the key set the ` +
+      "corpus declares differ",
+  );
+  return want;
 }
 
 // ---- Prose keys (#lzprosekeyconvention) ----

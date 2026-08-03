@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
-import { assertKey, assertKeyWith, excuseKey } from "./support/assert-key.js";
+import { assertKey, assertKeyWith, excuseKey, subBlock } from "./support/assert-key.js";
 
 import { ThreadSafeContext } from "../src/thread-safe.js";
 import {
@@ -79,12 +79,21 @@ test("thread-safe ComputedMap conformance: observational_transparency.json", () 
   );
   assert.equal(lazy.presentCount(), 0);
 
-  assertKeyWith(expected, "observe", (observe) => {
-    for (const [key, value] of Object.entries(observe)) {
-      assert.equal(eager.observe(key), value, `eager observe[${key}]`);
-      assert.equal(lazy.getOrInsertWith(key, factory), value, `lazy observe[${key}]`);
-    }
-  });
+  // Descended (#lzsubblockkeyset): the child tracker owns every key the
+  // fixture observes, so one added upstream is reported as unconsumed rather
+  // than skipped by a loop that only ever visits today's keys.
+  const observe = subBlock(expected, "observe");
+  for (const key of Object.keys(observe)) {
+    assertKeyWith(
+      observe,
+      key,
+      (value) => {
+        assert.equal(eager.observe(key), value, `eager observe[${key}]`);
+        assert.equal(lazy.getOrInsertWith(key, factory), value, `lazy observe[${key}]`);
+      },
+      "observe",
+    );
+  }
 
   const ctx2 = new ThreadSafeContext();
   const lazy2 = new ThreadSafeComputedMap(ctx2);

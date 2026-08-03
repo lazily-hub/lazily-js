@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
-import { assertKey, assertKeyWith, excuseKey } from "./support/assert-key.js";
+import { assertKey, assertKeyWith, excuseKey, subBlock } from "./support/assert-key.js";
 import { recordScenario, scenarios } from "./support/scenario.js";
 
 import { TextCrdt } from "../src/text-crdt.js";
@@ -338,6 +338,18 @@ function runTextCrdtScenario(scenario) {
       );
       continue;
     }
+    if (key === "text_on" || key === "version_vector_on") {
+      // Descended (#lzsubblockkeyset): the child tracker owns every replica the
+      // fixture names, so one added upstream is reported as unconsumed rather
+      // than skipped by a loop that only ever visits today's keys.
+      const want = subBlock(expect, key);
+      for (const name of Object.keys(want)) {
+        const got =
+          key === "text_on" ? replicas.get(name).text() : replicas.get(name).versionVector();
+        assertKey(want, name, got, `${label}: ${key} ${name}`);
+      }
+      continue;
+    }
     assertKeyWith(expect, key, (want) => {
       switch (key) {
         case "text":
@@ -349,20 +361,6 @@ function runTextCrdtScenario(scenario) {
         case "texts_equal":
           for (const [x, y] of want) {
             assert.equal(replicas.get(x).text(), replicas.get(y).text(), label);
-          }
-          break;
-        case "text_on":
-          for (const [name, wantText] of Object.entries(want)) {
-            assert.equal(replicas.get(name).text(), wantText, `${label}: text_on ${name}`);
-          }
-          break;
-        case "version_vector_on":
-          for (const [name, wantVv] of Object.entries(want)) {
-            assert.deepEqual(
-              replicas.get(name).versionVector(),
-              wantVv,
-              `${label}: version_vector_on ${name}`,
-            );
           }
           break;
         // The interleaving fixture pins the ENDS of the converged text, which is

@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
-import { assertKey, assertKeyWith } from "./support/assert-key.js";
+import { assertKey, assertKeyWith, subBlock } from "./support/assert-key.js";
 import { recordScenario } from "./support/scenario.js";
 
 import Ajv2020 from "ajv/dist/2020.js";
@@ -133,11 +133,20 @@ function assertExpect(world, expect, scenario) {
         assertKey(expect, "render", world.replicas.get("a").render(), `${scenario}: render on a`);
         break;
       case "render_on":
-        assertKeyWith(expect, "render_on", (renders) => {
-          for (const [name, text] of Object.entries(renders)) {
-            assert.equal(world.replicas.get(name).render(), text, `${scenario}: render on ${name}`);
+        {
+          // Descended (#lzsubblockkeyset): the child tracker owns every replica
+          // the fixture names, so one added upstream is reported as unconsumed
+          // rather than skipped by a loop over today's keys.
+          const renders = subBlock(expect, "render_on");
+          for (const name of Object.keys(renders)) {
+            assertKey(
+              renders,
+              name,
+              world.replicas.get(name).render(),
+              `${scenario}: render on ${name}`,
+            );
           }
-        });
+        }
         break;
       case "live_nodes":
         assertKey(
