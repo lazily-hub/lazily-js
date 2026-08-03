@@ -188,8 +188,6 @@ test("json frames round-trip through the reference codec", () => {
     assertValues(block, roundTripped, where);
     replayed += 1;
   }
-  assert.equal(replayed, 3, "one scenario per IpcMessage variant");
-
   // Against what this run REPLAYED, not against `fixture.scenarios.length`
   // (#lznullformblind). Comparing the fixture's declared count to the fixture's
   // own array is an identity: it holds however few scenarios the loop entered,
@@ -198,6 +196,7 @@ test("json frames round-trip through the reference codec", () => {
   assertKey(meta, "scenario_count", replayed, "assertions");
 
   verifyProse(fixture);
+  assert.equal(replayed, 3, "one scenario per IpcMessage variant");
 });
 
 // Sorted own-key names of a schema-lessly decoded map. Sorted because a
@@ -283,14 +282,13 @@ test("msgpack frames round-trip through the cross-language binary default", () =
     assertValues(block, roundTripped, where);
     replayed += 1;
   }
-  assert.equal(replayed, 3, "one scenario per IpcMessage variant");
-
   // Against what this run REPLAYED, not against `fixture.scenarios.length`
   // (#lznullformblind) — see the json half above for why the identity is
   // vacuous.
   assertKey(meta, "scenario_count", replayed, "assertions");
 
   verifyProse(fixture);
+  assert.equal(replayed, 3, "one scenario per IpcMessage variant");
 });
 
 // Byte payloads are ARRAYS OF INTEGERS on this wire, never MessagePack `bin`.

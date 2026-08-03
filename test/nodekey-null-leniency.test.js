@@ -344,14 +344,6 @@ test("NodeKey null-leniency: both wire forms decode as absent, the encoder still
     assertKey(expect, "epoch", epoch, where);
   }
 
-  assert.equal(replayed, 12, "two fields x three key forms x two codecs");
-  assert.equal(
-    keysDecoded,
-    4,
-    "only the `present` scenarios carry a key; a runner reporting absent for " +
-      "everything satisfies the null cases trivially",
-  );
-
   // ---- The three vocabularies, against what this run REALLY dispatched on ----
   //
   // Each is a set difference in both directions (#lznullformblind). A corpus
@@ -382,4 +374,12 @@ test("NodeKey null-leniency: both wire forms decode as absent, the encoder still
   assertKey(block, "scenario_count", replayed, FIXTURE);
 
   verifyProse(fixture);
+
+  assert.equal(replayed, 12, "two fields x three key forms x two codecs");
+  assert.equal(
+    keysDecoded,
+    4,
+    "only the `present` scenarios carry a key; a runner reporting absent for " +
+      "everything satisfies the null cases trivially",
+  );
 });

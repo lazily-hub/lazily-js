@@ -732,6 +732,11 @@ test("blob backend: an absent discriminator is shm, an unknown one is refused by
   // holds however few scenarios the loop entered.
   assertKey(block, "scenario_count", accepted + refused, FIXTURE);
 
+  // Finish fixture-owned assertions before the runner-side coverage floors.
+  // `epoch_disambiguation` is discharged by `expect.frame_epoch` and
+  // `expect.blob_epoch`, asserted per scenario (#lzprosekeyconvention).
+  verifyProse(fixture);
+
   assert.equal(accepted, 10, "five accepted backend forms x two codecs");
   assert.equal(
     omitted,
@@ -774,9 +779,4 @@ test("blob backend: an absent discriminator is shm, an unknown one is refused by
       "reading one source for both lands at zero, which is what v1's single `expect.epoch` " +
       "could not distinguish",
   );
-
-  // Fixture-scoped, and therefore LAST: `epoch_disambiguation` is discharged by
-  // `expect.frame_epoch` and `expect.blob_epoch`, which are asserted per scenario
-  // long after the `assertions` block above is finished (#lzprosekeyconvention).
-  verifyProse(fixture);
 });

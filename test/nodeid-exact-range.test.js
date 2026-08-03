@@ -245,12 +245,6 @@ test("NodeId exact-representation bound is enforced by refusal, never rounding",
     assertKey(expect, "root_id_decimal", String(snapshot.roots[0]), scenarioWhere);
   }
 
-  // Two scenarios (2^53 - 1, in both codecs) are inside the double range; the
-  // four above it are not. Pinning both halves means a guard that stopped
-  // refusing, and a decoder that stopped decoding, are each a failure here.
-  assert.equal(accepted, 2, "lazily-js decodes exactly the two 2^53 - 1 scenarios");
-  assert.equal(refused, 4, "lazily-js refuses both over-range identifiers in both codecs");
-
   // Both vocabularies against what this run REALLY did (#lznullformblind).
   //
   // `codecs` is the set of branches `decodeScenario` took, not a runner-side
@@ -285,4 +279,10 @@ test("NodeId exact-representation bound is enforced by refusal, never rounding",
   assertKeySet(block, "outcomes", observedOutcomes, where);
 
   verifyProse(fixture);
+
+  // Two scenarios (2^53 - 1, in both codecs) are inside the double range; the
+  // four above it are not. Pinning both halves means a guard that stopped
+  // refusing, and a decoder that stopped decoding, are each a failure here.
+  assert.equal(accepted, 2, "lazily-js decodes exactly the two 2^53 - 1 scenarios");
+  assert.equal(refused, 4, "lazily-js refuses both over-range identifiers in both codecs");
 });
