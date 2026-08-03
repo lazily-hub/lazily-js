@@ -113,9 +113,15 @@ test("NodeId exact-representation bound is enforced by refusal, never rounding",
     "node_id_decimal",
   ]);
   proseKey(block, "wire_encoding", [
-    // The expectation is a decimal STRING for both identifiers, so the fixture's
-    // own value survives this file being JSON. Both string comparisons are what
-    // that carriage exists for.
+    // A PROXY discharge, declared as one (#lzprosekeyconvention). Half of this
+    // paragraph is a claim about the CORPUS — that neither the wire nor the
+    // expectation is carried as a JSON number, so this file being JSON cannot
+    // round the fixture's own expected value before the comparison — and no
+    // assertion a run makes can observe that choice. Its other half IS
+    // executable and binds this runner: compare the decoded identifier by its
+    // decimal rendering. Both decimal-string comparisons do exactly that, across
+    // both codecs.
+    "codecs",
     "node_id_decimal",
     "root_id_decimal",
   ]);

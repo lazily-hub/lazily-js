@@ -94,6 +94,23 @@ if (out || walkOut) {
   // runner handing back the object it parsed is not making a claim it could get
   // wrong, exactly as `blockOwner` and `scenarioOwner` are not.
   const fixtureRoot = new WeakMap();
+  // The live prose ledger, `fixture` -> what the CURRENT test asserted, excused
+  // and discharged for it. Drained at each verification, because a "run" is one
+  // test and not one process (#lzprosekeyconvention).
+  const liveLedger = new Map();
+  const ledgerFor = (rel) => {
+    let live = liveLedger.get(rel);
+    if (live === undefined) {
+      live = {
+        assertedIds: new Set(),
+        assertedNames: new Set(),
+        excusedIds: new Set(),
+        claims: [],
+      };
+      liveLedger.set(rel, live);
+    }
+    return live;
+  };
   // Every tracked block that DECLARES `assertions.prose`, in parse order:
   // `{ rel, block, object, declared }`. The declaration is read off the corpus
   // before any accessor is installed, so the recorder never credits itself with
@@ -405,6 +422,14 @@ if (out || walkOut) {
         // Prose keys carry no presence record, so they carry no mark either.
         if (!keyRecords.has(`${id}\t${key}\tP`)) return false;
         keyRecords.add(tag === "X" ? `${id}\t${key}\tX\t${reason}` : `${id}\t${key}\t${tag}`);
+        const [rel, block] = id.split("\t");
+        const live = ledgerFor(rel);
+        if (tag === "A") {
+          live.assertedIds.add(`${block}\t${key}`);
+          live.assertedNames.add(key);
+        } else if (tag === "X") {
+          live.excusedIds.add(`${block}\t${key}`);
+        }
         return true;
       },
 
@@ -446,21 +471,25 @@ if (out || walkOut) {
         if (id === null) return false;
         if (!keyRecords.has(`${id}\t${key}\tP`)) return false;
         keyRecords.add(`${id}\t${key}\tD\t${names.join(",")}`);
+        const [rel, block] = id.split("\t");
+        ledgerFor(rel).claims.push({ block, key, names: [...names] });
         return true;
       },
 
-      // Every record the run holds for `rel`, so the verifier derives the
-      // asserted / excused / discharged sets from what REALLY happened rather
-      // than from a second bookkeeping structure that could drift from this one.
-      records(rel) {
-        const prefix = `${rel}\t`;
-        const out = [];
-        for (const line of keyRecords) {
-          if (!line.startsWith(prefix)) continue;
-          const [, block, key, tag, extra] = line.split("\t");
-          out.push({ block, key, tag, extra });
-        }
-        return out;
+      // The live ledger for `rel`, CLEARED as it is handed over.
+      //
+      // A "run" is one TEST, not one process (#lzprosekeyconvention). This
+      // recorder is a process-global `--require` preload and `keyRecords` spans
+      // the whole suite, so deriving the verifier's asserted set from the
+      // manifest — which is what this used to do — would let a discharge in one
+      // test be satisfied by an assertion in another test that happened to
+      // replay the same fixture. That is the accident-of-collocation the
+      // fixture-scoped ledger exists to bound, one level up. The manifest still
+      // records everything; only the VERIFIER's view is scoped and drained.
+      takeLedger(rel) {
+        const live = ledgerFor(rel);
+        liveLedger.delete(rel);
+        return live;
       },
 
       // The fixture's replay reached its verification point. A fixture that

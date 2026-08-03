@@ -190,26 +190,18 @@ export function verifyProse(fixture) {
   const blocks = rec.proseBlocks(rel);
   if (blocks.length === 0) return;
 
-  const records = rec.records(rel);
-  const assertedNames = new Set();
-  const assertedIds = new Set();
-  const excusedIds = new Set();
-  const claims = [];
-  for (const entry of records) {
-    if (entry.tag === "A") {
-      assertedNames.add(entry.key);
-      assertedIds.add(`${entry.block}\t${entry.key}`);
-    } else if (entry.tag === "X") {
-      excusedIds.add(`${entry.block}\t${entry.key}`);
-    } else if (entry.tag === "D") {
-      claims.push({
-        block: entry.block,
-        key: entry.key,
-        names: entry.extra === undefined || entry.extra === "" ? [] : entry.extra.split(","),
-      });
-    }
-  }
-  const everyProseName = new Set(blocks.flatMap((entry) => entry.declared));
+  // Drained, not read: a "run" is one TEST, not one process. Unioning what every
+  // test in this process asserted for the fixture would let a discharge here be
+  // satisfied by an assertion somewhere else that happens to replay it.
+  const ledger = rec.takeLedger(rel);
+  const { assertedNames, assertedIds, excusedIds, claims } = ledger;
+
+  // Seeded with `prose` itself. `prose` never lists itself, so a discharge
+  // naming it would slip past the "is itself prose" half of rule 7 — and rule 4
+  // marks `prose` asserted, so rule 6 would wave it through on any later
+  // verification. A paragraph discharged by the declaration that it is a
+  // paragraph proves nothing.
+  const everyProseName = new Set(["prose", ...blocks.flatMap((entry) => entry.declared)]);
 
   const problems = [];
   const toMark = [];
@@ -258,7 +250,10 @@ export function verifyProse(fixture) {
         if (everyProseName.has(name)) {
           problems.push(
             `'${claim.key}' in ${block} is discharged by '${name}', which is itself declared ` +
-              "prose. A paragraph cannot discharge a paragraph.",
+              (name === "prose"
+                ? "prose — `prose` IS the declaration that these keys are paragraphs, so " +
+                  "discharging one with it proves nothing."
+                : "prose. A paragraph cannot discharge a paragraph."),
           );
         } else if (!assertedNames.has(name)) {
           // Rule 6 — the whole convention. The excuse became falsifiable.
@@ -298,6 +293,11 @@ export function verifyProse(fixture) {
     });
   }
   for (const object of toMark) mark(object, "prose", "A");
+  // Marking re-seeded the ledger with rule 4's own `prose` assertion. Drain it
+  // again so the NEXT test starts from empty: a later discharge naming `prose`
+  // must be caught by rule 7, not waved through by rule 6 because this
+  // verification asserted it.
+  rec.takeLedger(rel);
 }
 
 /**

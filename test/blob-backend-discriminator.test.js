@@ -256,12 +256,17 @@ test("blob backend: an absent discriminator is shm, an unknown one is refused by
     "error_names_token",
   ]);
   proseKey(block, "wire_encoding", [
-    // The raw-text/hex carriage exists so the wire forms stay distinguishable
-    // before the decoder — which cannot tell them apart — runs. These are the
-    // two assertions that read the RAW slot: `rejection_kind` checks that the
-    // offending value really is a present string / a present non-string, and
-    // the field-presence assertion checks that a re-encode writes no entry at
+    // A PROXY discharge, declared as one (#lzprosekeyconvention). The paragraph
+    // is a claim about how the CORPUS carries its bytes — raw text and hex
+    // rather than a pre-parsed object — and no assertion a run makes can observe
+    // that choice. What a run can prove is that the distinction SURVIVED into
+    // the runner: the codec and form vocabularies say both codecs and all seven
+    // shapes were replayed, `rejection_kind` reads the raw slot and pins that
+    // the offending value really is a present string / a present non-string,
+    // and the field-presence assertion pins that a re-encode writes no entry at
     // all rather than echoing an explicit null.
+    "codecs",
+    "backend_forms",
     "rejection_kind",
     "reencoded_backend_field_present",
   ]);
@@ -308,9 +313,11 @@ test("blob backend: an absent discriminator is shm, an unknown one is refused by
     "backends",
   ]);
   proseKey(block, "theorem", [
-    // resolve_wrong_backend discharges non-resolution structurally by routing
-    // on kind; what this runner can observe is that an unknown kind is REFUSED
-    // rather than routed.
+    // A PROXY discharge, declared as one (#lzprosekeyconvention).
+    // `resolve_wrong_backend` is a Lean theorem in lazily-formal; nothing this
+    // run asserts can prove it. What the run can prove is its CONSEQUENCE — an
+    // unknown kind is refused rather than routed into a table this build really
+    // does resolve.
     "rejected",
     "rejection_is_decode_error",
   ]);

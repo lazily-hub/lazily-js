@@ -144,12 +144,17 @@ test("NodeKey null-leniency: both wire forms decode as absent, the encoder still
     "reencoded_key_field_present",
   ]);
   proseKey(block, "wire_encoding", [
-    // "the exact wire form under test — an ABSENT map entry versus an explicit
-    // null / msgpack nil — survives into the runner". `decoded_key` is the
-    // assertion that carriage exists for, and the `wireKey` control below is
-    // what makes that discharge honest: without it the `null` scenarios are the
-    // `omitted` ones under a different id, and this paragraph is discharged by
-    // an assertion that cannot tell them apart.
+    // A PROXY discharge, declared as one (#lzprosekeyconvention). The paragraph
+    // is a claim about how the CORPUS carries its bytes, which no assertion a
+    // run makes can observe. What a run can prove is that the distinction
+    // SURVIVED into the runner: the codec and key-form vocabularies say both
+    // codecs and all three forms were replayed, and `decoded_key` is the
+    // assertion that carriage exists for. The `wireKey` control below is what
+    // makes even the proxy honest — without it the `null` scenarios are the
+    // `omitted` ones under a different id and `decoded_key` cannot tell them
+    // apart.
+    "codecs",
+    "key_forms",
     "decoded_key",
   ]);
   proseKey(block, "reencode_obligation", [
