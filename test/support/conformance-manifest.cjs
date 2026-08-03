@@ -75,9 +75,16 @@ const path = require("node:path");
 const out = process.env.LAZILY_CONFORMANCE_MANIFEST;
 const keyOut = process.env.LAZILY_CONFORMANCE_KEY_MANIFEST;
 const scenarioOut = process.env.LAZILY_CONFORMANCE_SCENARIO_MANIFEST;
+// Rung 0 (#lznullformblind): which assertion BLOCKS this run instrumented at
+// all. Every rung above is scoped to a block the recorder reached; a block it
+// never reached has no presence record, so its keys are not unread — nothing
+// reads them — and the fixture reports exactly nothing. The guard script
+// declares the other side of this ledger by reading the corpus off DISK, which
+// is what makes it a cross-check rather than the recorder agreeing with itself.
+const blockOut = process.env.LAZILY_CONFORMANCE_BLOCK_MANIFEST;
 // Both the key tracker and the scenario ledger need the parsed fixture, so the
 // JSON.parse hook and the walk are shared by them.
-const walkOut = keyOut || scenarioOut;
+const walkOut = keyOut || scenarioOut || blockOut;
 
 if (out || walkOut) {
   const marker = `${path.sep}lazily-spec${path.sep}conformance${path.sep}`;
@@ -85,6 +92,12 @@ if (out || walkOut) {
   // `fixture\tblock\tkey\tP` present, `...\tR` read, `...\tA` asserted,
   // `...\tX\t<reason>` excused.
   const keyRecords = new Set();
+  // `bound\t<digest>` for every assertion block this run instrumented, keyed by
+  // the block's CONTENT and never by its `block` name: runners and fixtures
+  // spell those inconsistently (`assertions`, `expect`, `expect_after`) and the
+  // recorder books every per-frame block under the same bare name, so a
+  // name-keyed ledger would silently miss the mismatch instead of reporting it.
+  const blockRecords = new Set();
   // Instrumented block object -> `fixture\tblock`, so the assertion helpers can
   // attribute a mark without the runner naming its own fixture.
   const blockOwner = new WeakMap();
@@ -213,7 +226,31 @@ if (out || walkOut) {
 
   const isPlainObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
 
+  // FNV-1a over the block's canonical JSON. A content key, so a block is booked
+  // by what it SAYS rather than by what a runner or a fixture chose to call it.
+  const blockDigest = (object) => {
+    let text;
+    try {
+      text = JSON.stringify(object);
+    } catch {
+      return null;
+    }
+    if (typeof text !== "string") return null;
+    let hash = 0xcbf29ce484222325n;
+    for (const byte of Buffer.from(text, "utf8")) {
+      hash = BigInt.asUintN(64, (hash ^ BigInt(byte)) * 0x100000001b3n);
+    }
+    return hash.toString(16).padStart(16, "0");
+  };
+
   const instrumentBlock = (rel, block, object) => {
+    // BEFORE any accessor is installed, and before the prose/presence walk
+    // below: the digest has to be over the block as the corpus wrote it, because
+    // the guard's declaring side computes it from the bytes on disk.
+    if (blockOut) {
+      const digest = blockDigest(object);
+      if (digest !== null) blockRecords.add(`bound\t${digest}`);
+    }
     blockOwner.set(object, `${rel}\t${block}`);
     const declared = declaredProse(object);
     if (declared !== null) proseBlocks.push({ rel, block, object, declared });
@@ -360,7 +397,9 @@ if (out || walkOut) {
         continue;
       }
       walk(rel, value);
-      if (keyOut && TRACKED.has(key) && isPlainObject(value)) instrumentBlock(rel, key, value);
+      if ((keyOut || blockOut) && TRACKED.has(key) && isPlainObject(value)) {
+        instrumentBlock(rel, key, value);
+      }
       // AFTER the descent, never before: registration installs payload accessors
       // on each scenario, and the walk above reads every one of those keys. Doing
       // this first books the whole array as replayed at parse time — the recorder
@@ -566,6 +605,7 @@ if (out || walkOut) {
   process.on("exit", () => {
     flush(out, opened);
     flush(keyOut, keyRecords);
+    flush(blockOut, blockRecords);
     flush(scenarioOut, scenarioRecords);
   });
 }

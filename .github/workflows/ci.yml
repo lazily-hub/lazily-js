@@ -155,6 +155,8 @@ jobs:
       # cannot be exempt from it.
       #
       #   rung 1  scripts/check-conformance-coverage.sh  — fixture FILE opened
+      #   rung 0  scripts/check-assertion-keys.mjs       — every assertion BLOCK
+      #                                                    was instrumented at all
       #   rung 2  scripts/check-assertion-keys.mjs       — every key READ
       #   rung 3  scripts/check-assertion-keys.mjs       — every key ASSERTED
       #   rung 4  scripts/check-scenario-coverage.mjs    — every SCENARIO replayed
@@ -183,6 +185,7 @@ jobs:
         run: |
           for f in build/conformance-fixtures-loaded.txt \
                    build/conformance-assertion-keys.txt \
+                   build/conformance-assertion-blocks.txt \
                    build/conformance-scenarios.txt; do
             test -s "$f" || {
               echo "::error::$f is missing or empty — \`npm test\` ran without the"

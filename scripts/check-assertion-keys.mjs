@@ -424,6 +424,160 @@ if (consumed < MIN_ASSERTED_KEYS) {
   process.exit(1);
 }
 
+// ---- RUNG 0: the assertion-block BIND ledger (#lznullformblind) ----
+//
+// Every rung above is scoped to a block the recorder REACHED. The unconsumed-key
+// guard fires on a key nothing read; the unasserted-key guard on a key read and
+// discarded; the prose ledger on a discharge naming nothing. None of them can
+// fire for a block the recorder never instrumented, because there is no presence
+// record at all: its keys are not unread — nothing reads them — and the fixture
+// reports exactly nothing. lazily-dart found two such blocks carrying eight
+// silent keys, one of them the anti-spoof invariant its fixture exists for;
+// lazily-cpp found a third.
+//
+// The `!sawAny` check above is the FIXTURE-granular version of this and stops a
+// rung short: it asks whether a fixture produced any presence record, so a
+// fixture whose top-level `assertions` block is instrumented passes it while a
+// per-frame block of the same file goes unseen. It also cannot see a block whose
+// name is outside TRACKED, because it uses TRACKED to decide what to look for.
+//
+// So the declaring side here reads the corpus off DISK and inventories every
+// `assertions` block by the cross-binding definition, and the binding side is
+// the recorder's own ledger. The two are matched by the block's CONTENT digest,
+// never by its name — the recorder books every per-frame block under the bare
+// name `assertions`, so a name-keyed ledger would collapse them all together and
+// silently miss the mismatch instead of reporting it.
+const BLOCK_MANIFEST =
+  process.env.LAZILY_CONFORMANCE_BLOCK_MANIFEST ?? "build/conformance-assertion-blocks.txt";
+
+// An assertion block that genuinely cannot be bound belongs HERE, as a
+// documented excuse read on every run, not as a runner fabricated to manufacture
+// coverage. Format: `fixture|where|reason`; a reason is required, because an
+// excuse with no reason is an unexplained gap wearing a green badge.
+const KNOWN_UNBOUND_BLOCKS = [];
+
+// Positive-evidence floor (#lzvacuousrun). Zero inventoried blocks means zero
+// unbound blocks, which reports OK having compared nothing. NEVER lower this to
+// make the gate green.
+const MIN_BLOCKS = Number(process.env.MIN_BLOCKS ?? "20");
+
+function blockDigest(object) {
+  let text;
+  try {
+    text = JSON.stringify(object);
+  } catch {
+    return null;
+  }
+  if (typeof text !== "string") return null;
+  let hash = 0xcbf29ce484222325n;
+  for (const byte of Buffer.from(text, "utf8")) {
+    hash = BigInt.asUintN(64, (hash ^ BigInt(byte)) * 0x100000001b3n);
+  }
+  return hash.toString(16).padStart(16, "0");
+}
+
+if (!existsSync(BLOCK_MANIFEST) || statSync(BLOCK_MANIFEST).size === 0) {
+  fail([
+    `FAIL: no assertion-block ledger at ${BLOCK_MANIFEST}.`,
+    "      Run the suite with LAZILY_CONFORMANCE_BLOCK_MANIFEST set and the recorder",
+    "      preloaded (see the `test` script in package.json). An absent ledger is",
+    "      missing evidence, not evidence that every block was bound.",
+  ]);
+  process.exit(1);
+}
+
+const boundBlocks = new Set();
+for (const line of readFileSync(BLOCK_MANIFEST, "utf8").split("\n")) {
+  const [tag, digest] = line.split("\t");
+  if (tag === "bound" && digest) boundBlocks.add(digest);
+}
+
+const blockExcuses = new Map();
+for (const raw of KNOWN_UNBOUND_BLOCKS) {
+  const [fixture, where, reason] = String(raw).split("|");
+  if (!fixture || !where || !reason || reason.trim() === "") {
+    fail([
+      `ERROR: KNOWN_UNBOUND_BLOCKS entry '${raw}' must be 'fixture|where|reason'.`,
+      "       An excuse with no reason is an unexplained gap wearing a green badge.",
+    ]);
+    process.exit(1);
+  }
+  blockExcuses.set(`${fixture}|${where}`, reason);
+}
+
+const declaredBlocks = new Map();
+if (existsSync(FIXTURE_MANIFEST)) {
+  const openedFixtures = readFileSync(FIXTURE_MANIFEST, "utf8")
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
+  for (const fixture of [...new Set(openedFixtures)].sort()) {
+    const file = join(SPEC_DIR, fixture);
+    if (!existsSync(file)) continue;
+    let parsed;
+    try {
+      parsed = JSON.parse(readFileSync(file, "utf8"));
+    } catch {
+      continue;
+    }
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) continue;
+    const declare = (where, block) => {
+      if (block === null || typeof block !== "object" || Array.isArray(block)) return;
+      const digest = blockDigest(block);
+      if (digest === null) return;
+      if (!declaredBlocks.has(digest)) declaredBlocks.set(digest, new Set());
+      declaredBlocks.get(digest).add(`${fixture}|${where}`);
+    };
+    declare("assertions", parsed.assertions);
+    for (const container of ["frames", "scenarios", "rejects"]) {
+      const items = parsed[container];
+      if (!Array.isArray(items)) continue;
+      items.forEach((item, index) => {
+        if (item !== null && typeof item === "object" && !Array.isArray(item)) {
+          declare(`${container}[${index}].assertions`, item.assertions);
+        }
+      });
+    }
+  }
+}
+
+const unboundBlocks = [];
+for (const [digest, sites] of [...declaredBlocks.entries()].sort()) {
+  if (boundBlocks.has(digest)) continue;
+  for (const site of [...sites].sort()) {
+    if (blockExcuses.has(site)) continue;
+    unboundBlocks.push(site);
+  }
+}
+if (unboundBlocks.length > 0) {
+  fail([
+    `ERROR: ${unboundBlocks.length} assertion block(s) were carried by an OPENED fixture`,
+    "       and instrumented by no runner. Every check above is scoped to a block the",
+    "       recorder reached, so these report nothing at all rather than reporting a",
+    "       gap — their keys are not unread, nothing reads them:",
+    ...unboundBlocks.map((site) => `         ${site}`),
+    "       Parse the fixture with JSON.parse of its bytes so the recorder sees it, or",
+    "       add it to KNOWN_UNBOUND_BLOCKS with a reason so the gap is visible on every",
+    "       run instead of invisible.",
+  ]);
+  process.exit(1);
+}
+if (declaredBlocks.size < MIN_BLOCKS) {
+  fail([
+    `ERROR: only ${declaredBlocks.size} distinct assertion blocks were inventoried, expected >= ${MIN_BLOCKS}.`,
+    "       The disk-side inventory detached, or fixtures stopped being opened. Zero",
+    "       inventoried blocks means zero unbound blocks, which is OK over nothing.",
+    "       Do not lower MIN_BLOCKS to fix this.",
+  ]);
+  process.exit(1);
+}
+
+console.error(
+  `assertion-block bind OK: ${declaredBlocks.size}/${declaredBlocks.size} assertion blocks carried by` +
+    ` opened fixtures were instrumented (${blockExcuses.size} declared unbindable; floor ${MIN_BLOCKS};` +
+    ` content-keyed, so a runner's block NAME cannot satisfy it)`,
+);
+
 console.error(
   `assertion-key consumption OK: ${consumed}/${present.size} fixture assertion keys ASSERTED against` +
     ` their own fixture value by the suite (${declaredHere} excused in-runner,` +

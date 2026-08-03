@@ -199,7 +199,7 @@
     "bench:scale": "node --max-old-space-size=8192 bench/scale.bench.mjs",
     "benchmark-update": "node scripts/run-benchmarks.mjs",
     "benchmark-check": "node scripts/run-benchmarks.mjs --check",
-    "test": "npm run test:formal && npm run test:size && LAZILY_CONFORMANCE_MANIFEST=build/conformance-fixtures-loaded.txt LAZILY_CONFORMANCE_KEY_MANIFEST=build/conformance-assertion-keys.txt LAZILY_CONFORMANCE_SCENARIO_MANIFEST=build/conformance-scenarios.txt sh -c 'mkdir -p build && : > \"$LAZILY_CONFORMANCE_MANIFEST\" && : > \"$LAZILY_CONFORMANCE_KEY_MANIFEST\" && : > \"$LAZILY_CONFORMANCE_SCENARIO_MANIFEST\" && node --require ./test/support/conformance-manifest.cjs --test test/*.test.js'",
+    "test": "npm run test:formal && npm run test:size && LAZILY_CONFORMANCE_MANIFEST=build/conformance-fixtures-loaded.txt LAZILY_CONFORMANCE_KEY_MANIFEST=build/conformance-assertion-keys.txt LAZILY_CONFORMANCE_BLOCK_MANIFEST=build/conformance-assertion-blocks.txt LAZILY_CONFORMANCE_SCENARIO_MANIFEST=build/conformance-scenarios.txt sh -c 'mkdir -p build && : > \"$LAZILY_CONFORMANCE_MANIFEST\" && : > \"$LAZILY_CONFORMANCE_KEY_MANIFEST\" && : > \"$LAZILY_CONFORMANCE_BLOCK_MANIFEST\" && : > \"$LAZILY_CONFORMANCE_SCENARIO_MANIFEST\" && node --require ./test/support/conformance-manifest.cjs --test test/*.test.js'",
     "format": "prettier --check .",
     "format:fix": "prettier --write ."
   },
