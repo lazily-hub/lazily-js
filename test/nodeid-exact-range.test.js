@@ -28,7 +28,13 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
-import { assertKey, assertKeyWith, excuseKey } from "./support/assert-key.js";
+import {
+  assertKey,
+  assertKeyWith,
+  excuseKey,
+  proseKey,
+  verifyProse,
+} from "./support/assert-key.js";
 import { scenarios } from "./support/scenario.js";
 
 import { IpcMessage, NodeStatePayload } from "../src/index.js";
@@ -96,14 +102,41 @@ test("NodeId exact-representation bound is enforced by refusal, never rounding",
   assertKey(block, "required_of_binding", "MUST", where);
   assertKey(block, "codecs", ["json", "msgpack"], where);
   assertKey(block, "scenario_count", fixture.scenarios.length, where);
-  for (const prose of ["clause", "wire_encoding", "outcomes", "anti_vacuity", "generator"]) {
-    excuseKey(
-      block,
-      prose,
-      "prose: it states WHY the fixture is shaped this way; the behaviour it " +
-        "describes is asserted by the per-scenario decode below",
-    );
-  }
+  // The three PARAGRAPHS the corpus declares in `assertions.prose`
+  // (#lzprosekeyconvention), each discharged by naming the executable keys that
+  // carry it. `verifyProse` below checks that this run really asserted them.
+  proseKey(block, "clause", [
+    // "MUST reject, MUST NOT round/truncate/saturate/wrap": `outcome` is the
+    // permitted-behaviour split and `node_id_decimal` is the comparison that
+    // makes a rounded neighbour visible rather than approximately right.
+    "outcome",
+    "node_id_decimal",
+  ]);
+  proseKey(block, "wire_encoding", [
+    // The expectation is a decimal STRING for both identifiers, so the fixture's
+    // own value survives this file being JSON. Both string comparisons are what
+    // that carriage exists for.
+    "node_id_decimal",
+    "root_id_decimal",
+  ]);
+  proseKey(block, "anti_vacuity", [
+    // The two `exact` scenarios are the control: the boundary value must decode
+    // correctly before the refusals count.
+    "outcome",
+    "node_id_decimal",
+  ]);
+  // NOT prose (a vocabulary mapped to English glosses, #lzprosekeyconvention):
+  // the assertion is the KEY SET, and asserting the parent key discharges the
+  // glosses. Every outcome this run replayed must be one the corpus declares,
+  // and every outcome the corpus declares must have been replayed — otherwise
+  // `outcomes` grows a third value nothing here dispatches on.
+  const observedOutcomes = new Set();
+  excuseKey(
+    block,
+    "generator",
+    "names the corpus-side script that mints this fixture (lazily-spec " +
+      "`scripts/gen_nodeid_exact_range_fixture.py`); nothing in this binding observes it",
+  );
 
   // Anti-vacuity. `exact_or_reject` is satisfied by a runner that decodes
   // nothing and reports "rejected" — and lazily-js REFUSES four of the six
@@ -129,6 +162,7 @@ test("NodeId exact-representation bound is enforced by refusal, never rounding",
           want === "exact" || want === "exact_or_reject",
           `${scenarioWhere}: unknown outcome ${want}`,
         );
+        observedOutcomes.add(want);
         if (want === "exact") {
           assert.ok(
             representable,
@@ -188,4 +222,21 @@ test("NodeId exact-representation bound is enforced by refusal, never rounding",
   // refusing, and a decoder that stopped decoding, are each a failure here.
   assert.equal(accepted, 2, "lazily-js decodes exactly the two 2^53 - 1 scenarios");
   assert.equal(refused, 4, "lazily-js refuses both over-range identifiers in both codecs");
+
+  // The vocabulary, not the glosses. A third outcome added upstream would land
+  // in neither arm of the dispatch above, and the set difference is what says so.
+  assertKeyWith(
+    block,
+    "outcomes",
+    (outcomes) => {
+      assert.deepStrictEqual(
+        [...observedOutcomes].sort(),
+        Object.keys(outcomes).sort(),
+        `${where}: the outcomes replayed and the outcomes declared differ`,
+      );
+    },
+    where,
+  );
+
+  verifyProse(fixture);
 });

@@ -30,7 +30,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
-import { assertKey, excuseKey } from "./support/assert-key.js";
+import { assertKey, proseKey, verifyProse } from "./support/assert-key.js";
 import { scenarios } from "./support/scenario.js";
 
 import {
@@ -158,11 +158,11 @@ test("json frames round-trip through the reference codec", () => {
   assertKey(meta, "required_of_binding", "MUST", "assertions");
   assertKey(meta, "role", "reference", "assertions");
   assertKey(meta, "scenario_count", fixture.scenarios.length, "assertions");
-  excuseKey(
-    meta,
-    "note",
-    "prose: documents the reference-vs-byte-canonical distinction, states nothing the replay observes",
-  );
+  // The one PARAGRAPH the corpus declares in `assertions.prose`
+  // (#lzprosekeyconvention). It says both senses of "canonical" are pinned here
+  // so a runner cannot conflate them, and those two keys are exactly what
+  // discharges it.
+  proseKey(meta, "note", ["role", "byte_canonical"]);
 
   let replayed = 0;
   for (const scenario of scenarios(fixture)) {
@@ -181,6 +181,8 @@ test("json frames round-trip through the reference codec", () => {
     replayed += 1;
   }
   assert.equal(replayed, 3, "one scenario per IpcMessage variant");
+
+  verifyProse(fixture);
 });
 
 // Sorted own-key names of a schema-lessly decoded map. Sorted because a
@@ -207,11 +209,11 @@ test("msgpack frames round-trip through the cross-language binary default", () =
   assertKey(meta, "required_of_binding", "MUST", "assertions");
   assertKey(meta, "role", "cross_language_binary_default", "assertions");
   assertKey(meta, "scenario_count", fixture.scenarios.length, "assertions");
-  excuseKey(
-    meta,
-    "note",
-    "prose: restates the named-field rule that `encoded_body_field_names` below asserts executably",
-  );
+  // The paragraph's own subject: `byte_canonical: false` is why this fixture
+  // pins decoded values instead of golden bytes, and the named-field rule it
+  // states is what `encoded_body_field_names` asserts executably
+  // (#lzprosekeyconvention).
+  proseKey(meta, "note", ["byte_canonical", "encoded_body_field_names"]);
 
   let replayed = 0;
   for (const scenario of scenarios(fixture)) {
@@ -264,6 +266,8 @@ test("msgpack frames round-trip through the cross-language binary default", () =
     replayed += 1;
   }
   assert.equal(replayed, 3, "one scenario per IpcMessage variant");
+
+  verifyProse(fixture);
 });
 
 // Byte payloads are ARRAYS OF INTEGERS on this wire, never MessagePack `bin`.

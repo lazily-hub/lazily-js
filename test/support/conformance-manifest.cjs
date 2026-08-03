@@ -88,6 +88,17 @@ if (out || walkOut) {
   // Instrumented block object -> `fixture\tblock`, so the assertion helpers can
   // attribute a mark without the runner naming its own fixture.
   const blockOwner = new WeakMap();
+  // Parsed fixture ROOT object -> `fixture`, the same trick one level out.
+  // `verifyProse(fixture)` is fixture-scoped (#lzprosekeyconvention), so it needs
+  // an identity for the whole file rather than for one of its blocks — and a
+  // runner handing back the object it parsed is not making a claim it could get
+  // wrong, exactly as `blockOwner` and `scenarioOwner` are not.
+  const fixtureRoot = new WeakMap();
+  // Every tracked block that DECLARES `assertions.prose`, in parse order:
+  // `{ rel, block, object, declared }`. The declaration is read off the corpus
+  // before any accessor is installed, so the recorder never credits itself with
+  // the read that `verifyProse` must perform.
+  const proseBlocks = [];
   // Scenario object -> `fixture\tid`, the same trick one level up: the scenario
   // helpers mark a replay by handing back the object the runner is replaying.
   const scenarioOwner = new WeakMap();
@@ -149,8 +160,26 @@ if (out || walkOut) {
   // discriminators (`clock_regression`, `deadline_overflow`,
   // `operation_unavailable`) that a runner must compare, so exempting it would
   // silence a real assertion.
+  //
+  // This by-NAME exemption is the reserved-annotation rule of
+  // #lzprosekeyconvention, and it is only safe where the key annotates a step or
+  // a scenario. It is therefore switched OFF for a block that declares
+  // `assertions.prose`: there the CORPUS says which keys are paragraphs, a
+  // binding must not decide for itself, and `frame_roundtrip_json.json` declares
+  // exactly one — `note`. Leaving the name exemption in force there would file
+  // the corpus's own declaration under the guard that exempts it from being
+  // checked at all.
   const PROSE = new Set(["comment", "description", "note", "notes", "why"]);
   const isProse = (key, value) => PROSE.has(key) && typeof value === "string";
+
+  // The corpus's own declaration of which sibling keys are paragraphs
+  // (#lzprosekeyconvention). An array of strings, or null when the block does not
+  // declare one.
+  const declaredProse = (object) => {
+    const value = object.prose;
+    if (!Array.isArray(value)) return null;
+    return value.every((name) => typeof name === "string") ? value.slice() : null;
+  };
 
   const remember = (data, rel) => {
     try {
@@ -169,8 +198,10 @@ if (out || walkOut) {
 
   const instrumentBlock = (rel, block, object) => {
     blockOwner.set(object, `${rel}\t${block}`);
+    const declared = declaredProse(object);
+    if (declared !== null) proseBlocks.push({ rel, block, object, declared });
     for (const [key, value] of Object.entries(object)) {
-      if (isProse(key, value)) continue;
+      if (declared === null && isProse(key, value)) continue;
       keyRecords.add(`${rel}\t${block}\t${key}\tP`);
       Object.defineProperty(object, key, {
         enumerable: true,
@@ -376,6 +407,69 @@ if (out || walkOut) {
         keyRecords.add(tag === "X" ? `${id}\t${key}\tX\t${reason}` : `${id}\t${key}\t${tag}`);
         return true;
       },
+
+      // ---- Prose-key discharge ledger (#lzprosekeyconvention) ----
+      //
+      // A prose key is discharged, never asserted and never excused, by NAMING
+      // the executable keys that carry its obligation. The ledger below is what
+      // makes that naming falsifiable: it is fixture-scoped, because
+      // `epoch_disambiguation` is discharged by `expect.frame_epoch` and
+      // `expect.blob_epoch`, which are asserted long after the `assertions`
+      // block that states it is finished.
+
+      // The fixture id for a parsed corpus fixture ROOT or for one of its
+      // tracked blocks. Null for anything else — a copy, or a hand-built object.
+      fixtureOf(object) {
+        if (!isPlainObject(object)) return null;
+        const own = blockOwner.get(object);
+        if (own !== undefined) return own.split("\t")[0];
+        return fixtureRoot.get(object) ?? null;
+      },
+
+      // Every tracked block of `rel` that declared `prose`, with the block
+      // object so the verifier can read the declaration through its accessor —
+      // that read is what CONSUMES `prose`.
+      proseBlocks(rel) {
+        return proseBlocks
+          .filter((entry) => entry.rel === rel)
+          .map((entry) => ({
+            block: entry.block,
+            object: entry.object,
+            declared: [...entry.declared],
+          }));
+      },
+
+      // Record a discharge claim. `names` are key names, matched by name in ANY
+      // block of the same fixture when the claim is verified.
+      markProse(object, key, names) {
+        const id = this.owner(object);
+        if (id === null) return false;
+        if (!keyRecords.has(`${id}\t${key}\tP`)) return false;
+        keyRecords.add(`${id}\t${key}\tD\t${names.join(",")}`);
+        return true;
+      },
+
+      // Every record the run holds for `rel`, so the verifier derives the
+      // asserted / excused / discharged sets from what REALLY happened rather
+      // than from a second bookkeeping structure that could drift from this one.
+      records(rel) {
+        const prefix = `${rel}\t`;
+        const out = [];
+        for (const line of keyRecords) {
+          if (!line.startsWith(prefix)) continue;
+          const [, block, key, tag, extra] = line.split("\t");
+          out.push({ block, key, tag, extra });
+        }
+        return out;
+      },
+
+      // The fixture's replay reached its verification point. A fixture that
+      // declares `prose` and carries no such record failed to verify, which the
+      // manifest script reports exactly as it reports an unconsumed key: an
+      // unverified claim is not a checked claim.
+      markVerified(rel) {
+        keyRecords.add(`${rel}\t*\t*\tV`);
+      },
     };
   }
 
@@ -416,7 +510,13 @@ if (out || walkOut) {
         if (!rel && key !== null && key.length >= PREFIX) {
           rel = corpusPrefix.get(key.slice(0, PREFIX)) ?? undefined;
         }
-        if (rel) walk(rel, value);
+        if (rel) {
+          // Register the ROOT before the descent: `verifyProse(fixture)` is
+          // handed the parsed fixture itself, and a runner that never names its
+          // own fixture id cannot name the wrong one.
+          if (isPlainObject(value)) fixtureRoot.set(value, rel);
+          walk(rel, value);
+        }
       }
       return value;
     };

@@ -128,6 +128,13 @@ const present = new Set();
 const read = new Set();
 const asserted = new Set();
 const excusedInRunner = new Map();
+// Prose keys the run DISCHARGED, and the fixtures whose discharge claims were
+// really verified (#lzprosekeyconvention). Rules 1-7 are checked at runtime by
+// `verifyProse` in test/support/assert-key.js, because only the run knows which
+// keys it asserted. What this script adds is the one thing a runtime check
+// cannot do for itself: notice that the verification never ran at all.
+const dischargedInRunner = new Map();
+const verifiedFixtures = new Set();
 for (const line of readFileSync(KEY_MANIFEST, "utf8").split("\n")) {
   if (line.trim() === "") continue;
   const [fixture, block, key, tag, reason] = line.split("\t");
@@ -135,6 +142,8 @@ for (const line of readFileSync(KEY_MANIFEST, "utf8").split("\n")) {
   if (tag === "R") read.add(id);
   else if (tag === "A") asserted.add(id);
   else if (tag === "X") excusedInRunner.set(id, reason ?? "");
+  else if (tag === "D") dischargedInRunner.set(id, reason ?? "");
+  else if (tag === "V") verifiedFixtures.add(fixture);
   else present.add(id);
 }
 
@@ -174,6 +183,21 @@ if (existsSync(FIXTURE_MANIFEST)) {
     }
     if (!hasTrackedBlock(parsed)) continue;
     const sawAny = [...present].some((entry) => entry.startsWith(`${fixture}\t`));
+    // A fixture whose corpus block declares `prose` must have reached
+    // `verifyProse` (#lzprosekeyconvention). Rules 1-7 are runtime checks, so a
+    // runner that discharges nothing and never verifies would otherwise be
+    // reported only through the unconsumed `prose` key — true, but silent about
+    // the cause. An UNVERIFIED discharge claim is as bad as an unconsumed key:
+    // the claim was recorded and nothing ever checked it.
+    if (sawAny && Array.isArray(parsed?.assertions?.prose) && !verifiedFixtures.has(fixture)) {
+      fail([
+        `ERROR: '${fixture}' declares \`assertions.prose\` and its replay never called`,
+        "       verifyProse(fixture). The discharge claims this run recorded were never",
+        "       checked against what it asserted, so every one of them is a free-text",
+        "       excuse again. Call verifyProse(fixture) at the end of the replay.",
+      ]);
+      problems += 1;
+    }
     if (!sawAny) {
       fail([
         `ERROR: '${fixture}' was opened by the suite and carries an assertion block,`,
@@ -199,9 +223,32 @@ let unasserted = 0;
 let stale = 0;
 let consumed = 0;
 let declaredHere = 0;
+let dischargedHere = 0;
 for (const entry of [...present].sort()) {
   const [fixture, block, key] = entry.split("\t");
   const runnerExcuse = excusedInRunner.get(entry);
+  const runnerDischarge = dischargedInRunner.get(entry);
+
+  // A prose key is discharged, never asserted and never excused. Both collisions
+  // are runtime failures in `verifyProse` (rules 1 and 2); they are repeated here
+  // because this script reads the manifest of a run that may have been assembled
+  // from several processes, and two paths satisfying one key is the ambiguity the
+  // convention removes.
+  if (runnerDischarge !== undefined && (asserted.has(entry) || runnerExcuse !== undefined)) {
+    fail([
+      `ERROR: assertion key '${key}' in ${block} of '${fixture}' is DISCHARGED as prose and`,
+      `       also ${asserted.has(entry) ? "ASSERTED" : "EXCUSED"} in the same run.`,
+      `       Discharged by: ${runnerDischarge}`,
+      "       A prose key has exactly one treatment. Delete the other call.",
+    ]);
+    stale += 1;
+    problems += 1;
+    continue;
+  }
+  if (runnerDischarge !== undefined) {
+    dischargedHere += 1;
+    continue;
+  }
 
   // A runner excuse is stale in both directions, exactly as the static allowlist
   // is. An excuse for a key the same run also asserts is hiding nothing, and
@@ -275,6 +322,21 @@ for (const [entry, reason] of [...excusedInRunner].sort()) {
   problems += 1;
 }
 
+// The same staleness rule for a discharge: the corpus stopped declaring the key
+// prose, or stopped carrying it at all, and the claim outlived it.
+for (const [entry, names] of [...dischargedInRunner].sort()) {
+  if (present.has(entry)) continue;
+  const [fixture, block, key] = entry.split("\t");
+  fail([
+    `ERROR: proseKey names '${key}' in ${block} of '${fixture}', which the corpus no longer`,
+    "       carries as a tracked assertion key.",
+    `       Discharged by: ${names}`,
+    "       Delete the call — the fixture moved and the discharge outlived it.",
+  ]);
+  stale += 1;
+  problems += 1;
+}
+
 // A stale excuse is its own drift, in both directions: an entry naming a fixture
 // or key the corpus no longer has means the corpus moved and nobody updated the
 // claim, and an entry naming something the suite DOES consume means the gap it
@@ -324,7 +386,7 @@ if (problems > 0) {
 // prints OK. That is the same hole MIN_FIXTURES and MIN_SCENARIOS close one and
 // two rungs up; this is the assertion-key rung of the same ladder.
 //
-// 540 = calibrated below the observed run, which asserts 567 of 605 present keys.
+// 546 = calibrated below the observed run, which asserts 573 of 612 present keys.
 // Deliberately set under the real number so ordinary corpus churn does not trip
 // it, and far enough above zero that a detached recorder cannot slip through.
 // (Was 520 against an observed 547/575; codec/blob_backend_discriminator.json
@@ -333,10 +395,15 @@ if (problems > 0) {
 // hardening replaced `expect.epoch` with `frame_epoch` + `blob_epoch` and added
 // `rejection_kind`, `rejection_is_decode_error`, `backend_forms` and
 // `rejection_kinds`, so the observed run goes to 567 and the floor moves by the
-// same five.) NEVER lower this to make the gate green: a drop means keys stopped
-// being reached or stopped being asserted, and that is the finding, not the
-// floor.
-const MIN_ASSERTED_KEYS = Number(process.env.MIN_ASSERTED_KEYS ?? "540");
+// same five. Was 540 against an observed 567/605; #lzprosekeyconvention added
+// `assertions.prose` to five codec fixtures — each one asserted by the
+// `verifyProse` comparison — unhid `note` in the two frame_roundtrip fixtures,
+// and turned `nodeid_exact_range.json`'s `outcomes` from an excuse into a
+// key-set assertion, so the observed run goes to 573/612 and the floor moves by
+// the same six.) NEVER lower this to make the gate green: a drop means keys
+// stopped being reached or stopped being asserted, and that is the finding, not
+// the floor.
+const MIN_ASSERTED_KEYS = Number(process.env.MIN_ASSERTED_KEYS ?? "546");
 if (present.size === 0) {
   fail([
     "ERROR: the manifest recorded ZERO tracked assertion keys.",
@@ -360,6 +427,7 @@ if (consumed < MIN_ASSERTED_KEYS) {
 console.error(
   `assertion-key consumption OK: ${consumed}/${present.size} fixture assertion keys ASSERTED against` +
     ` their own fixture value by the suite (${declaredHere} excused in-runner,` +
+    ` ${dischargedHere} prose keys discharged across ${verifiedFixtures.size} verified fixture(s),` +
     ` ${excused.size} declared unconsumed; floor ${MIN_ASSERTED_KEYS};` +
     ` runtime manifest — these values were really compared)`,
 );

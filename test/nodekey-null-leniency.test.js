@@ -20,7 +20,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
-import { assertKey, excuseKey } from "./support/assert-key.js";
+import { assertKey, excuseKey, proseKey, verifyProse } from "./support/assert-key.js";
 import { scenarios } from "./support/scenario.js";
 
 import {
@@ -86,6 +86,34 @@ function reencodedNode(scenario, message) {
   throw new Error(`unknown scenario field in fixture: ${scenario.field}`);
 }
 
+/**
+ * The raw `key` slot of the scenario's node, parsed WITHOUT the library.
+ *
+ * The three key forms are `omitted`, `null` and `present`, and the first two are
+ * indistinguishable once decoded — `object.key ?? null` collapses them, which is
+ * the correct reading and also the reason no assertion over the decoded value can
+ * tell the two scenario families apart. Without this, the four `null` scenarios
+ * are the four `omitted` ones wearing a different id, and `wire_encoding`'s
+ * obligation — that the exact wire form survives into the runner — is discharged
+ * by nothing.
+ */
+function wireKey(scenario) {
+  let wire;
+  // Fail closed on both dispatches (#lzscenariobodyskip), as every other arm in
+  // this file does: a fallback arm inspects a frame the scenario never named.
+  if (scenario.codec === "json") wire = JSON.parse(scenario.wire_json);
+  else if (scenario.codec === "msgpack")
+    wire = decodeMsgpackValue(hexToBytes(scenario.wire_msgpack_hex));
+  else throw new Error(`unknown codec: ${scenario.codec}`);
+  let node;
+  if (scenario.field === "snapshot") node = wire.Snapshot.nodes[0];
+  else if (scenario.field === "node_add") node = wire.Delta.ops[0].NodeAdd;
+  else throw new Error(`unknown scenario field in fixture: ${scenario.field}`);
+  // `in`, not `?.` or `??`: absent and null are two of the three forms under
+  // test and the whole point is that they stay distinguishable.
+  return "key" in node ? { present: true, value: node.key } : { present: false };
+}
+
 function decodedKey(scenario, message) {
   if (scenario.field === "snapshot") return message.snapshot.nodes[0].key;
   // Same fail-open on the decode half (#lzscenariobodyskip).
@@ -106,20 +134,39 @@ test("NodeKey null-leniency: both wire forms decode as absent, the encoder still
   assertKey(block, "fields", ["snapshot", "node_add"], FIXTURE);
   assertKey(block, "key_forms", ["omitted", "null", "present"], FIXTURE);
   assertKey(block, "scenario_count", fixture.scenarios.length, FIXTURE);
-  for (const prose of [
-    "clause",
-    "wire_encoding",
-    "reencode_obligation",
-    "anti_vacuity",
+  // The four PARAGRAPHS the corpus declares in `assertions.prose`
+  // (#lzprosekeyconvention), each discharged by naming the executable keys that
+  // carry it; `verifyProse` below checks this run really asserted them.
+  proseKey(block, "clause", [
+    // Both wire forms decode as absent (refusing neither, constructing a key
+    // from neither), and omit-when-absent still binds the encoder.
+    "decoded_key",
+    "reencoded_key_field_present",
+  ]);
+  proseKey(block, "wire_encoding", [
+    // "the exact wire form under test — an ABSENT map entry versus an explicit
+    // null / msgpack nil — survives into the runner". `decoded_key` is the
+    // assertion that carriage exists for, and the `wireKey` control below is
+    // what makes that discharge honest: without it the `null` scenarios are the
+    // `omitted` ones under a different id, and this paragraph is discharged by
+    // an assertion that cannot tell them apart.
+    "decoded_key",
+  ]);
+  proseKey(block, "reencode_obligation", [
+    // Named in the paragraph itself.
+    "reencoded_key_field_present",
+  ]);
+  proseKey(block, "anti_vacuity", [
+    // The `present` scenarios force a real key through, which only a real decode
+    // produces; `keysDecoded` below pins the count.
+    "decoded_key",
+  ]);
+  excuseKey(
+    block,
     "generator",
-  ]) {
-    excuseKey(
-      block,
-      prose,
-      "prose: it states WHY the fixture is shaped this way; the behaviour it " +
-        "describes is asserted by the per-scenario decode and re-encode below",
-    );
-  }
+    "names the corpus-side script that mints this fixture (lazily-spec " +
+      "`scripts/gen_nodekey_null_leniency_fixture.py`); nothing in this binding observes it",
+  );
 
   // Anti-vacuity in both directions. A runner that never decodes reports
   // "absent" for everything and satisfies all eight omitted/null scenarios; the
@@ -131,6 +178,39 @@ test("NodeKey null-leniency: both wire forms decode as absent, the encoder still
     const expect = scenario.expect;
     const where = `${FIXTURE} ${scenario.id}`;
     replayed += 1;
+
+    // The distinction the DECODED value cannot carry. `object.key ?? null`
+    // erases it the moment the value is in hand, so without this the four
+    // `null` scenarios prove nothing the four `omitted` ones did not — and
+    // `wire_encoding`'s obligation, that the exact wire form survives into the
+    // runner, is discharged by an assertion that cannot see it.
+    const onWire = wireKey(scenario);
+    if (scenario.key_form === "omitted") {
+      assert.equal(
+        onWire.present,
+        false,
+        `${where}: the omitted form must carry NO \`key\` entry on the wire — otherwise it is ` +
+          "the null scenario under a different id",
+      );
+    } else if (scenario.key_form === "null") {
+      assert.ok(
+        onWire.present,
+        `${where}: the null form must carry an EXPLICIT \`key\` entry on the wire — if the ` +
+          "key is absent this scenario is a duplicate of the omitted one",
+      );
+      assert.equal(
+        onWire.value,
+        null,
+        `${where}: the null form must carry a JSON null / msgpack nil, not ${onWire.value}`,
+      );
+    } else if (scenario.key_form === "present") {
+      assert.ok(onWire.present, `${where}: the present form must carry a \`key\` entry`);
+      assert.notEqual(onWire.value, null, `${where}: the present form must carry a real key`);
+    } else {
+      // Fail closed rather than letting an unrecognised form skip the control
+      // (#lzscenariobodyskip).
+      throw new Error(`unknown key_form in fixture: ${scenario.key_form}`);
+    }
 
     const message = decodeScenario(scenario);
     const key = decodedKey(scenario, message);
@@ -162,4 +242,6 @@ test("NodeKey null-leniency: both wire forms decode as absent, the encoder still
     "only the `present` scenarios carry a key; a runner reporting absent for " +
       "everything satisfies the null cases trivially",
   );
+
+  verifyProse(fixture);
 });

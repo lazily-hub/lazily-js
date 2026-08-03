@@ -89,7 +89,13 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
-import { assertKey, assertKeyWith, excuseKey } from "./support/assert-key.js";
+import {
+  assertKey,
+  assertKeyWith,
+  excuseKey,
+  proseKey,
+  verifyProse,
+} from "./support/assert-key.js";
 import { scenarios } from "./support/scenario.js";
 
 import {
@@ -236,50 +242,85 @@ test("blob backend: an absent discriminator is shm, an unknown one is refused by
   // dropped one it does, is a failure here rather than a silent divergence.
   assertKey(block, "codecs", [Codec.Json, Codec.Msgpack], FIXTURE);
   assertKey(block, "outcomes", ["accept", "reject"], FIXTURE);
-  for (const prose of [
-    "clause",
-    "wire_encoding",
-    "reject_obligation",
-    "anti_vacuity",
-    "theorem",
+  // The nine PARAGRAPHS the corpus declares in `assertions.prose`
+  // (#lzprosekeyconvention). Each is discharged by naming the executable keys
+  // that carry its obligation, and `verifyProse` at the bottom of this test
+  // checks that this run really asserted every key named — which is what turns
+  // the free-text excuses these calls replace into a claim about the run.
+  proseKey(block, "clause", [
+    // Omitted/null decode as shm; a present unknown token is refused, through
+    // the decode-error family, naming the token, and never normalized.
+    "decoded_backend",
+    "rejected",
+    "rejection_is_decode_error",
+    "error_names_token",
+  ]);
+  proseKey(block, "wire_encoding", [
+    // The raw-text/hex carriage exists so the wire forms stay distinguishable
+    // before the decoder — which cannot tell them apart — runs. These are the
+    // two assertions that read the RAW slot: `rejection_kind` checks that the
+    // offending value really is a present string / a present non-string, and
+    // the field-presence assertion checks that a re-encode writes no entry at
+    // all rather than echoing an explicit null.
+    "rejection_kind",
+    "reencoded_backend_field_present",
+  ]);
+  proseKey(block, "backend_form_vocabulary", [
+    // Its normative half — every backend in `assertions.backends` must appear
+    // as the `decoded_backend` of some accept scenario — is the set difference
+    // inside the `backends` assertion below; its descriptive half (seven wire
+    // shapes) is the `backend_forms` set equality.
+    "backends",
+    "backend_forms",
+    "decoded_backend",
+  ]);
+  proseKey(block, "reject_obligation", [
+    // "Refused for the stated reason", not merely "refused".
+    "rejected",
+    "error_names_token",
+    "rejection_is_decode_error",
+  ]);
+  proseKey(block, "null_form", [
+    // An explicit null is the ABSENT form: it decodes as `shm` and re-encodes
+    // to no entry at all.
+    "decoded_backend",
+    "reencoded_backend_field_present",
+  ]);
+  proseKey(block, "non_string_form", [
+    // Refused, through the documented family, and identified as the non-string
+    // refusal rather than the unknown-token one. `error_names_token` is
+    // deliberately absent: there is no token to name.
+    "rejected",
+    "rejection_is_decode_error",
+    "rejection_kind",
+  ]);
+  proseKey(block, "epoch_disambiguation", [
+    // The two epochs, asserted against two different sources.
+    "frame_epoch",
+    "blob_epoch",
+  ]);
+  proseKey(block, "anti_vacuity", [
+    // Controls (1) and (2) are `decoded_backend` (a real decode, and the field
+    // really read); (3) is the encoder half; (4) is the vocabulary completeness
+    // asserted through `backends`.
+    "decoded_backend",
+    "reencoded_backend_field_present",
+    "backends",
+  ]);
+  proseKey(block, "theorem", [
+    // resolve_wrong_backend discharges non-resolution structurally by routing
+    // on kind; what this runner can observe is that an unknown kind is REFUSED
+    // rather than routed.
+    "rejected",
+    "rejection_is_decode_error",
+  ]);
+  // NOT prose, and not discharged: `generator` names a corpus-side script. There
+  // is nothing in this binding to compare it against.
+  excuseKey(
+    block,
     "generator",
-  ]) {
-    excuseKey(
-      block,
-      prose,
-      "prose: it states WHY the fixture is shaped this way; the behaviour it " +
-        "describes is asserted by the per-scenario decode, re-encode and refusal below",
-    );
-  }
-  excuseKey(
-    block,
-    "backend_form_vocabulary",
-    "prose: its normative half — every backend in `assertions.backends` must appear as the " +
-      "`decoded_backend` of some accept scenario — is asserted as a set difference against " +
-      "`decodedBackends` after the loop, and its descriptive half (seven forms, four of them " +
-      "tokens) by the `backend_forms` set equality there",
-  );
-  excuseKey(
-    block,
-    "null_form",
-    "prose: the behaviour is asserted by the two `null` scenarios — `decoded_backend` is " +
-      "`shm`, `reencoded_backend_field_present` is false, the wire really carried an explicit " +
-      "null rather than an absent key (`wireBackend`), and the constructor agrees with the " +
-      "decoder on null as it does on absence",
-  );
-  excuseKey(
-    block,
-    "non_string_form",
-    "prose: the behaviour is asserted by the two `non_string` scenarios — refused, refused " +
-      "through `DecodeError`, refused attributably (the same frame with a conforming token " +
-      "decodes), and carrying no `error_names_token` because there is no token",
-  );
-  excuseKey(
-    block,
-    "epoch_disambiguation",
-    "prose: the two epochs are asserted against DIFFERENT sources — `frame_epoch` against the " +
-      "Delta's own epoch and `blob_epoch` against the descriptor's — and `epochsDistinct` " +
-      "counts the accept scenarios where those two observations really differed",
+    "names the corpus-side script that mints this fixture (lazily-spec " +
+      "`scripts/gen_blob_backend_discriminator_fixture.py`); nothing in this binding observes it",
   );
 
   // Counters, one per way this runner could pass without proving anything.
@@ -666,4 +707,9 @@ test("blob backend: an absent discriminator is shm, an unknown one is refused by
       "reading one source for both lands at zero, which is what v1's single `expect.epoch` " +
       "could not distinguish",
   );
+
+  // Fixture-scoped, and therefore LAST: `epoch_disambiguation` is discharged by
+  // `expect.frame_epoch` and `expect.blob_epoch`, which are asserted per scenario
+  // long after the `assertions` block above is finished (#lzprosekeyconvention).
+  verifyProse(fixture);
 });
