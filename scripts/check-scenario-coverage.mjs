@@ -347,7 +347,11 @@ if (problems > 0) {
 // Raised 110 -> 118 when codec/blob_backend_discriminator.json landed
 // (#lzblobbackendstrict): its eight scenarios took the observed run from 118 to
 // 126, so the floor moves by the same eight and keeps the margin it had.
-const MIN_SCENARIOS = Number(process.env.MIN_SCENARIOS ?? "118");
+// Raised 118 -> 124 when that same fixture hardened to v2 (8 -> 14 scenarios:
+// `in_process`, an explicit null and a non-string `backend`, each in both
+// codecs). The observed run goes 126 -> 132, so the floor moves by the same six
+// and the margin of eight is unchanged.
+const MIN_SCENARIOS = Number(process.env.MIN_SCENARIOS ?? "124");
 if (total === 0) {
   fail([
     "ERROR: ZERO scenarios were found across the opened fixtures.",

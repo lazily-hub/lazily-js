@@ -25,12 +25,63 @@
 //
 //   * the ENCODER — `toWire()` must OMIT `backend` when it is `shm` (so a
 //     pre-field descriptor round-trips byte-identically) and EMIT it for
-//     `arrow`. A decoder that reads the field correctly and echoes whatever it
-//     received back out has a correct decoded value and a non-conforming
-//     encoder;
+//     `arrow` and `in_process`. A decoder that reads the field correctly and
+//     echoes whatever it received back out has a correct decoded value and a
+//     non-conforming encoder;
 //   * the REASON — the thrown error must name `rdma`. A decoder that refuses the
 //     frame because it mis-parsed `checksum` satisfies "an error was thrown"
 //     while implementing none of the clause.
+//
+// FIXTURE v2 (14 scenarios, seven wire shapes x two codecs) adds four facts v1
+// declared or implied without carrying, and each lands somewhere different here:
+//
+//   * `in_process` — the THIRD declared backend. v1 carried scenarios for two of
+//     the three names in `assertions.backends`, so a binding knowing only
+//     {shm, arrow} refused `in_process` NAMING THE TOKEN, conformingly by the
+//     letter of the clause, and passed all eight scenarios with a smaller enum
+//     than the clause declares. The scenario is necessary and not sufficient:
+//     the assertion that closes the hole is the set difference at the bottom of
+//     this file — every backend in `assertions.backends` must turn up as the
+//     `decoded_backend` of some accept scenario — because a scenario count
+//     cannot reach it and neither can any per-scenario assertion.
+//   * an explicit `null` — the ABSENT form, not a present-unknown one
+//     (`#lzkeynullstrict`), because a serde-style peer that skipped
+//     `skip_serializing_if` emits null where a conforming encoder omits. In
+//     JavaScript this is the easiest of the four to get accidentally right and
+//     accidentally wrong at once: `object.backend ?? Shm` treats `null` and
+//     `undefined` identically, so the ACCEPT half is free, while nothing in the
+//     language distinguishes "the frame carried an explicit null" from "the
+//     frame carried no key" once the value is in hand. So this runner reads the
+//     raw wire alongside the decode and asserts the two forms really are
+//     different on the wire (`wireBackend` below) — otherwise the null scenarios
+//     are the omitted scenarios wearing a different `id`.
+//   * a NON-STRING `backend` (the integer 7) — the same refusal reached through
+//     a door the clause, written entirely about tokens, does not describe. JS
+//     coerces enthusiastically: `String(7)`, a `==` comparison, or an
+//     `Array.includes` after a `.toString()` would all quietly turn 7 into
+//     something a lenient reader accepts. `BLOB_BACKEND_KINDS.has(7)` does not,
+//     because `Set.has` is SameValueZero — verified by running the frame rather
+//     than by reading the line.
+//   * `frame_epoch` vs `blob_epoch` — v1 carried 9 in the Delta AND in the
+//     descriptor, so one `expect.epoch` could not tell a runner reading the
+//     frame's epoch from one reading the blob's. They are now 9 and 5, they are
+//     asserted against different sources, and `epochsDistinct` counts the runs
+//     where the two observations really differed.
+//
+// The decode-error FAMILY, `rejection_is_decode_error`. This binding's decode
+// path refuses structurally malformed frames with `TypeError` and nothing else:
+// `assertObject`, `assertTagged`, `assertInteger`, the unknown-variant arm of
+// `IpcMessage.fromWire` and the unknown-backend arm of `ShmBlobRef` all throw it,
+// so `catch (e) { if (e instanceof TypeError) … }` is the one guard a caller
+// wraps a decode in. A refusal raised outside that family still refuses the
+// frame and still fails PAST every such handler, which is why the fixture
+// asserts the family and not merely that something was thrown. `instanceof`
+// alone is a weak instrument in a language where a stray property access on
+// `undefined` also throws `TypeError`, so it is paired with the attribution
+// control below: the same frame with a conforming token in the same slot must
+// DECODE, which is what makes the refusal attributable to `backend` rather than
+// to anything else in the descriptor. That control is the non-string form's
+// analogue of `error_names_token`, which cannot apply where there is no token.
 
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
@@ -57,6 +108,11 @@ const specFixtures = join(here, "..", "..", "lazily-spec", "conformance");
 
 const FIXTURE = "codec/blob_backend_discriminator.json";
 
+// This binding's documented decode-error family (see the header note). Named
+// here so the fixture's `rejection_is_decode_error` compares against something a
+// reader can find, rather than an `instanceof TypeError` buried in an arm.
+const DecodeError = TypeError;
+
 function loadFixture() {
   const path = join(specFixtures, FIXTURE);
   assert.ok(
@@ -77,6 +133,33 @@ function hexToBytes(hex) {
     out[i] = Number.parseInt(hex.slice(i * 2, i * 2 + 2), 16);
   }
   return out;
+}
+
+/**
+ * The scenario's wire frame as a plain tree, parsed WITHOUT the library.
+ *
+ * Two things need this. The first is the null/omitted distinction: once
+ * `ShmBlobRef.fromWire` has run, `null` and a missing key are the same value in
+ * hand and no assertion over the decoded descriptor can tell the two scenarios
+ * apart. The second is the attribution control for the reject scenarios — the
+ * same frame with a conforming token has to decode, and building that frame
+ * means editing the tree, not the text.
+ */
+function wireTree(scenario) {
+  if (scenario.codec === Codec.Json) return JSON.parse(scenario.wire_json);
+  if (scenario.codec === Codec.Msgpack) {
+    return decodeMsgpackValue(hexToBytes(scenario.wire_msgpack_hex));
+  }
+  throw new Error(`unknown codec in fixture: ${scenario.codec}`);
+}
+
+/** The raw `backend` slot of the scenario's descriptor: a value, `null`, or absent. */
+function wireBackend(scenario) {
+  const blob = wireTree(scenario).Delta.ops[0].SlotValue.payload.SharedBlob;
+  // `in`, not `?.` or `??`: absent and null are two of the seven forms under
+  // test and the whole point is that they stay distinguishable before the
+  // decoder — which cannot tell them apart — runs.
+  return "backend" in blob ? { present: true, value: blob.backend } : { present: false };
 }
 
 /**
@@ -152,9 +235,7 @@ test("blob backend: an absent discriminator is shm, an unknown one is refused by
   // a binding that grew a fourth backend the corpus does not know about, or
   // dropped one it does, is a failure here rather than a silent divergence.
   assertKey(block, "codecs", [Codec.Json, Codec.Msgpack], FIXTURE);
-  assertKey(block, "backends", Object.values(BlobBackendKind), FIXTURE);
   assertKey(block, "outcomes", ["accept", "reject"], FIXTURE);
-  assertKey(block, "scenario_count", fixture.scenarios.length, FIXTURE);
   for (const prose of [
     "clause",
     "wire_encoding",
@@ -170,27 +251,77 @@ test("blob backend: an absent discriminator is shm, an unknown one is refused by
         "describes is asserted by the per-scenario decode, re-encode and refusal below",
     );
   }
+  excuseKey(
+    block,
+    "backend_form_vocabulary",
+    "prose: its normative half — every backend in `assertions.backends` must appear as the " +
+      "`decoded_backend` of some accept scenario — is asserted as a set difference against " +
+      "`decodedBackends` after the loop, and its descriptive half (seven forms, four of them " +
+      "tokens) by the `backend_forms` set equality there",
+  );
+  excuseKey(
+    block,
+    "null_form",
+    "prose: the behaviour is asserted by the two `null` scenarios — `decoded_backend` is " +
+      "`shm`, `reencoded_backend_field_present` is false, the wire really carried an explicit " +
+      "null rather than an absent key (`wireBackend`), and the constructor agrees with the " +
+      "decoder on null as it does on absence",
+  );
+  excuseKey(
+    block,
+    "non_string_form",
+    "prose: the behaviour is asserted by the two `non_string` scenarios — refused, refused " +
+      "through `DecodeError`, refused attributably (the same frame with a conforming token " +
+      "decodes), and carrying no `error_names_token` because there is no token",
+  );
+  excuseKey(
+    block,
+    "epoch_disambiguation",
+    "prose: the two epochs are asserted against DIFFERENT sources — `frame_epoch` against the " +
+      "Delta's own epoch and `blob_epoch` against the descriptor's — and `epochsDistinct` " +
+      "counts the accept scenarios where those two observations really differed",
+  );
 
-  // Four counters, one per way this runner could pass without proving anything.
+  // Counters, one per way this runner could pass without proving anything.
   //
   //   `accepted`/`refused` — a runner that decodes nothing reports every frame
   //     refused and satisfies the reject half trivially.
-  //   `arrowDecoded` — a decoder that ignores `backend` and hardcodes `shm`
-  //     passes the omitted and explicit-shm scenarios; only a non-shm decoded
-  //     value can come from actually reading the field.
+  //   `nonShmDecoded` — a decoder that ignores `backend` and hardcodes `shm`
+  //     passes the omitted, null and explicit-shm scenarios; only a non-shm
+  //     decoded value can come from actually reading the field.
+  //   `inProcessDecoded` — the vocabulary, in the positive direction. A binding
+  //     that knows {shm, arrow} refuses `in_process` and lands at zero here
+  //     while still decoding `arrow`.
   //   `fieldEmitted` — the encoder half in the positive direction. Every
   //     `reencoded_backend_field_present` assertion is satisfiable by an encoder
-  //     that omits `backend` unconditionally except the two arrow scenarios, so
-  //     count those rather than trusting the per-scenario assertion alone.
+  //     that omits `backend` unconditionally except the arrow and in_process
+  //     scenarios, so count those rather than trusting the per-scenario
+  //     assertion alone.
+  //   `omitted`/`nullForm` — the two spellings of absence, counted separately so
+  //     a runner that collapsed them (the easy JS mistake) cannot reach both.
+  //   `epochsDistinct` — the two epochs came from two sources and really
+  //     differed; a runner reading the frame epoch twice lands at zero.
+  //   `unknownTokenRefusals`/`nonStringRefusals` — the two rejection kinds, so a
+  //     dispatch that fell through one arm cannot hide behind `refused`.
   let accepted = 0;
   let refused = 0;
-  let arrowDecoded = 0;
+  let nonShmDecoded = 0;
+  let inProcessDecoded = 0;
   let fieldEmitted = 0;
   let omitted = 0;
+  let nullForm = 0;
+  let epochsDistinct = 0;
+  let unknownTokenRefusals = 0;
+  let nonStringRefusals = 0;
+  const observedForms = new Set();
+  const observedRejectionKinds = new Set();
+  const decodedBackends = new Set();
 
   for (const scenario of scenarios(fixture)) {
     const expect = scenario.expect;
     const where = `${FIXTURE} ${scenario.id}`;
+    const onWire = wireBackend(scenario);
+    observedForms.add(scenario.backend_form);
     const result = decodeScenario(scenario);
 
     if (scenario.outcome === "reject") {
@@ -203,22 +334,97 @@ test("blob backend: an absent discriminator is shm, an unknown one is refused by
           "table this build really does resolve, which is the misroute resolve_wrong_backend " +
           "discharges structurally.",
       );
-      // The reason, not just the refusal. The fixture's own token reaches the
-      // containment check, so a decoder that refused the frame for some other
-      // reason — a mis-parsed checksum, a rejected op tag — fails here while
-      // passing the bare is-error assertion above.
+
+      // The FAMILY. A refusal raised outside the type every caller guards a
+      // decode with is invisible: the frame is still refused and the peer still
+      // never sees the error, because it failed past the handler.
+      assertKey(expect, "rejection_is_decode_error", result.error instanceof DecodeError, where);
+
+      // ATTRIBUTION. `instanceof TypeError` is cheap in a language where reading
+      // a property off `undefined` throws one too, so prove the refusal is about
+      // `backend` and nothing else: swap a conforming token into the same slot
+      // of the same frame and it must decode. A decoder that refused because it
+      // mis-parsed `checksum`, or rejected the op tag, fails here.
+      const repaired = wireTree(scenario);
+      repaired.Delta.ops[0].SlotValue.payload.SharedBlob.backend = BlobBackendKind.Shm;
+      assert.doesNotThrow(
+        () => IpcMessage.fromWire(repaired),
+        `${where}: the same frame with a conforming \`backend\` must DECODE. It does not, so ` +
+          "the refusal above is not attributable to the discriminator — something else in " +
+          "this descriptor is being refused and the reject assertion is passing by accident.",
+      );
+
       assertKeyWith(
         expect,
-        "error_names_token",
-        (token) => {
-          assert.ok(
-            String(result.error.message).includes(token),
-            `${where}: the refusal must name the offending token '${token}'; got ` +
-              `${result.error.message}`,
+        "rejection_kind",
+        (kind) => {
+          if (kind === "unknown_token") {
+            unknownTokenRefusals += 1;
+            assert.ok(onWire.present, `${where}: an unknown TOKEN must be present on the wire`);
+            assert.equal(
+              typeof onWire.value,
+              "string",
+              `${where}: \`rejection_kind\` is 'unknown_token' but the wire carries ` +
+                `${typeof onWire.value} — the scenario labels are crossed`,
+            );
+            // The reason, not just the refusal. The fixture's own token reaches
+            // the containment check, so a decoder that refused the frame for
+            // some other reason fails here while passing the bare is-error
+            // assertion above.
+            assertKeyWith(
+              expect,
+              "error_names_token",
+              (token) => {
+                assert.equal(
+                  onWire.value,
+                  token,
+                  `${where}: the fixture names token '${token}' but the wire carries ` +
+                    `'${onWire.value}'`,
+                );
+                assert.ok(
+                  String(result.error.message).includes(token),
+                  `${where}: the refusal must name the offending token '${token}'; got ` +
+                    `${result.error.message}`,
+                );
+              },
+              where,
+            );
+            return;
+          }
+          if (kind === "non_string") {
+            nonStringRefusals += 1;
+            assert.ok(onWire.present, `${where}: a non-string \`backend\` must be present`);
+            assert.notEqual(
+              typeof onWire.value,
+              "string",
+              `${where}: \`rejection_kind\` is 'non_string' but the wire carries a string — ` +
+                "the scenario would then be a duplicate of the unknown-token one",
+            );
+            assert.notEqual(
+              onWire.value,
+              null,
+              `${where}: an explicit null is the ABSENT form and is accepted; it must not be ` +
+                "replayed as the non-string refusal",
+            );
+            // Membership, not a read: `in` deliberately does not mark the key
+            // consumed, which is exactly right here — the assertion is that the
+            // corpus carries no token to name, and reading one would be reading
+            // a key that must not exist.
+            assert.ok(
+              !("error_names_token" in expect),
+              `${where}: the non-string form has no token, so pinning a message format here ` +
+                "would bind a shape no codec's native type error carries",
+            );
+            return;
+          }
+          assert.fail(
+            `${where}: unknown rejection_kind '${kind}'. Failing closed rather than treating an ` +
+              "unrecognised kind as satisfied (#lzscenariobodyskip).",
           );
         },
         where,
       );
+      observedRejectionKinds.add(expect.rejection_kind);
       continue;
     }
 
@@ -231,10 +437,18 @@ test("blob backend: an absent discriminator is shm, an unknown one is refused by
 
     const blob = decodedBlob(scenario, result.message);
     assertKey(expect, "decoded_backend", blob.backend, where);
-    if (blob.backend !== BlobBackendKind.Shm) arrowDecoded += 1;
+    decodedBackends.add(blob.backend);
+    if (blob.backend !== BlobBackendKind.Shm) nonShmDecoded += 1;
+    if (blob.backend === BlobBackendKind.InProcess) inProcessDecoded += 1;
 
     if (scenario.backend_form === "omitted") {
       omitted += 1;
+      assert.equal(
+        onWire.present,
+        false,
+        `${where}: the omitted form must carry NO \`backend\` key on the wire — otherwise it ` +
+          "is the null scenario under a different id",
+      );
       // `absent means shm` is defaulted TWICE and only one of the two sites is on
       // the decode path: `ShmBlobRef.fromWire` fills the key in before handing it
       // to the constructor, whose own `backend ?? Shm` is therefore dead for every
@@ -258,13 +472,59 @@ test("blob backend: an absent discriminator is shm, an unknown one is refused by
       );
     }
 
+    if (scenario.backend_form === "null") {
+      nullForm += 1;
+      // The distinction the decoded value cannot carry. Without this the two
+      // null scenarios are the two omitted ones wearing a different id, because
+      // `??` erases the difference the moment the value is in hand.
+      assert.ok(
+        onWire.present,
+        `${where}: the null form must carry an EXPLICIT \`backend\` entry on the wire — if the ` +
+          "key is absent this scenario is a duplicate of the omitted one and proves nothing " +
+          "the omitted one did not",
+      );
+      assert.equal(
+        onWire.value,
+        null,
+        `${where}: the null form must carry a JSON null / msgpack nil, not ${onWire.value}`,
+      );
+      // Both defaulting sites again, this time on null rather than on absence. A
+      // constructor spelling its default `backend === undefined ? Shm : backend`
+      // accepts every decoded frame (`fromWire` already substituted) and stores
+      // `null` here — a descriptor whose backend depends on the door it came
+      // through, which is the same defect the omitted branch guards one value
+      // over.
+      const constructed = new ShmBlobRef({
+        offset: blob.offset,
+        len: blob.len,
+        generation: blob.generation,
+        epoch: blob.epoch,
+        checksum: blob.checksum,
+        backend: null,
+      });
+      assert.equal(
+        constructed.backend,
+        blob.backend,
+        `${where}: constructing a descriptor with an explicit null \`backend\` disagrees with ` +
+          "decoding a frame that carries one — null is the absent form at both sites",
+      );
+    }
+
     const node = result.message.delta.ops[0].node;
     assertKey(expect, "node", node, where);
     assertKey(expect, "offset", blob.offset, where);
     assertKey(expect, "len", blob.len, where);
     assertKey(expect, "generation", blob.generation, where);
-    assertKey(expect, "epoch", blob.epoch, where);
     assertKey(expect, "checksum", blob.checksum, where);
+
+    // Two epochs, two sources. v1 carried the same number in both, so a runner
+    // reading either satisfied one `expect.epoch`; these are 9 and 5 and are
+    // read off the Delta and off the descriptor respectively. Swapping the two
+    // observations is now a failure rather than a wash.
+    const frameEpoch = result.message.delta.epoch;
+    assertKey(expect, "frame_epoch", frameEpoch, where);
+    assertKey(expect, "blob_epoch", blob.epoch, where);
+    if (frameEpoch !== blob.epoch) epochsDistinct += 1;
 
     // The encoder half, which no assertion over the decoded value can reach.
     const wireBlob = reencodedBlob(scenario, result.message);
@@ -275,28 +535,135 @@ test("blob backend: an absent discriminator is shm, an unknown one is refused by
       // Emitting the field is not enough; it has to carry the decoded kind. An
       // encoder that wrote a constant would satisfy the presence flag.
       assert.equal(wireBlob.backend, blob.backend, `${where}: re-encoded backend disagrees`);
+    } else {
+      // The omission has to be a real omission, not a `backend: null` echoed
+      // straight back out. The null scenarios are what make this reachable: an
+      // encoder that copied the decoded field verbatim would write `null` here,
+      // and `!== undefined` alone reads that as absent.
+      assert.ok(
+        !("backend" in wireBlob),
+        `${where}: the re-encoded descriptor carries a \`backend\` entry (${wireBlob.backend}) ` +
+          "where a conforming encoder writes no entry at all — an explicit null must not " +
+          "survive a round trip",
+      );
     }
   }
 
-  assert.equal(accepted, 6, "three accepted backend forms x two codecs");
+  // ---- The vocabulary is COMPLETE, not merely read ----
+  //
+  // This is the assertion v1 lacked, and no count reaches it: it is a set
+  // difference. `arrow` proves the discriminator is READ — a decoder that
+  // hardcodes `shm` fails it — but a binding knowing only {shm, arrow} refuses
+  // `in_process` NAMING THE TOKEN, which is conforming behaviour for an unknown
+  // token, and so passed every v1 scenario while implementing a smaller enum
+  // than the clause declares. The fixture's own list reaches both comparisons:
+  // against the library's exported enum (a binding that grew or dropped a name)
+  // and against the backends actually DECODED from accept frames (a name in the
+  // enum that no frame this run replayed can produce).
+  assertKeyWith(
+    block,
+    "backends",
+    (backends) => {
+      assert.deepStrictEqual(
+        Object.values(BlobBackendKind),
+        backends,
+        `${FIXTURE}: the library's BlobBackendKind and the corpus's declared backends differ`,
+      );
+      const missing = backends.filter((backend) => !decodedBackends.has(backend));
+      assert.deepStrictEqual(
+        missing,
+        [],
+        `${FIXTURE}: ${JSON.stringify(missing)} is declared in \`assertions.backends\` but is ` +
+          "the `decoded_backend` of no accept scenario this run replayed. Either the corpus " +
+          "declares a backend it carries no accept frame for, or this binding refuses one it " +
+          "must accept — v1 shipped the first and hid the second behind it.",
+      );
+      assert.deepStrictEqual(
+        [...decodedBackends].sort(),
+        [...backends].sort(),
+        `${FIXTURE}: an accept scenario decoded to a backend the corpus does not declare`,
+      );
+    },
+    FIXTURE,
+  );
+
+  // Every declared wire SHAPE was replayed, and no other. Four are tokens; the
+  // other three (`omitted`, `null`, `non_string`) are the shapes the clause's
+  // token-only prose does not describe, which is why they are enumerated rather
+  // than implied.
+  assertKeyWith(
+    block,
+    "backend_forms",
+    (forms) => {
+      assert.deepStrictEqual(
+        [...observedForms].sort(),
+        [...forms].sort(),
+        `${FIXTURE}: the wire shapes replayed and the wire shapes declared differ`,
+      );
+    },
+    FIXTURE,
+  );
+
+  // Both refusal kinds were reached. A dispatch that fell through the
+  // `non_string` arm would leave `refused` at four and this set at one.
+  assertKeyWith(
+    block,
+    "rejection_kinds",
+    (kinds) => {
+      assert.deepStrictEqual(
+        [...observedRejectionKinds].sort(),
+        [...kinds].sort(),
+        `${FIXTURE}: the rejection kinds replayed and the rejection kinds declared differ`,
+      );
+    },
+    FIXTURE,
+  );
+
+  // Against what this run REPLAYED, not against `fixture.scenarios.length` —
+  // comparing the fixture's count to the fixture's own array is an identity that
+  // holds however few scenarios the loop entered.
+  assertKey(block, "scenario_count", accepted + refused, FIXTURE);
+
+  assert.equal(accepted, 10, "five accepted backend forms x two codecs");
   assert.equal(
     omitted,
     2,
     "the forward-compatibility form, in both codecs — without these the second " +
       "defaulting site is never reached and its default is unfalsifiable",
   );
-  assert.equal(refused, 2, "the unknown token, in both codecs");
   assert.equal(
-    arrowDecoded,
+    nullForm,
     2,
-    "only the `arrow` scenarios decode to a non-shm backend; a decoder that ignores the " +
-      "field and hardcodes `shm` satisfies the other four and lands at zero here",
+    "the explicit-null form, in both codecs — the ABSENT form spelled the other way",
+  );
+  assert.equal(refused, 4, "two refusal kinds x two codecs");
+  assert.equal(unknownTokenRefusals, 2, "the unknown token, in both codecs");
+  assert.equal(nonStringRefusals, 2, "the non-string value, in both codecs");
+  assert.equal(
+    nonShmDecoded,
+    4,
+    "only the `arrow` and `in_process` scenarios decode to a non-shm backend; a decoder that " +
+      "ignores the field and hardcodes `shm` satisfies the other six and lands at zero here",
+  );
+  assert.equal(
+    inProcessDecoded,
+    2,
+    "the third declared backend, in both codecs — a binding knowing only {shm, arrow} refuses " +
+      "these two frames, conformingly by the letter of the unknown-token clause, and lands at " +
+      "zero here while every other counter still balances",
   );
   assert.equal(
     fieldEmitted,
-    2,
-    "the encoder emits `backend` for exactly the two `arrow` scenarios and omits it for " +
-      "the four shm ones — an encoder that always omits lands at zero, one that always " +
-      "emits lands at six",
+    4,
+    "the encoder emits `backend` for exactly the two `arrow` and two `in_process` scenarios " +
+      "and omits it for the six shm ones — an encoder that always omits lands at zero, one " +
+      "that always emits lands at ten",
+  );
+  assert.equal(
+    epochsDistinct,
+    10,
+    "every accept scenario carries a Delta epoch and a descriptor epoch that DIFFER; a runner " +
+      "reading one source for both lands at zero, which is what v1's single `expect.epoch` " +
+      "could not distinguish",
   );
 });
