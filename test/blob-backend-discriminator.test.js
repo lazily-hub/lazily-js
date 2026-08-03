@@ -181,12 +181,17 @@ function wireBackend(scenario) {
  * Returns `{ ok: true, message }` or `{ ok: false, error }`; which one is
  * conforming is the scenario's `outcome`, and that split is the fixture.
  */
-function decodeScenario(scenario) {
+function decodeScenario(scenario, observedCodecs) {
   try {
     if (scenario.codec === Codec.Json) {
+      // The branch really taken, recorded where it is taken
+      // (#lznullformblind) — `codecs` is asserted against this set rather than
+      // against a runner-side transcription of the corpus's own list.
+      observedCodecs.add(Codec.Json);
       return { ok: true, message: IpcMessage.decodeJson(scenario.wire_json) };
     }
     if (scenario.codec === Codec.Msgpack) {
+      observedCodecs.add(Codec.Msgpack);
       return {
         ok: true,
         message: IpcMessage.decodeMsgpack(hexToBytes(scenario.wire_msgpack_hex)),
@@ -237,11 +242,14 @@ test("blob backend: an absent discriminator is shm, an unknown one is refused by
 
   const block = fixture.assertions;
   assertKey(block, "required_of_binding", "MUST", FIXTURE);
-  // The library's own values reach the comparison, not a transcription of them:
-  // a binding that grew a fourth backend the corpus does not know about, or
-  // dropped one it does, is a failure here rather than a silent divergence.
-  assertKey(block, "codecs", [Codec.Json, Codec.Msgpack], FIXTURE);
-  assertKey(block, "outcomes", ["accept", "reject"], FIXTURE);
+  // `codecs` and `outcomes` are asserted AFTER the loop, against the branches
+  // this run really dispatched on (#lznullformblind). Naming the library's
+  // `Codec` members, or writing `["accept", "reject"]`, still compares the
+  // corpus's list against a runner-side transcription of it: both stay green
+  // over a runner whose replay loop never runs, which is the vacuity
+  // `anti_vacuity` exists to forbid.
+  const observedCodecs = new Set();
+  const observedOutcomes = new Set();
   // The nine PARAGRAPHS the corpus declares in `assertions.prose`
   // (#lzprosekeyconvention). Each is discharged by naming the executable keys
   // that carry its obligation, and `verifyProse` at the bottom of this test
@@ -261,7 +269,11 @@ test("blob backend: an absent discriminator is shm, an unknown one is refused by
     // rather than a pre-parsed object — and no assertion a run makes can observe
     // that choice. What a run can prove is that the distinction SURVIVED into
     // the runner: the codec and form vocabularies say both codecs and all seven
-    // shapes were replayed, `rejection_kind` reads the raw slot and pins that
+    // shapes were replayed — and "were replayed" is only true of `codecs` since
+    // #lznullformblind, because it used to be `[Codec.Json, Codec.Msgpack]`
+    // transcribed at the top of the test, which names the two codecs without
+    // proving either was dispatched on. It is now the set of decode branches
+    // this replay really took. `rejection_kind` reads the raw slot and pins that
     // the offending value really is a present string / a present non-string,
     // and the field-presence assertion pins that a re-encode writes no entry at
     // all rather than echoing an explicit null.
@@ -370,9 +382,10 @@ test("blob backend: an absent discriminator is shm, an unknown one is refused by
     const where = `${FIXTURE} ${scenario.id}`;
     const onWire = wireBackend(scenario);
     observedForms.add(scenario.backend_form);
-    const result = decodeScenario(scenario);
+    const result = decodeScenario(scenario, observedCodecs);
 
     if (scenario.outcome === "reject") {
+      observedOutcomes.add("reject");
       refused += 1;
       assertKey(expect, "rejected", !result.ok, where);
       assert.ok(
@@ -480,6 +493,7 @@ test("blob backend: an absent discriminator is shm, an unknown one is refused by
     // (#lzscenariobodyskip): a mistyped outcome would otherwise be replayed
     // against the wrong half of the contract.
     assert.equal(scenario.outcome, "accept", `${where}: unknown outcome ${scenario.outcome}`);
+    observedOutcomes.add("accept");
     assert.ok(result.ok, `${where}: a conforming frame was refused — ${result.error}`);
     accepted += 1;
 
@@ -662,6 +676,52 @@ test("blob backend: an absent discriminator is shm, an unknown one is refused by
         [...observedRejectionKinds].sort(),
         [...kinds].sort(),
         `${FIXTURE}: the rejection kinds replayed and the rejection kinds declared differ`,
+      );
+    },
+    FIXTURE,
+  );
+
+  // The codec branches this run really dispatched on. The library's `Codec`
+  // members written out here read like the library reaching the comparison, but
+  // nothing tied them to a decode: a runner that stopped dispatching on msgpack
+  // kept passing (#lznullformblind).
+  assertKeyWith(
+    block,
+    "codecs",
+    (codecs) => {
+      assert.deepStrictEqual(
+        [...observedCodecs].sort(),
+        [...codecs].sort(),
+        `${FIXTURE}: the codecs replayed and the codecs declared differ`,
+      );
+      // Every declared codec is also a member of the library's own `Codec`, so a
+      // corpus that renamed one is a failure rather than a set of two strings
+      // this runner happens to agree with. `Codec` is deliberately WIDER than
+      // the fixture (it also carries `bincode`/`postcard`), so this is
+      // containment, not equality.
+      for (const codec of codecs) {
+        assert.ok(
+          Object.values(Codec).includes(codec),
+          `${FIXTURE}: the corpus declares codec '${codec}', which the library's Codec ` +
+            `does not carry (${JSON.stringify(Object.values(Codec))})`,
+        );
+      }
+    },
+    FIXTURE,
+  );
+
+  // Both arms of the accept/reject dispatch were entered. `accepted`/`refused`
+  // pin the counts; this pins that neither VALUE went unrecognised — a corpus
+  // that grew a third outcome would land in the `assert.equal(..., "accept")`
+  // fail-closed arm, and this is what says so from the other direction.
+  assertKeyWith(
+    block,
+    "outcomes",
+    (outcomes) => {
+      assert.deepStrictEqual(
+        [...observedOutcomes].sort(),
+        [...outcomes].sort(),
+        `${FIXTURE}: the outcomes replayed and the outcomes declared differ`,
       );
     },
     FIXTURE,

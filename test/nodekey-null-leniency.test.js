@@ -20,7 +20,13 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
-import { assertKey, excuseKey, proseKey, verifyProse } from "./support/assert-key.js";
+import {
+  assertKey,
+  assertKeyWith,
+  excuseKey,
+  proseKey,
+  verifyProse,
+} from "./support/assert-key.js";
 import { scenarios } from "./support/scenario.js";
 
 import {
@@ -57,9 +63,21 @@ function hexToBytes(hex) {
   return out;
 }
 
-function decodeScenario(scenario) {
-  if (scenario.codec === "json") return IpcMessage.decodeJson(scenario.wire_json);
+/**
+ * Decode under the scenario's own codec.
+ *
+ * `observedCodecs` collects the branch really taken, where it is taken
+ * (#lznullformblind). The `codecs` vocabulary is asserted against that set, so a
+ * codec the corpus declares and this runner never dispatches on fails rather
+ * than matching a runner-side transcription forever.
+ */
+function decodeScenario(scenario, observedCodecs) {
+  if (scenario.codec === "json") {
+    observedCodecs.add("json");
+    return IpcMessage.decodeJson(scenario.wire_json);
+  }
   if (scenario.codec === "msgpack") {
+    observedCodecs.add("msgpack");
     return IpcMessage.decodeMsgpack(hexToBytes(scenario.wire_msgpack_hex));
   }
   throw new Error(`unknown codec: ${scenario.codec}`);
@@ -111,15 +129,80 @@ function wireKey(scenario) {
   else throw new Error(`unknown scenario field in fixture: ${scenario.field}`);
   // `in`, not `?.` or `??`: absent and null are two of the three forms under
   // test and the whole point is that they stay distinguishable.
-  return "key" in node ? { present: true, value: node.key } : { present: false };
+  const observed = "key" in node ? { present: true, value: node.key } : { present: false };
+  // The msgpack half of this control still runs through THIS BINDING's
+  // `decodeMsgpackValue`, so a defect there corrupts the control and the thing
+  // controlled together: the control would agree with the decode because both
+  // came out of the same code. `rawMsgpackKey` is a second witness that never
+  // touches the decoder.
+  if (scenario.codec === "msgpack") {
+    const raw = rawMsgpackKey(scenario.wire_msgpack_hex);
+    assert.equal(
+      raw.present,
+      observed.present,
+      `${scenario.id}: the raw bytes and decodeMsgpackValue disagree about whether a \`key\` ` +
+        "entry is on the wire — one of the two is wrong and the control cannot arbitrate itself",
+    );
+    if (raw.present) {
+      assert.equal(
+        raw.nil,
+        observed.value === null,
+        `${scenario.id}: the raw bytes and decodeMsgpackValue disagree about whether the ` +
+          "`key` entry is msgpack nil",
+      );
+    }
+  }
+  return observed;
 }
 
-function decodedKey(scenario, message) {
-  if (scenario.field === "snapshot") return message.snapshot.nodes[0].key;
+// `a3 6b 65 79` is the msgpack encoding of the map key "key": `0xa3` is the
+// fixstr header for a 3-byte string, then `k`, `e`, `y`. The byte immediately
+// after it is the value's own type header, and `0xc0` is nil.
+const KEY_FIXSTR_HEX = "a36b6579";
+
+/**
+ * The `key` slot of a msgpack frame, read off the raw hex WITHOUT this
+ * binding's decoder.
+ *
+ * Deliberately dumb: it does not parse the frame, it locates one two-byte
+ * sequence. That is the point — a witness sharing no code with the thing it
+ * witnesses is the only kind that can contradict it.
+ */
+function rawMsgpackKey(hex) {
+  const at = hex.indexOf(KEY_FIXSTR_HEX);
+  if (at === -1) return { present: false };
+  const after = at + KEY_FIXSTR_HEX.length;
+  // One `key` entry per frame in this fixture. More than one and this witness
+  // would be reading a slot the scenario is not about, which is worse than not
+  // witnessing at all.
+  assert.equal(
+    hex.indexOf(KEY_FIXSTR_HEX, after),
+    -1,
+    "the frame carries more than one `key` map entry; this witness cannot tell which is " +
+      "the node's own",
+  );
+  const header = hex.slice(after, after + 2);
+  assert.equal(header.length, 2, "the `key` entry is the last thing on the wire, with no value");
+  return { present: true, nil: header === "c0" };
+}
+
+/**
+ * The DECODED `key` of the scenario's node.
+ *
+ * `observedFields` collects the frame position really read, where it is read
+ * (#lznullformblind) — the `fields` vocabulary is asserted against that set
+ * rather than against a transcription of the corpus's list.
+ */
+function decodedKey(scenario, message, observedFields) {
+  if (scenario.field === "snapshot") {
+    observedFields.add("snapshot");
+    return message.snapshot.nodes[0].key;
+  }
   // Same fail-open on the decode half (#lzscenariobodyskip).
   if (scenario.field !== "node_add") {
     throw new Error(`unknown scenario field in fixture: ${scenario.field}`);
   }
+  observedFields.add("node_add");
   const op = message.delta.ops[0];
   assert.ok(op instanceof DeltaOpNodeAdd, "the fixture declares a NodeAdd op");
   return op.key;
@@ -130,10 +213,15 @@ test("NodeKey null-leniency: both wire forms decode as absent, the encoder still
 
   const block = fixture.assertions;
   assertKey(block, "required_of_binding", "MUST", FIXTURE);
-  assertKey(block, "codecs", ["json", "msgpack"], FIXTURE);
-  assertKey(block, "fields", ["snapshot", "node_add"], FIXTURE);
-  assertKey(block, "key_forms", ["omitted", "null", "present"], FIXTURE);
-  assertKey(block, "scenario_count", fixture.scenarios.length, FIXTURE);
+  // `codecs`, `fields`, `key_forms` and `scenario_count` are asserted AFTER the
+  // loop, against the branches this run really dispatched on and the scenarios
+  // it really replayed (#lznullformblind). Transcribing the corpus's own lists
+  // here — and comparing `scenario_count` to `fixture.scenarios.length` — is the
+  // fixture agreeing with itself: every one of those four stays green over a
+  // runner that decodes nothing, which is exactly what `anti_vacuity` forbids.
+  const observedCodecs = new Set();
+  const observedFields = new Set();
+  const observedKeyForms = new Set();
   // The four PARAGRAPHS the corpus declares in `assertions.prose`
   // (#lzprosekeyconvention), each discharged by naming the executable keys that
   // carry it; `verifyProse` below checks this run really asserted them.
@@ -153,6 +241,12 @@ test("NodeKey null-leniency: both wire forms decode as absent, the encoder still
     // makes even the proxy honest — without it the `null` scenarios are the
     // `omitted` ones under a different id and `decoded_key` cannot tell them
     // apart.
+    //
+    // "Both codecs and all three forms were replayed" is only a claim about the
+    // RUN now that `codecs` and `key_forms` are the sets of branches this replay
+    // really took (#lznullformblind). They used to be runner-side transcriptions
+    // of the corpus's own lists, so this half of the discharge asserted the
+    // fixture against itself and would have survived deleting the loop.
     "codecs",
     "key_forms",
     "decoded_key",
@@ -164,7 +258,14 @@ test("NodeKey null-leniency: both wire forms decode as absent, the encoder still
   proseKey(block, "anti_vacuity", [
     // The `present` scenarios force a real key through, which only a real decode
     // produces; `keysDecoded` below pins the count.
+    //
+    // `scenario_count` is the second half, and it only became evidence under
+    // #lznullformblind: it is `replayed`, so a loop that entered no body cannot
+    // reach the declared count. As `fixture.scenarios.length` it was an identity
+    // over the fixture — the paragraph most about vacuity discharged by the most
+    // vacuous assertion in the file.
     "decoded_key",
+    "scenario_count",
   ]);
   excuseKey(
     block,
@@ -191,6 +292,7 @@ test("NodeKey null-leniency: both wire forms decode as absent, the encoder still
     // runner, is discharged by an assertion that cannot see it.
     const onWire = wireKey(scenario);
     if (scenario.key_form === "omitted") {
+      observedKeyForms.add("omitted");
       assert.equal(
         onWire.present,
         false,
@@ -198,6 +300,7 @@ test("NodeKey null-leniency: both wire forms decode as absent, the encoder still
           "the null scenario under a different id",
       );
     } else if (scenario.key_form === "null") {
+      observedKeyForms.add("null");
       assert.ok(
         onWire.present,
         `${where}: the null form must carry an EXPLICIT \`key\` entry on the wire — if the ` +
@@ -209,6 +312,7 @@ test("NodeKey null-leniency: both wire forms decode as absent, the encoder still
         `${where}: the null form must carry a JSON null / msgpack nil, not ${onWire.value}`,
       );
     } else if (scenario.key_form === "present") {
+      observedKeyForms.add("present");
       assert.ok(onWire.present, `${where}: the present form must carry a \`key\` entry`);
       assert.notEqual(onWire.value, null, `${where}: the present form must carry a real key`);
     } else {
@@ -217,8 +321,8 @@ test("NodeKey null-leniency: both wire forms decode as absent, the encoder still
       throw new Error(`unknown key_form in fixture: ${scenario.key_form}`);
     }
 
-    const message = decodeScenario(scenario);
-    const key = decodedKey(scenario, message);
+    const message = decodeScenario(scenario, observedCodecs);
+    const key = decodedKey(scenario, message, observedFields);
     if (key !== null) keysDecoded += 1;
 
     // The decode half: omitted and explicit-null must both arrive absent.
@@ -247,6 +351,35 @@ test("NodeKey null-leniency: both wire forms decode as absent, the encoder still
     "only the `present` scenarios carry a key; a runner reporting absent for " +
       "everything satisfies the null cases trivially",
   );
+
+  // ---- The three vocabularies, against what this run REALLY dispatched on ----
+  //
+  // Each is a set difference in both directions (#lznullformblind). A corpus
+  // that grows a fourth key form, or a runner that quietly stops taking one of
+  // the branches, is a failure here — where a transcribed literal would keep
+  // agreeing with the fixture forever.
+  const vocabulary = [
+    ["codecs", observedCodecs, "codecs"],
+    ["fields", observedFields, "frame positions"],
+    ["key_forms", observedKeyForms, "key forms"],
+  ];
+  for (const [key, observed, noun] of vocabulary) {
+    assertKeyWith(
+      block,
+      key,
+      (declared) => {
+        assert.deepStrictEqual(
+          [...observed].sort(),
+          [...declared].sort(),
+          `${FIXTURE}: the ${noun} replayed and the ${noun} declared differ`,
+        );
+      },
+      FIXTURE,
+    );
+  }
+  // Against what this run REPLAYED, not `fixture.scenarios.length` — the
+  // identity form holds however few scenarios the loop entered.
+  assertKey(block, "scenario_count", replayed, FIXTURE);
 
   verifyProse(fixture);
 });

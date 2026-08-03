@@ -153,11 +153,19 @@ test("json frames round-trip through the reference codec", () => {
   // interop floor, `byte_canonical` = one deterministic byte form per message).
   const meta = fixture.assertions;
   assertKey(meta, "codec", "json", "assertions");
+  // CORPUS DECLARATIONS, deliberately compared against a runner-side literal
+  // (#lznullformblind). `self_describing`, `byte_canonical`, `role` and
+  // `required_of_binding` state what two CONFORMING BINDINGS may do; no single
+  // binding's run produces a comparable value, so "assert it against what the
+  // run produced" has nothing to reach for. Pinning them by agreement is the
+  // point, and this is the boundary of the rule the `scenario_count` fix below
+  // is an instance of — not another instance of the vacuity.
   assertKey(meta, "self_describing", true, "assertions");
   assertKey(meta, "byte_canonical", true, "assertions");
   assertKey(meta, "required_of_binding", "MUST", "assertions");
   assertKey(meta, "role", "reference", "assertions");
-  assertKey(meta, "scenario_count", fixture.scenarios.length, "assertions");
+  // `scenario_count` is asserted AFTER the loop, against what this run really
+  // replayed (#lznullformblind).
   // The one PARAGRAPH the corpus declares in `assertions.prose`
   // (#lzprosekeyconvention). It says both senses of "canonical" are pinned here
   // so a runner cannot conflate them, and those two keys are exactly what
@@ -182,6 +190,13 @@ test("json frames round-trip through the reference codec", () => {
   }
   assert.equal(replayed, 3, "one scenario per IpcMessage variant");
 
+  // Against what this run REPLAYED, not against `fixture.scenarios.length`
+  // (#lznullformblind). Comparing the fixture's declared count to the fixture's
+  // own array is an identity: it holds however few scenarios the loop entered,
+  // and stays green over a runner that decodes nothing — the exact vacuity the
+  // corpus's own anti-vacuity reasoning exists to name.
+  assertKey(meta, "scenario_count", replayed, "assertions");
+
   verifyProse(fixture);
 });
 
@@ -203,12 +218,15 @@ test("msgpack frames round-trip through the cross-language binary default", () =
 
   const meta = fixture.assertions;
   assertKey(meta, "codec", "msgpack", "assertions");
+  // Corpus declarations, compared against a literal by design — see the json
+  // half above (#lznullformblind).
   assertKey(meta, "self_describing", true, "assertions");
   // The reason this fixture pins decoded values instead of golden bytes.
   assertKey(meta, "byte_canonical", false, "assertions");
   assertKey(meta, "required_of_binding", "MUST", "assertions");
   assertKey(meta, "role", "cross_language_binary_default", "assertions");
-  assertKey(meta, "scenario_count", fixture.scenarios.length, "assertions");
+  // `scenario_count` is asserted AFTER the loop, against what this run really
+  // replayed (#lznullformblind).
   // The paragraph's own subject: `byte_canonical: false` is why this fixture
   // pins decoded values instead of golden bytes, and the named-field rule it
   // states is what `encoded_body_field_names` asserts executably
@@ -266,6 +284,11 @@ test("msgpack frames round-trip through the cross-language binary default", () =
     replayed += 1;
   }
   assert.equal(replayed, 3, "one scenario per IpcMessage variant");
+
+  // Against what this run REPLAYED, not against `fixture.scenarios.length`
+  // (#lznullformblind) — see the json half above for why the identity is
+  // vacuous.
+  assertKey(meta, "scenario_count", replayed, "assertions");
 
   verifyProse(fixture);
 });

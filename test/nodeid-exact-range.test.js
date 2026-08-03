@@ -75,10 +75,16 @@ function hexToBytes(hex) {
  * Returns `{ ok: true, message }` or `{ ok: false, error }`. Both are
  * conforming outcomes depending on the identifier; the caller decides which,
  * because that split is the whole point of the fixture.
+ *
+ * `observedCodecs` collects the codec whose BRANCH was really taken, at the
+ * point it is taken (#lznullformblind). The `codecs` vocabulary is asserted
+ * against that set, so a codec the corpus declares and this runner never
+ * dispatches on is a failure rather than a transcription that always matches.
  */
-function decodeScenario(scenario) {
+function decodeScenario(scenario, observedCodecs) {
   try {
     if (scenario.codec === "json") {
+      observedCodecs.add("json");
       // Deliberately the raw TEXT through the codec's own entry point, not a
       // pre-parsed object: `JSON.parse` is where the rounding would happen, so
       // a runner that parsed the frame itself and handed over the object would
@@ -86,6 +92,7 @@ function decodeScenario(scenario) {
       return { ok: true, message: IpcMessage.decodeJson(scenario.wire_json) };
     }
     if (scenario.codec === "msgpack") {
+      observedCodecs.add("msgpack");
       return { ok: true, message: IpcMessage.decodeMsgpack(hexToBytes(scenario.wire_msgpack_hex)) };
     }
   } catch (error) {
@@ -100,8 +107,13 @@ test("NodeId exact-representation bound is enforced by refusal, never rounding",
   const block = fixture.assertions;
   const where = FIXTURE;
   assertKey(block, "required_of_binding", "MUST", where);
-  assertKey(block, "codecs", ["json", "msgpack"], where);
-  assertKey(block, "scenario_count", fixture.scenarios.length, where);
+  // `codecs` and `scenario_count` are asserted AFTER the loop, against the
+  // codec branches this run really dispatched on and the scenarios it really
+  // replayed (#lznullformblind). Transcribing `["json", "msgpack"]` here, or
+  // comparing `scenario_count` to `fixture.scenarios.length`, is a comparison
+  // of the fixture against itself: both stay green over a runner that decodes
+  // nothing, which is the vacuity `anti_vacuity` names.
+  const observedCodecs = new Set();
   // The three PARAGRAPHS the corpus declares in `assertions.prose`
   // (#lzprosekeyconvention), each discharged by naming the executable keys that
   // carry it. `verifyProse` below checks that this run really asserted them.
@@ -119,17 +131,26 @@ test("NodeId exact-representation bound is enforced by refusal, never rounding",
     // round the fixture's own expected value before the comparison — and no
     // assertion a run makes can observe that choice. Its other half IS
     // executable and binds this runner: compare the decoded identifier by its
-    // decimal rendering. Both decimal-string comparisons do exactly that, across
-    // both codecs.
+    // decimal rendering. Both decimal-string comparisons do exactly that, and
+    // `codecs` is what says "across both codecs" — it used to be a transcribed
+    // `["json", "msgpack"]`, which named the two codecs without proving either
+    // was dispatched on, so the "across both codecs" half of this discharge was
+    // resting on nothing (#lznullformblind). It is now the set of codec branches
+    // `decodeScenario` really took.
     "codecs",
     "node_id_decimal",
     "root_id_decimal",
   ]);
   proseKey(block, "anti_vacuity", [
     // The two `exact` scenarios are the control: the boundary value must decode
-    // correctly before the refusals count.
+    // correctly before the refusals count. `scenario_count` is the other half —
+    // it is `accepted + refused`, so a loop that entered no body at all cannot
+    // reach the declared count (#lznullformblind). It used to be
+    // `fixture.scenarios.length`, which is the fixture agreeing with itself, so
+    // the paragraph MOST about vacuity was the one discharged most vacuously.
     "outcome",
     "node_id_decimal",
+    "scenario_count",
   ]);
   // NOT prose (a vocabulary mapped to English glosses, #lzprosekeyconvention):
   // the assertion is the KEY SET, and asserting the parent key discharges the
@@ -179,7 +200,7 @@ test("NodeId exact-representation bound is enforced by refusal, never rounding",
       scenarioWhere,
     );
 
-    const result = decodeScenario(scenario);
+    const result = decodeScenario(scenario, observedCodecs);
 
     if (!result.ok) {
       assert.ok(
@@ -228,6 +249,28 @@ test("NodeId exact-representation bound is enforced by refusal, never rounding",
   // refusing, and a decoder that stopped decoding, are each a failure here.
   assert.equal(accepted, 2, "lazily-js decodes exactly the two 2^53 - 1 scenarios");
   assert.equal(refused, 4, "lazily-js refuses both over-range identifiers in both codecs");
+
+  // Both vocabularies against what this run REALLY did (#lznullformblind).
+  //
+  // `codecs` is the set of branches `decodeScenario` took, not a runner-side
+  // transcription of the corpus's list: a binding that quietly stopped
+  // dispatching on msgpack — or a corpus that grew a third codec — is a failure
+  // here rather than a literal that agrees with the fixture forever.
+  assertKeyWith(
+    block,
+    "codecs",
+    (codecs) => {
+      assert.deepStrictEqual(
+        [...observedCodecs].sort(),
+        [...codecs].sort(),
+        `${where}: the codecs replayed and the codecs declared differ`,
+      );
+    },
+    where,
+  );
+  // `scenario_count` against the two counters, not `fixture.scenarios.length`.
+  // The identity form holds however few scenarios the loop entered.
+  assertKey(block, "scenario_count", accepted + refused, where);
 
   // The vocabulary, not the glosses. A third outcome added upstream would land
   // in neither arm of the dispatch above, and the set difference is what says so.
