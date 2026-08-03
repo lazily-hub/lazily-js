@@ -24,6 +24,7 @@ import {
   assertKey,
   assertKeyWith,
   excuseKey,
+  fnv1a64Hex,
   proseKey,
   verifyProse,
 } from "./support/assert-key.js";
@@ -71,14 +72,18 @@ function hexToBytes(hex) {
  * codec the corpus declares and this runner never dispatches on fails rather
  * than matching a runner-side transcription forever.
  */
-function decodeScenario(scenario, observedCodecs) {
+function decodeScenario(scenario, expect, observedCodecs) {
   if (scenario.codec === "json") {
     observedCodecs.add("json");
-    return IpcMessage.decodeJson(scenario.wire_json);
+    const wireInput = Buffer.from(scenario.wire_json, "utf8");
+    assertKey(expect, "wire_input_fnv1a64", fnv1a64Hex(wireInput));
+    return IpcMessage.decodeJson(wireInput.toString("utf8"));
   }
   if (scenario.codec === "msgpack") {
     observedCodecs.add("msgpack");
-    return IpcMessage.decodeMsgpack(hexToBytes(scenario.wire_msgpack_hex));
+    const wireInput = hexToBytes(scenario.wire_msgpack_hex);
+    assertKey(expect, "wire_input_fnv1a64", fnv1a64Hex(wireInput));
+    return IpcMessage.decodeMsgpack(wireInput);
   }
   throw new Error(`unknown codec: ${scenario.codec}`);
 }
@@ -231,26 +236,7 @@ test("NodeKey null-leniency: both wire forms decode as absent, the encoder still
     "decoded_key",
     "reencoded_key_field_present",
   ]);
-  proseKey(block, "wire_encoding", [
-    // A PROXY discharge, declared as one (#lzprosekeyconvention). The paragraph
-    // is a claim about how the CORPUS carries its bytes, which no assertion a
-    // run makes can observe. What a run can prove is that the distinction
-    // SURVIVED into the runner: the codec and key-form vocabularies say both
-    // codecs and all three forms were replayed, and `decoded_key` is the
-    // assertion that carriage exists for. The `wireKey` control below is what
-    // makes even the proxy honest — without it the `null` scenarios are the
-    // `omitted` ones under a different id and `decoded_key` cannot tell them
-    // apart.
-    //
-    // "Both codecs and all three forms were replayed" is only a claim about the
-    // RUN now that `codecs` and `key_forms` are the sets of branches this replay
-    // really took (#lznullformblind). They used to be runner-side transcriptions
-    // of the corpus's own lists, so this half of the discharge asserted the
-    // fixture against itself and would have survived deleting the loop.
-    "codecs",
-    "key_forms",
-    "decoded_key",
-  ]);
+  proseKey(block, "wire_encoding", ["wire_input_fnv1a64"]);
   proseKey(block, "reencode_obligation", [
     // Named in the paragraph itself.
     "reencoded_key_field_present",
@@ -321,7 +307,7 @@ test("NodeKey null-leniency: both wire forms decode as absent, the encoder still
       throw new Error(`unknown key_form in fixture: ${scenario.key_form}`);
     }
 
-    const message = decodeScenario(scenario, observedCodecs);
+    const message = decodeScenario(scenario, expect, observedCodecs);
     const key = decodedKey(scenario, message, observedFields);
     if (key !== null) keysDecoded += 1;
 

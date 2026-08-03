@@ -93,6 +93,7 @@ import {
   assertKey,
   assertKeyWith,
   excuseKey,
+  fnv1a64Hex,
   proseKey,
   verifyProse,
 } from "./support/assert-key.js";
@@ -181,20 +182,24 @@ function wireBackend(scenario) {
  * Returns `{ ok: true, message }` or `{ ok: false, error }`; which one is
  * conforming is the scenario's `outcome`, and that split is the fixture.
  */
-function decodeScenario(scenario, observedCodecs) {
+function decodeScenario(scenario, expect, observedCodecs) {
   try {
     if (scenario.codec === Codec.Json) {
       // The branch really taken, recorded where it is taken
       // (#lznullformblind) — `codecs` is asserted against this set rather than
       // against a runner-side transcription of the corpus's own list.
       observedCodecs.add(Codec.Json);
-      return { ok: true, message: IpcMessage.decodeJson(scenario.wire_json) };
+      const wireInput = Buffer.from(scenario.wire_json, "utf8");
+      assertKey(expect, "wire_input_fnv1a64", fnv1a64Hex(wireInput));
+      return { ok: true, message: IpcMessage.decodeJson(wireInput.toString("utf8")) };
     }
     if (scenario.codec === Codec.Msgpack) {
       observedCodecs.add(Codec.Msgpack);
+      const wireInput = hexToBytes(scenario.wire_msgpack_hex);
+      assertKey(expect, "wire_input_fnv1a64", fnv1a64Hex(wireInput));
       return {
         ok: true,
-        message: IpcMessage.decodeMsgpack(hexToBytes(scenario.wire_msgpack_hex)),
+        message: IpcMessage.decodeMsgpack(wireInput),
       };
     }
   } catch (error) {
@@ -263,25 +268,7 @@ test("blob backend: an absent discriminator is shm, an unknown one is refused by
     "rejection_is_decode_error",
     "error_names_token",
   ]);
-  proseKey(block, "wire_encoding", [
-    // A PROXY discharge, declared as one (#lzprosekeyconvention). The paragraph
-    // is a claim about how the CORPUS carries its bytes — raw text and hex
-    // rather than a pre-parsed object — and no assertion a run makes can observe
-    // that choice. What a run can prove is that the distinction SURVIVED into
-    // the runner: the codec and form vocabularies say both codecs and all seven
-    // shapes were replayed — and "were replayed" is only true of `codecs` since
-    // #lznullformblind, because it used to be `[Codec.Json, Codec.Msgpack]`
-    // transcribed at the top of the test, which names the two codecs without
-    // proving either was dispatched on. It is now the set of decode branches
-    // this replay really took. `rejection_kind` reads the raw slot and pins that
-    // the offending value really is a present string / a present non-string,
-    // and the field-presence assertion pins that a re-encode writes no entry at
-    // all rather than echoing an explicit null.
-    "codecs",
-    "backend_forms",
-    "rejection_kind",
-    "reencoded_backend_field_present",
-  ]);
+  proseKey(block, "wire_encoding", ["wire_input_fnv1a64"]);
   proseKey(block, "backend_form_vocabulary", [
     // Its normative half — every backend in `assertions.backends` must appear
     // as the `decoded_backend` of some accept scenario — is the set difference
@@ -382,7 +369,7 @@ test("blob backend: an absent discriminator is shm, an unknown one is refused by
     const where = `${FIXTURE} ${scenario.id}`;
     const onWire = wireBackend(scenario);
     observedForms.add(scenario.backend_form);
-    const result = decodeScenario(scenario, observedCodecs);
+    const result = decodeScenario(scenario, expect, observedCodecs);
 
     if (scenario.outcome === "reject") {
       observedOutcomes.add("reject");

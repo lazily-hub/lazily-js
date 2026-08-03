@@ -55,6 +55,16 @@ function fetch(block, key, verb) {
 
 const isPlainObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
 
+/** FNV-1a over exact bytes as sixteen lowercase hexadecimal digits. */
+export function fnv1a64Hex(bytes) {
+  let digest = 0xcbf29ce484222325n;
+  for (const byte of bytes) {
+    digest ^= BigInt(byte);
+    digest = BigInt.asUintN(64, digest * 0x100000001b3n);
+  }
+  return digest.toString(16).padStart(16, "0");
+}
+
 /**
  * Mark an object-valued key's KEY SET as checked (#lzsubblockkeyset).
  *

@@ -33,6 +33,7 @@ import {
   assertKeySet,
   assertKeyWith,
   excuseKey,
+  fnv1a64Hex,
   proseKey,
   verifyProse,
 } from "./support/assert-key.js";
@@ -82,7 +83,7 @@ function hexToBytes(hex) {
  * against that set, so a codec the corpus declares and this runner never
  * dispatches on is a failure rather than a transcription that always matches.
  */
-function decodeScenario(scenario, observedCodecs) {
+function decodeScenario(scenario, expect, observedCodecs) {
   try {
     if (scenario.codec === "json") {
       observedCodecs.add("json");
@@ -90,11 +91,15 @@ function decodeScenario(scenario, observedCodecs) {
       // pre-parsed object: `JSON.parse` is where the rounding would happen, so
       // a runner that parsed the frame itself and handed over the object would
       // move the defect outside the code under test.
-      return { ok: true, message: IpcMessage.decodeJson(scenario.wire_json) };
+      const wireInput = Buffer.from(scenario.wire_json, "utf8");
+      assertKey(expect, "wire_input_fnv1a64", fnv1a64Hex(wireInput));
+      return { ok: true, message: IpcMessage.decodeJson(wireInput.toString("utf8")) };
     }
     if (scenario.codec === "msgpack") {
       observedCodecs.add("msgpack");
-      return { ok: true, message: IpcMessage.decodeMsgpack(hexToBytes(scenario.wire_msgpack_hex)) };
+      const wireInput = hexToBytes(scenario.wire_msgpack_hex);
+      assertKey(expect, "wire_input_fnv1a64", fnv1a64Hex(wireInput));
+      return { ok: true, message: IpcMessage.decodeMsgpack(wireInput) };
     }
   } catch (error) {
     return { ok: false, error };
@@ -125,23 +130,7 @@ test("NodeId exact-representation bound is enforced by refusal, never rounding",
     "outcome",
     "node_id_decimal",
   ]);
-  proseKey(block, "wire_encoding", [
-    // A PROXY discharge, declared as one (#lzprosekeyconvention). Half of this
-    // paragraph is a claim about the CORPUS — that neither the wire nor the
-    // expectation is carried as a JSON number, so this file being JSON cannot
-    // round the fixture's own expected value before the comparison — and no
-    // assertion a run makes can observe that choice. Its other half IS
-    // executable and binds this runner: compare the decoded identifier by its
-    // decimal rendering. Both decimal-string comparisons do exactly that, and
-    // `codecs` is what says "across both codecs" — it used to be a transcribed
-    // `["json", "msgpack"]`, which named the two codecs without proving either
-    // was dispatched on, so the "across both codecs" half of this discharge was
-    // resting on nothing (#lznullformblind). It is now the set of codec branches
-    // `decodeScenario` really took.
-    "codecs",
-    "node_id_decimal",
-    "root_id_decimal",
-  ]);
+  proseKey(block, "wire_encoding", ["wire_input_fnv1a64"]);
   proseKey(block, "anti_vacuity", [
     // The two `exact` scenarios are the control: the boundary value must decode
     // correctly before the refusals count. `scenario_count` is the other half —
@@ -201,7 +190,7 @@ test("NodeId exact-representation bound is enforced by refusal, never rounding",
       scenarioWhere,
     );
 
-    const result = decodeScenario(scenario, observedCodecs);
+    const result = decodeScenario(scenario, expect, observedCodecs);
 
     if (!result.ok) {
       assert.ok(
