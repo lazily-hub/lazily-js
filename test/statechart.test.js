@@ -71,6 +71,18 @@ for (const name of FIXTURES) {
   });
 }
 
+test("statechart malformed corpus is rejected", () => {
+  const fixture = loadFixture("malformed_rejected.json");
+  assert.ok(fixture.cases.length > 0, "malformed corpus must contain cases");
+  for (const scenario of fixture.cases) {
+    assert.throws(
+      () => ChartDef.fromChart(scenario.chart),
+      undefined,
+      `malformed statechart case ${scenario.name} was accepted`,
+    );
+  }
+});
+
 test("flat single-region chart resolves transitions via walk-up + LCA", () => {
   const chart = new StateChart(
     ChartDef.fromChart({

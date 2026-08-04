@@ -64,15 +64,25 @@ function parseTransition(raw, stateId, event) {
     }
   }
   const action = parseActionList(obj.action, `transition ${stateId}.${event} action`);
+  if (obj.internal !== undefined && obj.internal !== null && typeof obj.internal !== "boolean") {
+    throw new TypeError(`transition ${stateId}.${event}: internal must be a boolean`);
+  }
   const internal = obj.internal === true;
   return { target, guard, action, internal };
 }
 
 function parseState(id, raw) {
   const obj = assertObject(raw, `state ${id}`);
-  const parent = typeof obj.parent === "string" ? obj.parent : null;
-  const initial = typeof obj.initial === "string" ? obj.initial : null;
-  const defaultTarget = typeof obj.default === "string" ? obj.default : null;
+  const optionalString = (field) => {
+    const value = obj[field];
+    if (value !== undefined && value !== null && typeof value !== "string") {
+      throw new TypeError(`state ${id}: ${field} must be a string`);
+    }
+    return value ?? null;
+  };
+  const parent = optionalString("parent");
+  const initial = optionalString("initial");
+  const defaultTarget = optionalString("default");
 
   if (obj.run !== undefined && obj.run !== null) {
     throw new TypeError(
@@ -82,6 +92,12 @@ function parseState(id, raw) {
 
   let kind;
   let history = null;
+  if (obj.history !== undefined && obj.history !== null && typeof obj.history !== "string") {
+    throw new TypeError(`state ${id}: history must be a string`);
+  }
+  if (obj.parallel !== undefined && obj.parallel !== null && typeof obj.parallel !== "boolean") {
+    throw new TypeError(`state ${id}: parallel must be a boolean`);
+  }
   if (typeof obj.history === "string") {
     if (obj.history !== HISTORY_SHALLOW && obj.history !== HISTORY_DEEP) {
       throw new TypeError(`state ${id}: unknown history kind \`${obj.history}\``);
@@ -187,6 +203,9 @@ export class ChartDef {
       idx += 1;
       states.set(id, parseState(id, raw));
     }
+    if (!states.has(obj.initial)) {
+      throw new TypeError(`chart.initial references unknown state \`${obj.initial}\``);
+    }
 
     return ChartDef.fromStates(states, order);
   }
@@ -260,7 +279,9 @@ export class ChartDef {
   }
 
   kind(id) {
-    return this.states.get(id)?.kind ?? "atomic";
+    const state = this.states.get(id);
+    if (!state) throw new TypeError(`unknown state in this chart: ${id}`);
+    return state.kind;
   }
 
   isLeaf(id) {
