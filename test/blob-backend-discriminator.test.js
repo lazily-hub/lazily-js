@@ -92,7 +92,6 @@ import test from "node:test";
 import {
   assertKey,
   assertKeyWith,
-  excuseKey,
   fnv1a64Hex,
   proseKey,
   verifyProse,
@@ -320,15 +319,6 @@ test("blob backend: an absent discriminator is shm, an unknown one is refused by
     "rejected",
     "rejection_is_decode_error",
   ]);
-  // NOT prose, and not discharged: `generator` names a corpus-side script. There
-  // is nothing in this binding to compare it against.
-  excuseKey(
-    block,
-    "generator",
-    "names the corpus-side script that mints this fixture (lazily-spec " +
-      "`scripts/gen_blob_backend_discriminator_fixture.py`); nothing in this binding observes it",
-  );
-
   // Counters, one per way this runner could pass without proving anything.
   //
   //   `accepted`/`refused` — a runner that decodes nothing reports every frame

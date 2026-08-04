@@ -23,7 +23,6 @@ import test from "node:test";
 import {
   assertKey,
   assertKeyWith,
-  excuseKey,
   fnv1a64Hex,
   proseKey,
   verifyProse,
@@ -253,13 +252,6 @@ test("NodeKey null-leniency: both wire forms decode as absent, the encoder still
     "decoded_key",
     "scenario_count",
   ]);
-  excuseKey(
-    block,
-    "generator",
-    "names the corpus-side script that mints this fixture (lazily-spec " +
-      "`scripts/gen_nodekey_null_leniency_fixture.py`); nothing in this binding observes it",
-  );
-
   // Anti-vacuity in both directions. A runner that never decodes reports
   // "absent" for everything and satisfies all eight omitted/null scenarios; the
   // `present` count is what only a real decode can produce.

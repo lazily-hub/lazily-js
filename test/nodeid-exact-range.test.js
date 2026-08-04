@@ -32,7 +32,6 @@ import {
   assertKey,
   assertKeySet,
   assertKeyWith,
-  excuseKey,
   fnv1a64Hex,
   proseKey,
   verifyProse,
@@ -148,13 +147,6 @@ test("NodeId exact-representation bound is enforced by refusal, never rounding",
   // and every outcome the corpus declares must have been replayed — otherwise
   // `outcomes` grows a third value nothing here dispatches on.
   const observedOutcomes = new Set();
-  excuseKey(
-    block,
-    "generator",
-    "names the corpus-side script that mints this fixture (lazily-spec " +
-      "`scripts/gen_nodeid_exact_range_fixture.py`); nothing in this binding observes it",
-  );
-
   // Anti-vacuity. `exact_or_reject` is satisfied by a runner that decodes
   // nothing and reports "rejected" — and lazily-js REFUSES four of the six
   // scenarios, so a broken runner would look almost exactly like a working one.
