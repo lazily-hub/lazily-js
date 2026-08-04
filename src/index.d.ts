@@ -685,7 +685,9 @@ export type HandshakeWire = {
   features?: string[];
 };
 
-export type CompatibilityResult = { ok: true } | { ok: false; field: string; reason: string };
+export type CompatibilityResult =
+  | { ok: true; maxFrameSize: number; fragmentationSupported: boolean }
+  | { ok: false; field: string; reason: string };
 
 export class SessionHandshake {
   constructor(fields: HandshakeWire);

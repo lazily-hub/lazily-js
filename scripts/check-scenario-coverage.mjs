@@ -351,7 +351,9 @@ if (problems > 0) {
 // `in_process`, an explicit null and a non-string `backend`, each in both
 // codecs). The observed run goes 126 -> 132, so the floor moves by the same six
 // and the margin of eight is unchanged.
-const MIN_SCENARIOS = Number(process.env.MIN_SCENARIOS ?? "124");
+// Raised 124 -> 129 for the five negotiated-state scenarios in
+// codec/capability_handshake.json (#lzhandshakedeadfields).
+const MIN_SCENARIOS = Number(process.env.MIN_SCENARIOS ?? "129");
 if (total === 0) {
   fail([
     "ERROR: ZERO scenarios were found across the opened fixtures.",

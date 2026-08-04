@@ -1712,9 +1712,10 @@ export class SessionHandshake {
   }
 
   // Fail-closed compatibility check (protocol.md § Capability Negotiation).
-  // Peers are compatible only when they agree on `protocol_id`,
-  // `protocol_major_version`, `codec`, and `ordered_reliable`, and `other`
-  // offers every feature this side requires.
+  // Peers are compatible only when they speak the current protocol, agree on
+  // codec, both provide ordered-reliable delivery, name the same non-empty
+  // session, and `other` offers every feature this side requires. Frame limits
+  // are retained as negotiated state rather than compared for equality.
   checkCompatible(other, requiredFeatures = []) {
     if (this.protocolId !== PROTOCOL_ID) {
       return { ok: false, field: "protocol_id", reason: `expected "${PROTOCOL_ID}"` };
@@ -1722,21 +1723,45 @@ export class SessionHandshake {
     if (other.protocolId !== PROTOCOL_ID) {
       return { ok: false, field: "protocol_id", reason: `peer is not ${PROTOCOL_ID}` };
     }
-    if (this.protocolMajorVersion !== other.protocolMajorVersion) {
+    if (
+      this.protocolMajorVersion !== PROTOCOL_MAJOR_VERSION ||
+      other.protocolMajorVersion !== PROTOCOL_MAJOR_VERSION ||
+      this.protocolMajorVersion !== other.protocolMajorVersion
+    ) {
       return {
         ok: false,
         field: "protocol_major_version",
-        reason: `${this.protocolMajorVersion} != ${other.protocolMajorVersion}`,
+        reason:
+          `${this.protocolMajorVersion} / ${other.protocolMajorVersion} ` +
+          `must both equal ${PROTOCOL_MAJOR_VERSION}`,
       };
     }
     if (this.codec !== other.codec) {
       return { ok: false, field: "codec", reason: `${this.codec} != ${other.codec}` };
     }
-    if (this.orderedReliable !== other.orderedReliable) {
+    if (!this.orderedReliable || !other.orderedReliable) {
       return {
         ok: false,
         field: "ordered_reliable",
-        reason: `${this.orderedReliable} != ${other.orderedReliable}`,
+        reason: "both peers must require ordered-reliable delivery",
+      };
+    }
+    if (this.maxFrameSize <= 0 || other.maxFrameSize <= 0) {
+      return {
+        ok: false,
+        field: "max_frame_size",
+        reason: "both peers must advertise a positive receive ceiling",
+      };
+    }
+    if (
+      this.sessionId.length === 0 ||
+      other.sessionId.length === 0 ||
+      this.sessionId !== other.sessionId
+    ) {
+      return {
+        ok: false,
+        field: "session_id",
+        reason: "both peers must name the same non-empty session",
       };
     }
     const offered = new Set(other.features);
@@ -1749,7 +1774,11 @@ export class SessionHandshake {
         };
       }
     }
-    return { ok: true };
+    return {
+      ok: true,
+      maxFrameSize: Math.min(this.maxFrameSize, other.maxFrameSize),
+      fragmentationSupported: this.fragmentationSupported && other.fragmentationSupported,
+    };
   }
 
   static fromWire(value) {

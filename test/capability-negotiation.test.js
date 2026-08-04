@@ -53,7 +53,11 @@ test("SessionHandshake encodeJson / decodeJson round-trip", () => {
 test("compatible peers with matching constraints report ok", () => {
   const a = handshake({ peer_id: 1 });
   const b = handshake({ peer_id: 2 });
-  assert.deepEqual(a.checkCompatible(b), { ok: true });
+  assert.deepEqual(a.checkCompatible(b), {
+    ok: true,
+    maxFrameSize: 1048576,
+    fragmentationSupported: false,
+  });
 });
 
 test("disagreeing protocol_major_version fails closed", () => {
@@ -78,6 +82,22 @@ test("disagreeing ordered_reliable fails closed", () => {
   assert.equal(a.checkCompatible(b).ok, false);
 });
 
+test("ordered_reliable must be true at both endpoints", () => {
+  const a = handshake({ ordered_reliable: false });
+  const b = handshake({ ordered_reliable: false });
+  const result = a.checkCompatible(b);
+  assert.equal(result.ok, false);
+  assert.equal(result.field, "ordered_reliable");
+});
+
+test("two equal non-current protocol versions still fail closed", () => {
+  const a = handshake({ protocol_major_version: PROTOCOL_MAJOR_VERSION + 1 });
+  const b = handshake({ protocol_major_version: PROTOCOL_MAJOR_VERSION + 1 });
+  const result = a.checkCompatible(b);
+  assert.equal(result.ok, false);
+  assert.equal(result.field, "protocol_major_version");
+});
+
 test("a non-lazily-ipc protocol_id fails closed", () => {
   const a = handshake({});
   const b = handshake({ protocol_id: "something-else" });
@@ -97,7 +117,44 @@ test("a missing required feature fails closed", () => {
 test("a peer offering the required feature is accepted", () => {
   const a = handshake({ features: ["shared-blob"] });
   const b = handshake({ features: ["shared-blob", "signaling-relay"] });
-  assert.deepEqual(a.checkCompatible(b, ["shared-blob"]), { ok: true });
+  assert.deepEqual(a.checkCompatible(b, ["shared-blob"]), {
+    ok: true,
+    maxFrameSize: 1048576,
+    fragmentationSupported: false,
+  });
+});
+
+test("frame ceiling negotiates to min and fragmentation to AND", () => {
+  const a = handshake({
+    max_frame_size: 16 * 1024 * 1024,
+    fragmentation_supported: true,
+  });
+  const b = handshake({
+    max_frame_size: 1024,
+    fragmentation_supported: false,
+    peer_id: 2,
+  });
+  assert.deepEqual(a.checkCompatible(b), {
+    ok: true,
+    maxFrameSize: 1024,
+    fragmentationSupported: false,
+  });
+});
+
+test("zero frame ceiling and invalid sessions fail closed", () => {
+  const valid = handshake();
+
+  let result = valid.checkCompatible(handshake({ peer_id: 2, max_frame_size: 0 }));
+  assert.equal(result.ok, false);
+  assert.equal(result.field, "max_frame_size");
+
+  result = valid.checkCompatible(handshake({ peer_id: 2, session_id: "other" }));
+  assert.equal(result.ok, false);
+  assert.equal(result.field, "session_id");
+
+  result = valid.checkCompatible(handshake({ peer_id: 2, session_id: "" }));
+  assert.equal(result.ok, false);
+  assert.equal(result.field, "session_id");
 });
 
 test("LazilyFfiMessageKind includes CrdtSync = 3 (required discriminant)", () => {
