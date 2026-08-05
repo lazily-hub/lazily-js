@@ -26,5 +26,5 @@
     "forceConsistentCasingInFileNames": true,
     "types": ["node"]
   },
-  "include": ["src/**/*.d.ts"]
+  "include": ["src/**/*.d.ts", "build/generated/*.d.ts"]
 }

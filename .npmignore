@@ -6,4 +6,9 @@ tsconfig.json
 test/
 scripts/
 .tsift/
-build/
+coverage/
+dist/
+node_modules/
+build/*
+!build/generated/
+!build/generated/**

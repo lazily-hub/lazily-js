@@ -57,6 +57,8 @@ KNOWN_UNCOVERED=(
   "arena_blob.json"
   "reliable-sync/coalesce_bounds_outbox.json"
   "reliable-sync/liveness_lease_eviction.json"
+  # The canonical journal-decoder trace has no JavaScript replay runner yet.
+  "reliable-sync/outbox_journal_decode.json"
 )
 
 MANIFEST="${LAZILY_CONFORMANCE_MANIFEST:-build/conformance-fixtures-loaded.txt}"

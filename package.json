@@ -10,6 +10,18 @@
   "type": "module",
   "main": "src/index.js",
   "types": "src/index.d.ts",
+  "files": [
+    ".github/",
+    ".prettierignore",
+    ".prettierrc",
+    ".size-limit.json",
+    "BENCHMARKS.md",
+    "bench/",
+    "bin/",
+    "build/generated/",
+    "runbooks/",
+    "src/"
+  ],
   "bin": {
     "lazily-interop-peer": "bin/interop-peer.mjs"
   },
@@ -184,11 +196,17 @@
     "./distributed": {
       "types": "./src/distributed.d.ts",
       "default": "./src/distributed.js"
+    },
+    "./protobuf-graph-boundary": {
+      "types": "./src/protobuf-graph-boundary.d.ts",
+      "default": "./src/protobuf-graph-boundary.js"
     }
   },
   "sideEffects": false,
   "scripts": {
-    "build": "node --check src/index.js && node --check src/msgpack-codec.js && node --check src/transport.js && node --check src/shm-backend.js && node --check src/reactive.js && node --check src/teardown-scope.js && node --check src/reactive-async.js && node --check src/reactive-family.js && node --check src/async-reactive-family.js && node --check src/thread-safe.js && node --check src/thread-safe-reactive-family.js && node --check src/ffi.js && node --check src/ffi-node.js && node --check src/instrumentation.js && node --check src/state-machine.js && node --check src/statechart.js && node --check src/collections.js && node --check src/queue-core.js && node --check src/queue.js && node --check src/thread-safe-queue.js && node --check src/async-queue.js && node --check src/merge.js && node --check src/relay.js && node --check src/ingress-core.js && node --check src/ingress.js && node --check src/thread-safe-ingress.js && node --check src/async-ingress.js && node --check src/rateshape.js && node --check src/membership.js && node --check src/coordination.js && node --check src/presence.js && node --check src/windowing.js && node --check src/resilience.js && node --check src/service.js && node --check src/temporal.js && node --check src/stdlib.js && node --check src/sem-tree.js && node --check src/stable-id.js && node --check src/seq-crdt.js && node --check src/text-crdt.js && node --check src/indexeddb-outbox.js && node --check src/utf8-offsets.js && node --check src/lossless-tree-crdt.js && node --check src/state-projection.js && node --check src/graph-view.js && node --check src/signaling.js && node --check src/distributed.js && node scripts/update-size-limits.mjs",
+    "generate:protobuf": "mkdir -p build/generated && pbjs -t static-module -w es6 -o build/generated/graph-boundary.js ../lazily-spec/proto/lazily/graph_boundary/v1/graph_boundary.proto && pbts -o build/generated/graph-boundary.d.ts build/generated/graph-boundary.js",
+    "prepack": "npm run generate:protobuf",
+    "build": "npm run generate:protobuf && node --check src/index.js && node --check src/msgpack-codec.js && node --check src/transport.js && node --check src/shm-backend.js && node --check src/reactive.js && node --check src/teardown-scope.js && node --check src/reactive-async.js && node --check src/reactive-family.js && node --check src/async-reactive-family.js && node --check src/thread-safe.js && node --check src/thread-safe-reactive-family.js && node --check src/ffi.js && node --check src/ffi-node.js && node --check src/instrumentation.js && node --check src/state-machine.js && node --check src/statechart.js && node --check src/collections.js && node --check src/queue-core.js && node --check src/queue.js && node --check src/thread-safe-queue.js && node --check src/async-queue.js && node --check src/merge.js && node --check src/relay.js && node --check src/ingress-core.js && node --check src/ingress.js && node --check src/thread-safe-ingress.js && node --check src/async-ingress.js && node --check src/rateshape.js && node --check src/membership.js && node --check src/coordination.js && node --check src/presence.js && node --check src/windowing.js && node --check src/resilience.js && node --check src/service.js && node --check src/temporal.js && node --check src/stdlib.js && node --check src/sem-tree.js && node --check src/stable-id.js && node --check src/seq-crdt.js && node --check src/text-crdt.js && node --check src/indexeddb-outbox.js && node --check src/utf8-offsets.js && node --check src/lossless-tree-crdt.js && node --check src/state-projection.js && node --check src/graph-view.js && node --check src/signaling.js && node --check src/distributed.js && node --check src/protobuf-graph-boundary.js && node --check build/generated/graph-boundary.js && node scripts/update-size-limits.mjs",
     "typecheck": "tsc -p tsconfig.json",
     "test:formal": "node scripts/formal-check.mjs",
     "test:interop-peer": "node bin/interop-peer.mjs --self-check",
@@ -204,7 +222,8 @@
     "format:fix": "prettier --write ."
   },
   "dependencies": {
-    "koffi": "^3.0.2"
+    "koffi": "^3.0.2",
+    "protobufjs": "8.7.1"
   },
   "devDependencies": {
     "@size-limit/preset-small-lib": "^12.1.0",
@@ -212,6 +231,7 @@
     "ajv": "^8.20.0",
     "fake-indexeddb": "^6.2.5",
     "prettier": "3.9.6",
+    "protobufjs-cli": "2.6.1",
     "size-limit": "^12.1.0",
     "tsx": "^4.19.0",
     "typescript": "^5.6.0"
