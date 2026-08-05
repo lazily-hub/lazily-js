@@ -443,10 +443,10 @@ async function replayWorkQueue(flavor, name) {
   const fixture = loadFixture(name);
   const where = (i) => `${flavor.name} ${name} step ${i}`;
   assert.ok(
-    fixture.config,
-    `${name}: fixture carries no lease config — every binding would hardcode it out of band`,
+    fixture.initial?.visibility_timeout && fixture.initial?.max_deliveries,
+    `${name}: initial state carries no lease config — every binding would hardcode it out of band`,
   );
-  const queue = flavor.workQueue(fixture.config);
+  const queue = flavor.workQueue(fixture.initial);
 
   const reads = {
     pending_len: (cx) => queue.pendingLen(cx),

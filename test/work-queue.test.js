@@ -20,7 +20,7 @@ function loadFixture(name) {
 
 function runFixture(fixture) {
   const ctx = new Context();
-  const queue = new WorkQueueCell(ctx, fixture.config);
+  const queue = new WorkQueueCell(ctx, fixture.initial);
   const probes = {};
   for (const [kind, read] of Object.entries({
     pending_len: (cx) => queue.pendingLen(cx),
