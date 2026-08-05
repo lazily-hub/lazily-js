@@ -56,10 +56,8 @@ jobs:
         working-directory: lazily-js
         run: npm test
 
-      # Publish as `latest`. The accidental v1.x versions that forced the old
-      # `prev` dist-tag workaround have been removed (npm now shows only the
-      # 0.4.0 / 0.5.0 / 0.6.x line, latest = 0.6.1), so the v0.x line is the
-      # canonical latest again.
+      # A rerun of an existing release is an idempotent no-op. A new tagged
+      # package version publishes to the default `latest` dist-tag.
       - name: Publish
         working-directory: lazily-js
         run: |
