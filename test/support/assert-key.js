@@ -101,11 +101,18 @@ export function assertKey(block, key, actual, where) {
  */
 export function assertKeyWith(block, key, check, where) {
   const want = fetch(block, key, "assertKeyWith");
-  mark(block, key, "A");
   if (typeof check !== "function") {
     throw new TypeError(`assertKeyWith(${label(block, key, where)}): check must be a function`);
   }
-  return check(want);
+  const result = check(want);
+  if (result && typeof result.then === "function") {
+    return result.then((value) => {
+      mark(block, key, "A");
+      return value;
+    });
+  }
+  mark(block, key, "A");
+  return result;
 }
 
 /**
