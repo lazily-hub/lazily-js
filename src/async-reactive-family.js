@@ -19,7 +19,7 @@
 //
 // Rust reference: `lazily-rs/src/async_reactive_family.rs`.
 
-import { EntryKind } from "./reactive-family.js";
+import { DependencyAvailability, EntryKind } from "./reactive-family.js";
 import { AtomicMutex } from "./thread-safe.js";
 
 export { EntryKind };
@@ -345,6 +345,25 @@ export class AsyncSourceMap extends AsyncReactiveMap {
       return;
     }
     this.getOrInsertHandle(key, () => value);
+  }
+}
+
+/** @template K,V */
+export class AsyncDependencyMap extends AsyncSourceMap {
+  /** @param {K} key @returns {DependencyAvailability<V>} */
+  observeDependency(key) {
+    const handle = this.getOrInsertHandle(key, () => DependencyAvailability.unavailable());
+    return this._ctx.get(handle);
+  }
+
+  /** @param {K} key @param {V} value */
+  publish(key, value) {
+    this.set(key, DependencyAvailability.available(value));
+  }
+
+  /** @param {K} key */
+  unpublish(key) {
+    this.set(key, DependencyAvailability.unavailable());
   }
 }
 

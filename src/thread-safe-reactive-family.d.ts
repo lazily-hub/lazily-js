@@ -1,5 +1,5 @@
 import type { CellHandle, SlotHandle } from "./reactive.js";
-import type { EntryKind } from "./reactive-family.js";
+import type { DependencyAvailability, EntryKind } from "./reactive-family.js";
 import type { ThreadSafeContext } from "./thread-safe.js";
 
 export { EntryKind } from "./reactive-family.js";
@@ -68,6 +68,15 @@ export class ThreadSafeSourceMap<K = unknown, V = unknown> extends ThreadSafeRea
   constructor(ctx: ThreadSafeContext);
   /** Set the value at `key`, inserting a new input cell if absent. Cell-only. */
   set(key: K, value: V): void;
+}
+
+export class ThreadSafeDependencyMap<K = unknown, V = unknown> extends ThreadSafeSourceMap<
+  K,
+  DependencyAvailability<V>
+> {
+  observeDependency(key: K): DependencyAvailability<V>;
+  publish(key: K, value: V): void;
+  unpublish(key: K): void;
 }
 
 /**

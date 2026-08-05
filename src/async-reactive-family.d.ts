@@ -1,5 +1,5 @@
 import type { AsyncSource, AsyncContext, AsyncComputed } from "./reactive-async.js";
-import type { EntryKind } from "./reactive-family.js";
+import type { DependencyAvailability, EntryKind } from "./reactive-family.js";
 
 export { EntryKind } from "./reactive-family.js";
 
@@ -67,6 +67,15 @@ export class AsyncSourceMap<K = unknown, V = unknown> extends AsyncReactiveMap<K
   constructor(ctx: AsyncContext);
   /** Set the value at `key`, inserting a new input cell if absent. Cell-only. */
   set(key: K, value: V): void;
+}
+
+export class AsyncDependencyMap<K = unknown, V = unknown> extends AsyncSourceMap<
+  K,
+  DependencyAvailability<V>
+> {
+  observeDependency(key: K): DependencyAvailability<V>;
+  publish(key: K, value: V): void;
+  unpublish(key: K): void;
 }
 
 /**

@@ -410,6 +410,53 @@ export class SourceMap extends ReactiveMap {
 }
 
 /**
+ * Exact-key dependency availability. Absence is a value on a stable source,
+ * never a request awaiting a membership acknowledgement.
+ * @template V
+ */
+export class DependencyAvailability {
+  /** @param {boolean} available @param {V | undefined} value */
+  constructor(available, value = undefined) {
+    this.available = available;
+    this.value = value;
+    Object.freeze(this);
+  }
+
+  /** @returns {DependencyAvailability<V>} */
+  static unavailable() {
+    return new DependencyAvailability(false);
+  }
+
+  /** @param {V} value @returns {DependencyAvailability<V>} */
+  static available(value) {
+    return new DependencyAvailability(true, value);
+  }
+}
+
+/** @template K,V */
+export class DependencyMap extends SourceMap {
+  /**
+   * Observe one stable per-key availability source, minting only that source.
+   * @param {import("./reactive.js").ComputeOps} ops
+   * @param {K} key
+   * @returns {DependencyAvailability<V>}
+   */
+  observeDependency(ops, key) {
+    return ops.get(this.entry(key, DependencyAvailability.unavailable()));
+  }
+
+  /** @param {K} key @param {V} value */
+  publish(key, value) {
+    this.set(key, DependencyAvailability.available(value));
+  }
+
+  /** @param {K} key */
+  unpublish(key) {
+    this.set(key, DependencyAvailability.unavailable());
+  }
+}
+
+/**
  * A keyed DERIVED-SLOT collection: every entry is a derived slot whose value is
  * derived. `getOrInsertWith` mints a slot on first access (lazy
  * materialization); {@link ComputedMap#materializeAll} pre-mints the keyset (eager).

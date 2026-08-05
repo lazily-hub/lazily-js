@@ -90,6 +90,26 @@ export class SourceMap<K = unknown, V = unknown> extends ReactiveMap<K, V> {
   set(key: K, value: V): void;
 }
 
+/** Exact-key availability carried by one stable per-key source. */
+export class DependencyAvailability<V = unknown> {
+  readonly available: boolean;
+  readonly value: V | undefined;
+  private constructor(available: boolean, value?: V);
+  static unavailable<V = never>(): DependencyAvailability<V>;
+  static available<V>(value: V): DependencyAvailability<V>;
+}
+
+/** A keyed family whose absent state is reactively observable. */
+export class DependencyMap<K = unknown, V = unknown> extends SourceMap<
+  K,
+  DependencyAvailability<V>
+> {
+  constructor(ctx: Context);
+  observeDependency(ops: ComputeOps, key: K): DependencyAvailability<V>;
+  publish(key: K, value: V): void;
+  unpublish(key: K): void;
+}
+
 /**
  * The derived-slot specialization of {@link ReactiveMap}: `getOrInsertWith` mints
  * a slot on first access (lazy); `materializeAll` pre-mints the keyset (eager).

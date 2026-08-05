@@ -26,7 +26,7 @@
 //
 // Rust reference: `lazily-rs/src/thread_safe_reactive_family.rs`.
 
-import { EntryKind } from "./reactive-family.js";
+import { DependencyAvailability, EntryKind } from "./reactive-family.js";
 import { AtomicMutex } from "./thread-safe.js";
 
 export { EntryKind };
@@ -347,6 +347,24 @@ export class ThreadSafeSourceMap extends ThreadSafeReactiveMap {
       return;
     }
     this.getOrInsertHandle(key, () => value);
+  }
+}
+
+/** @template K,V */
+export class ThreadSafeDependencyMap extends ThreadSafeSourceMap {
+  /** @param {K} key @returns {DependencyAvailability<V>} */
+  observeDependency(key) {
+    return this._observe(this.getOrInsertHandle(key, () => DependencyAvailability.unavailable()));
+  }
+
+  /** @param {K} key @param {V} value */
+  publish(key, value) {
+    this.set(key, DependencyAvailability.available(value));
+  }
+
+  /** @param {K} key */
+  unpublish(key) {
+    this.set(key, DependencyAvailability.unavailable());
   }
 }
 
