@@ -54,6 +54,10 @@ fi
 # listed HERE must not also appear in EXCUSED_SCENARIOS — that guard rejects it,
 # because the fixture is never opened and the gap is already reported on this line.
 KNOWN_UNCOVERED=(
+  # Register CRDTs (LWW / MV / PnCounter + the CellCrdt projection bit) are
+  # implemented here, but this binding has no canonical replay for the new
+  # registers corpus yet; the Registers coverage row is `~` until it does.
+  "collections/registers_convergence.json"
   # Reactive egress is currently Rust-only; JavaScript has no egress replay runner.
   "egress/egress_generation_fence.json"
   "egress/egress_inflight_window.json"
