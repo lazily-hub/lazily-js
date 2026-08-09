@@ -4,13 +4,19 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
-import { assertKey, assertKeyWith, excuseKey, subBlock } from "./support/assert-key.js";
+import { assertKey, assertKeyWith, subBlock } from "./support/assert-key.js";
 
 import { Context } from "../src/reactive.js";
 import { SourceMap, EntryKind, ReactiveMap, ComputedMap } from "../src/reactive-family.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const specMaterialization = join(here, "..", "..", "lazily-spec", "conformance", "materialization");
+// The canonical sibling, overridable by the SAME env var the three conformance
+// guard scripts already read (`LAZILY_SPEC_CONFORMANCE_DIR`). Without it the
+// guards and the suite can be pointed at two different corpora, and a
+// corpus-perturbation check cannot reach the runner at all.
+const specConformance =
+  process.env.LAZILY_SPEC_CONFORMANCE_DIR ?? join(here, "..", "..", "lazily-spec", "conformance");
+const specMaterialization = join(specConformance, "materialization");
 
 function loadFixture(name) {
   const path = join(specMaterialization, name);
@@ -46,6 +52,37 @@ function eagerSlotMap(ctx, keys, factory) {
   return map;
 }
 
+// `default_mode` (clause default_mode_eager) — the fixture's value SELECTS THE
+// BUILD, and what is asserted is behavioural: a map built the way the fixture
+// names its default is fully materialized at build time.
+//
+// Having no mode flag to read back is NOT a reason to excuse the key: lazily-cpp
+// and lazily-cs have no flag either and both assert the behaviour. Nor is
+// comparing the string to a hardcoded `"eager"` an assertion — that reddens on a
+// corpus flip while saying nothing about the library, so an eager build that
+// materialized nothing would still pass it (#lzconsumednotasserted). Read the
+// string, DISPATCH on it, and count what the resulting map holds before any read.
+//
+// An unknown strategy is a hard failure, never a skip: a corpus that grows a
+// third one must reach a runner that models it.
+function computedMapPresentAtBuild(ctx, mode, keys, factory) {
+  if (mode === "eager") return eagerSlotMap(ctx, keys, factory).presentCount();
+  // Every entry of these two fixtures is a derived computed, so a map built the
+  // lazy way holds nothing at all until something reads it.
+  if (mode === "lazy") return new ComputedMap(ctx).presentCount();
+  throw new TypeError(`unknown default_mode ${JSON.stringify(mode)}`);
+}
+
+function assertDefaultModeMaterializesAtBuild(expected, keys, factory) {
+  assertKeyWith(expected, "default_mode", (mode) => {
+    assert.equal(
+      computedMapPresentAtBuild(new Context(), mode, keys, factory),
+      keys.length,
+      `a map built the fixture's default way (${mode}) is materialized at build`,
+    );
+  });
+}
+
 // --- conformance: observational_transparency.json --------------------------
 test("ComputedMap materialization conformance: observational_transparency.json", () => {
   const fixture = loadFixture("observational_transparency.json");
@@ -53,21 +90,9 @@ test("ComputedMap materialization conformance: observational_transparency.json",
   const keys = Object.keys(spec.val);
   const factory = (k) => spec.val[k];
 
-  // default_mode_eager: eager is the default materialization strategy.
-  excuseKey(
-    expected,
-    "default_mode",
-    "materialization mode is not a value this binding can report: eager is the " +
-      "pre-mint loop (materializeAll) and lazy is mint-on-access, so there is no " +
-      "mode flag to read back. The key selects which construction this runner " +
-      "replays as the default; the behaviour it selects is asserted through " +
-      "eager_present, lazy_present_at_build and lazy_present_after_reads.",
-  );
-  assert.equal(
-    expected.default_mode,
-    "eager",
-    "runner models the eager default only — a corpus that changes it needs a new path",
-  );
+  // default_mode_eager: a map built the fixture's default way is materialized at
+  // build (the string selects the build — see the dispatch above).
+  assertDefaultModeMaterializesAtBuild(expected, keys, factory);
 
   const ctx = new Context();
   const eager = eagerSlotMap(ctx, keys, factory);
@@ -113,20 +138,8 @@ test("ComputedMap materialization conformance: deferral_not_deallocation.json", 
   const keys = Object.keys(spec.val);
   const factory = (k) => spec.val[k];
 
-  excuseKey(
-    expected,
-    "default_mode",
-    "materialization mode is not a value this binding can report: eager is the " +
-      "pre-mint loop (materializeAll) and lazy is mint-on-access, so there is no " +
-      "mode flag to read back. The key selects which construction this runner " +
-      "replays as the default; the behaviour it selects is asserted through " +
-      "eager_present, lazy_present_at_build and lazy_present_after_reads.",
-  );
-  assert.equal(
-    expected.default_mode,
-    "eager",
-    "runner models the eager default only — a corpus that changes it needs a new path",
-  );
+  // default_mode_eager: same behavioural fact, this fixture's keyset.
+  assertDefaultModeMaterializesAtBuild(expected, keys, factory);
 
   const ctx = new Context();
   const eager = eagerSlotMap(ctx, keys, factory);
@@ -186,20 +199,24 @@ test("materialization conformance: entry_kind_orthogonal_to_mode.json", () => {
   // entries into both buckets rather than dumping everything into one.
   assert.ok(cellKeys.length > 0, "fixture has source entries");
   assert.ok(slotKeys.length > 0, "fixture has computed entries");
-  excuseKey(
-    expected,
-    "default_mode",
-    "materialization mode is not a value this binding can report: eager is the " +
-      "pre-mint loop (materializeAll) and lazy is mint-on-access, so there is no " +
-      "mode flag to read back. The key selects which construction this runner " +
-      "replays as the default; the behaviour it selects is asserted through " +
-      "eager_present, lazy_present_at_build and lazy_present_after_reads.",
-  );
-  assert.equal(
-    expected.default_mode,
-    "eager",
-    "runner models the eager default only — a corpus that changes it needs a new path",
-  );
+  // default_mode_eager with the entry-kind split: source entries are present at
+  // build under EVERY strategy, computed entries only under eager. So a map built
+  // the fixture's default way holds every declared entry — four under `eager`,
+  // and only the two sources under `lazy`, which is why this arm reddens on a
+  // corpus flip as well as on a broken eager build.
+  assertKeyWith(expected, "default_mode", (mode) => {
+    const ctx = new Context();
+    const cells = new SourceMap(ctx);
+    for (const k of cellKeys) cells.entry(k, lookup(k));
+    const slots = new ComputedMap(ctx);
+    if (mode === "eager") slots.materializeAll(slotKeys, lookup);
+    else if (mode !== "lazy") throw new TypeError(`unknown default_mode ${JSON.stringify(mode)}`);
+    assert.equal(
+      cells.presentCount() + slots.presentCount(),
+      cellKeys.length + slotKeys.length,
+      `a mixed-kind map built the fixture's default way (${mode}) is materialized at build`,
+    );
+  });
 
   // Eager build: every entry present (cells + slots).
   const ctxE = new Context();

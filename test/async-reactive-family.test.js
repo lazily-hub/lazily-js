@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
-import { assertKey, assertKeyWith, excuseKey, subBlock } from "./support/assert-key.js";
+import { assertKey, assertKeyWith, subBlock } from "./support/assert-key.js";
 
 import { AsyncContext } from "../src/reactive-async.js";
 import {
@@ -15,7 +15,11 @@ import {
 } from "../src/async-reactive-family.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const specMaterialization = join(here, "..", "..", "lazily-spec", "conformance", "materialization");
+// Overridable by the SAME env var the three conformance guard scripts read, so a
+// corpus-perturbation check can reach this runner (see reactive-family.test.js).
+const specConformance =
+  process.env.LAZILY_SPEC_CONFORMANCE_DIR ?? join(here, "..", "..", "lazily-spec", "conformance");
+const specMaterialization = join(specConformance, "materialization");
 
 function loadFixture(name) {
   const path = join(specMaterialization, name);
@@ -48,6 +52,33 @@ function eagerSlotMap(ctx, keys, factory) {
   return map;
 }
 
+// `default_mode` (clause default_mode_eager) on the ASYNC plane, asserted on its
+// OWN context rather than deferred to the sync runner — a construction that is
+// correct synchronously can be broken asynchronously, which is why this plane has
+// its own runner at all.
+//
+// The fixture's value SELECTS THE BUILD; the fact asserted is that a map built
+// the way the fixture names its default is fully materialized at build time. The
+// dispatch chooses the construction and nothing else: the comparison is against
+// EVERY declared key, unconditionally. Asserting "what this mode implies" instead
+// (lazy ⇒ nothing present) would be a tautology that stays green on a corpus flip
+// and proves nothing.
+function computedMapPresentAtBuild(ctx, mode, keys, factory) {
+  if (mode === "eager") return eagerSlotMap(ctx, keys, factory).presentCount();
+  if (mode === "lazy") return new AsyncComputedMap(ctx).presentCount();
+  throw new TypeError(`unknown default_mode ${JSON.stringify(mode)}`);
+}
+
+function assertDefaultModeMaterializesAtBuild(expected, keys, factory) {
+  assertKeyWith(expected, "default_mode", (mode) => {
+    assert.equal(
+      computedMapPresentAtBuild(new AsyncContext(), mode, keys, factory),
+      keys.length,
+      `an async map built the fixture's default way (${mode}) is materialized at build`,
+    );
+  });
+}
+
 // --- conformance replayed through the ASYNC ComputedMap (eventual transparency) --
 // A derived slot observes as `undefined` until driven; `resolve` awaits the
 // canonical value. Once resolved, eager ≡ lazy — the AsyncMaterialization proof.
@@ -57,20 +88,7 @@ test("async ComputedMap conformance: observational_transparency.json", async () 
   const keys = Object.keys(spec.val);
   const factory = (k) => spec.val[k];
 
-  excuseKey(
-    expected,
-    "default_mode",
-    "materialization mode is not a value this binding can report: eager is the " +
-      "pre-mint loop (materializeAll) and lazy is mint-on-access, so there is no " +
-      "mode flag to read back. The key selects which construction this runner " +
-      "replays as the default; the behaviour it selects is asserted through " +
-      "eager_present, lazy_present_at_build and lazy_present_after_reads.",
-  );
-  assert.equal(
-    expected.default_mode,
-    "eager",
-    "runner models the eager default only — a corpus that changes it needs a new path",
-  );
+  assertDefaultModeMaterializesAtBuild(expected, keys, factory);
 
   const ctxE = new AsyncContext();
   const eager = eagerSlotMap(ctxE, keys, factory);
@@ -113,6 +131,8 @@ test("async ComputedMap conformance: deferral_not_deallocation.json", async () =
   const { spec, expected } = fixture;
   const factory = (k) => spec.val[k];
 
+  assertDefaultModeMaterializesAtBuild(expected, Object.keys(spec.val), factory);
+
   const ctx = new AsyncContext();
   const eager = eagerSlotMap(ctx, Object.keys(spec.val), factory);
   assertKeyWith(expected, "eager_present", (want) =>
@@ -143,6 +163,23 @@ test("async conformance: entry_kind_orthogonal_to_mode.json (SourceMap + Compute
   for (const [key, entry] of Object.entries(spec.entries)) {
     (fixtureEntryKind(key, entry.kind) === EntryKind.Source ? cellKeys : slotKeys).push(key);
   }
+
+  // default_mode_eager with the entry-kind split, on the async plane's own
+  // context. Sources are present at build under every strategy, computeds only
+  // under eager, so only the eager build holds all four declared entries.
+  assertKeyWith(expected, "default_mode", (mode) => {
+    const ctx = new AsyncContext();
+    const cells = new AsyncSourceMap(ctx);
+    for (const k of cellKeys) cells.set(k, lookup(k));
+    const slots = new AsyncComputedMap(ctx);
+    if (mode === "eager") slots.materializeAll(slotKeys, lookup);
+    else if (mode !== "lazy") throw new TypeError(`unknown default_mode ${JSON.stringify(mode)}`);
+    assert.equal(
+      cells.presentCount() + slots.presentCount(),
+      cellKeys.length + slotKeys.length,
+      `a mixed-kind async map built the fixture's default way (${mode}) is materialized at build`,
+    );
+  });
 
   const ctxE = new AsyncContext();
   const eagerCells = new AsyncSourceMap(ctxE);
