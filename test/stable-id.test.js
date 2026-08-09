@@ -18,8 +18,10 @@ import {
   EDIT_THRESHOLD,
 } from "../src/stable-id.js";
 
+import { specPath } from "./spec-corpus.cjs";
+
 const here = dirname(fileURLToPath(import.meta.url));
-const specCollections = join(here, "..", "..", "lazily-spec", "conformance", "collections");
+const specCollections = specPath("collections");
 
 function loadFixture(name) {
   const path = join(specCollections, name);

@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import test from "node:test";
 
 import { ChartDef, StateChart } from "../src/statechart.js";
 
-const here = dirname(fileURLToPath(import.meta.url));
-const specStatechart = join(here, "..", "..", "lazily-spec", "conformance", "statechart");
+import { specPath } from "./spec-corpus.cjs";
+
+const specStatechart = specPath("statechart");
 
 const FIXTURES = [
   "flat_cycle.json",

@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import test from "node:test";
 
 import { assertKey, assertKeyWith, subBlock } from "./support/assert-key.js";
@@ -17,8 +16,9 @@ import {
   treeUpdateToWire,
 } from "../src/lossless-tree-crdt.js";
 
-const here = dirname(fileURLToPath(import.meta.url));
-const specDir = join(here, "..", "..", "lazily-spec", "conformance", "lossless-tree");
+import { schemasRoot, specPath } from "./spec-corpus.cjs";
+
+const specDir = specPath("lossless-tree");
 
 function loadFixture(name) {
   const path = join(specDir, name);
@@ -207,7 +207,7 @@ for (const name of [
 
 // -- Wire schema compliance: emitted TreeUpdate validates against the schema ---
 
-const schemaDir = join(here, "..", "..", "lazily-spec", "schemas");
+const schemaDir = schemasRoot;
 const loadSchema = (n) => JSON.parse(readFileSync(join(schemaDir, `${n}.json`), "utf8"));
 
 test("emitted TreeUpdate validates against lossless-tree-delta.json", () => {

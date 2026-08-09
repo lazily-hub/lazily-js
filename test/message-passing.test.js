@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import test from "node:test";
 
 import { assertKey, assertKeyWith, excuseKey, subBlock } from "./support/assert-key.js";
@@ -26,8 +25,9 @@ import {
   isTerminalCommandStatus,
 } from "../src/index.js";
 
-const here = dirname(fileURLToPath(import.meta.url));
-const fixtureDir = join(here, "..", "..", "lazily-spec", "conformance", "message-passing");
+import { specPath } from "./spec-corpus.cjs";
+
+const fixtureDir = specPath("message-passing");
 
 function fixturesPresent() {
   return existsSync(fixtureDir);

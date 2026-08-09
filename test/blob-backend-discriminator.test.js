@@ -109,8 +109,10 @@ import {
   encodeMsgpackValue,
 } from "../src/index.js";
 
+import { conformanceRoot } from "./spec-corpus.cjs";
+
 const here = dirname(fileURLToPath(import.meta.url));
-const specFixtures = join(here, "..", "..", "lazily-spec", "conformance");
+const specFixtures = conformanceRoot;
 
 const FIXTURE = "codec/blob_backend_discriminator.json";
 

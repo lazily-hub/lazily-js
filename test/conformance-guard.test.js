@@ -13,25 +13,28 @@
 //      empty dir passes `test -d` and skips every fixture in it);
 //   3. no bundled `test/conformance/` copy exists to shadow the canonical one
 //      (js carried nine such files; `crdt-tree/algebra.json` had already
-//      drifted from spec).
+//      drifted from spec);
+//   4. no runner computes the sibling path for ITSELF (#lzoverrideallrunners).
+//      Every runner resolves the corpus through `test/spec-corpus.cjs`, which is
+//      what makes `LAZILY_SPEC_CONFORMANCE_DIR` reach the whole suite rather than
+//      the three files that happened to have grown their own copy of the
+//      override. A runner that spells the sibling path itself silently opts out
+//      of every corpus-perturbation probe, so it fails here instead.
 import assert from "node:assert/strict";
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
+import { CLONE_HINT, conformanceRoot, specPath } from "./spec-corpus.cjs";
+
 const here = dirname(fileURLToPath(import.meta.url));
-const specRoot = join(here, "..", "..", "lazily-spec");
-const specConformance = join(specRoot, "conformance");
+const specConformance = conformanceRoot;
 const bundled = join(here, "conformance");
 
-const CLONE_HINT =
-  "clone the canonical sibling: " +
-  "git clone --depth 1 https://github.com/lazily-hub/lazily-spec.git ../lazily-spec";
-
 // Every `conformance/<area>` directory the suite reads. Keep in sync with the
-// `join(here, "..", "..", "lazily-spec", "conformance", <area>)` constants in
-// the test files — a missing entry here means an area can go dark unnoticed.
+// `specPath(<area>)` call sites in the test files — a missing entry here means
+// an area can go dark unnoticed.
 const AREAS = [
   "agent-doc",
   "collections",
@@ -81,7 +84,7 @@ test("every conformance area the suite reads exists and is non-empty", () => {
   const missing = [];
   const empty = [];
   for (const area of AREAS) {
-    const dir = join(specConformance, area);
+    const dir = specPath(area);
     if (!existsSync(dir) || !statSync(dir).isDirectory()) {
       missing.push(area);
       continue;
@@ -105,10 +108,50 @@ test("no bundled fixture copy shadows the canonical spec", () => {
 });
 
 test("formerly-bundled fixtures all resolve under the canonical spec", () => {
-  const unresolved = FORMERLY_BUNDLED.filter((rel) => !existsSync(join(specConformance, rel)));
+  const unresolved = FORMERLY_BUNDLED.filter((rel) => !existsSync(specPath(rel)));
   assert.deepEqual(
     unresolved,
     [],
     `fixtures no longer resolvable after de-bundling — ${CLONE_HINT}`,
+  );
+});
+
+// The corpus seam itself, and the recorder that must attribute opens relative to
+// the SAME resolved root, are the only files allowed to name the sibling.
+const CORPUS_SEAM = ["spec-corpus.cjs"];
+
+// The path segment a hand-rolled resolution has to spell, assembled rather than
+// written out so this guard does not match its own source and exempt itself.
+const SIBLING_SEGMENT = `"lazily` + `-spec"`;
+
+test("no runner computes the sibling corpus path for itself (#lzoverrideallrunners)", () => {
+  // Source text only, comments stripped: a doc comment naming `../lazily-spec`
+  // is fine and several runners carry one. What must not exist is a second
+  // resolution in CODE, which is how the override stopped at three files.
+  const offenders = [];
+  const walk = (dir) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        walk(full);
+        continue;
+      }
+      if (!/\.(c|m)?js$/.test(entry.name)) continue;
+      if (CORPUS_SEAM.includes(entry.name)) continue;
+      const code = readFileSync(full, "utf8")
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .split("\n")
+        .filter((line) => !/^\s*\/\//.test(line))
+        .join("\n");
+      if (code.includes(SIBLING_SEGMENT)) offenders.push(full);
+    }
+  };
+  walk(here);
+  assert.deepEqual(
+    offenders,
+    [],
+    "these files resolve the lazily-spec sibling themselves instead of importing " +
+      "test/spec-corpus.cjs. A per-file path is a per-file corpus: LAZILY_SPEC_CONFORMANCE_DIR " +
+      "cannot reach it, so a corpus-perturbation probe would report a vacuous green for it.",
   );
 });

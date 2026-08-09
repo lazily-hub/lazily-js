@@ -8,8 +8,10 @@ import { assertBlock } from "./support/assert-key.js";
 import { scenarios } from "./support/scenario.js";
 import { RevisionBarrier, Timeout, TimeoutOperation, Timer, TimerError } from "../src/stdlib.js";
 
+import { specPath } from "./spec-corpus.cjs";
+
 const here = dirname(fileURLToPath(import.meta.url));
-const root = join(here, "..", "..", "lazily-spec", "conformance", "stdlib");
+const root = specPath("stdlib");
 const load = (name) => {
   const source = readFileSync(join(root, name), "utf8").replace(
     /(:\s*)(\d{16,})(?=\s*[,}])/g,

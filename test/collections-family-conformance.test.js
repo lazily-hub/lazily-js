@@ -14,8 +14,6 @@
 
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 import { assertKey, assertKeyWith, subBlock } from "./support/assert-key.js";
@@ -27,20 +25,16 @@ import { SourceMap } from "../src/reactive-family.js";
 import { ThreadSafeSourceMap } from "../src/thread-safe-reactive-family.js";
 import { AsyncSourceMap } from "../src/async-reactive-family.js";
 
-const here = dirname(fileURLToPath(import.meta.url));
+import { specPath } from "./spec-corpus.cjs";
 
 const FIXTURES = ["cellmap_atomic_move.json", "cellmap_independence.json"];
 
 function loadFixture(name) {
-  for (const path of [
-    join(here, "..", "..", "lazily-spec", "conformance", "collections", name),
-    join(here, "conformance", "collections", name),
-  ]) {
-    if (existsSync(path)) {
-      return JSON.parse(readFileSync(path, "utf8"));
-    }
-  }
-  return undefined;
+  // No bundled-copy fallback: a mirrored corpus under test/ would shadow the
+  // canonical one (conformance-guard.test.js forbids it) and would silently
+  // survive a `LAZILY_SPEC_CONFORMANCE_DIR` override (#lzoverrideallrunners).
+  const path = specPath("collections", name);
+  return existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : undefined;
 }
 
 /** Order-sensitive, so an order reader's VALUE changes on a reorder. */

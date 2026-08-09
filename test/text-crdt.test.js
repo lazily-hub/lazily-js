@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import test from "node:test";
 
 import { assertKey, assertKeyWith, excuseKey, subBlock } from "./support/assert-key.js";
@@ -9,9 +8,10 @@ import { recordScenario, scenarios } from "./support/scenario.js";
 
 import { TextCrdt } from "../src/text-crdt.js";
 
-const here = dirname(fileURLToPath(import.meta.url));
-const specCollections = join(here, "..", "..", "lazily-spec", "conformance", "collections");
-const specCrdtTree = join(here, "..", "..", "lazily-spec", "conformance", "crdt-tree");
+import { specPath } from "./spec-corpus.cjs";
+
+const specCollections = specPath("collections");
+const specCrdtTree = specPath("crdt-tree");
 
 function loadFixture(name) {
   const path = join(specCollections, name);

@@ -26,8 +26,7 @@
 
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import test from "node:test";
 
 import { assertKey, proseKey, verifyProse } from "./support/assert-key.js";
@@ -49,8 +48,9 @@ import {
   decodeMsgpackValue,
 } from "../src/index.js";
 
-const here = dirname(fileURLToPath(import.meta.url));
-const specFixtures = join(here, "..", "..", "lazily-spec", "conformance");
+import { conformanceRoot } from "./spec-corpus.cjs";
+
+const specFixtures = conformanceRoot;
 
 const JSON_FIXTURE = "codec/frame_roundtrip_json.json";
 const MSGPACK_FIXTURE = "codec/frame_roundtrip_msgpack.json";

@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import test from "node:test";
 
 import { assertKey, assertKeyWith, subBlock } from "./support/assert-key.js";
@@ -9,6 +8,8 @@ import { scenarios } from "./support/scenario.js";
 
 import { CrdtSync } from "../src/index.js";
 import { CrdtPlaneRuntime } from "../src/distributed.js";
+
+import { conformanceRoot } from "./spec-corpus.cjs";
 
 // Replays the canonical lazily-spec/conformance/familysync fixture against the
 // native CrdtPlaneRuntime family layer — the language-agnostic conformance every
@@ -20,8 +21,7 @@ import { CrdtPlaneRuntime } from "../src/distributed.js";
 // adopted, a later last-writer-wins update converges, re-ingest is idempotent, and
 // a derived aggregate (count of `true` entries) converges across replicas.
 
-const here = dirname(fileURLToPath(import.meta.url));
-const specFixtures = join(here, "..", "..", "lazily-spec", "conformance");
+const specFixtures = conformanceRoot;
 
 function loadFixture(name) {
   const path = join(specFixtures, name);

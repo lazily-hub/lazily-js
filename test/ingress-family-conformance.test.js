@@ -66,6 +66,8 @@ import {
 import { KeepLatest, Sum } from "../src/merge.js";
 import { Overflow } from "../src/relay.js";
 
+import { specPath } from "./spec-corpus.cjs";
+
 const here = dirname(fileURLToPath(import.meta.url));
 const SRC = join(here, "..", "src");
 
@@ -95,14 +97,12 @@ const LEDGER = [
 // corpus loading
 // ---------------------------------------------------------------------------
 
+// No bundled-copy fallback: a mirrored corpus under test/ would shadow the
+// canonical one (conformance-guard.test.js forbids it) and would silently
+// survive a `LAZILY_SPEC_CONFORMANCE_DIR` override (#lzoverrideallrunners).
 function fixtureDir() {
-  for (const candidate of [
-    join(here, "..", "..", "lazily-spec", "conformance", "ingress"),
-    join(here, "conformance", "ingress"),
-  ]) {
-    if (existsSync(candidate)) return candidate;
-  }
-  return undefined;
+  const candidate = specPath("ingress");
+  return existsSync(candidate) ? candidate : undefined;
 }
 
 function loadFixture(name) {

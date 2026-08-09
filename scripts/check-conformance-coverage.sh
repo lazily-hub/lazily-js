@@ -18,7 +18,23 @@
 # that state is exactly the vacuous green this guard exists to prevent.
 set -euo pipefail
 
-SPEC_DIR="${LAZILY_SPEC_CONFORMANCE_DIR:-../lazily-spec/conformance}"
+# `-` and not `:-`: an EMPTY value is a set value, i.e. a broken path rather than
+# an absent one, and must reach the fail-closed branch below (#lzoverrideallrunners).
+SPEC_DIR="${LAZILY_SPEC_CONFORMANCE_DIR-../lazily-spec/conformance}"
+SPEC_DIR_OVERRIDDEN="${LAZILY_SPEC_CONFORMANCE_DIR+yes}"
+
+# An EXPLICIT override that cannot be read is never a skip and never a fallback.
+# The whole point of the override is to point the suite and these guards at one
+# scratch corpus; silently reverting to the canonical sibling would audit the
+# UNPERTURBED corpus and report a green that proves nothing. This branch runs
+# before the local-skip branch so the skip cannot swallow it.
+if [ -n "$SPEC_DIR_OVERRIDDEN" ] && [ ! -d "$SPEC_DIR" ]; then
+  echo "ERROR: LAZILY_SPEC_CONFORMANCE_DIR is set to '$SPEC_DIR' but that is not a" >&2
+  echo "       readable directory. An explicit corpus override must fail closed:" >&2
+  echo "       falling back to the canonical sibling would audit a corpus nobody asked" >&2
+  echo "       for, and skipping would report OK over zero fixtures (#lzvacuousrun)." >&2
+  exit 1
+fi
 
 # A missing corpus is a legitimate local state (no sibling checkout) and an
 # illegitimate CI state (#lzvacuousrun). Skipping under CI is the vacuous green

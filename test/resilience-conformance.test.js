@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import test from "node:test";
 
 import { assertKey, subBlock } from "./support/assert-key.js";
@@ -14,8 +13,9 @@ import {
   TimeoutCell,
 } from "../src/resilience.js";
 
-const here = dirname(fileURLToPath(import.meta.url));
-const specDir = join(here, "..", "..", "lazily-spec", "conformance", "resilience");
+import { specPath } from "./spec-corpus.cjs";
+
+const specDir = specPath("resilience");
 
 function loadFixture(name) {
   const path = join(specDir, name);

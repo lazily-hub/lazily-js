@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import test from "node:test";
 
 import { assertKey, assertKeyWith, subBlock } from "./support/assert-key.js";
@@ -14,12 +13,13 @@ import {
   EntryKind,
 } from "../src/async-reactive-family.js";
 
-const here = dirname(fileURLToPath(import.meta.url));
-// Overridable by the SAME env var the three conformance guard scripts read, so a
-// corpus-perturbation check can reach this runner (see reactive-family.test.js).
-const specConformance =
-  process.env.LAZILY_SPEC_CONFORMANCE_DIR ?? join(here, "..", "..", "lazily-spec", "conformance");
-const specMaterialization = join(specConformance, "materialization");
+import { specPath } from "./spec-corpus.cjs";
+
+// The corpus root — and the `LAZILY_SPEC_CONFORMANCE_DIR` override — comes from
+// the ONE seam every runner shares (test/spec-corpus.cjs, #lzoverrideallrunners).
+// This file used to compute both for itself, which is how the rest of the suite
+// stayed unreachable by a corpus-perturbation probe.
+const specMaterialization = specPath("materialization");
 
 function loadFixture(name) {
   const path = join(specMaterialization, name);

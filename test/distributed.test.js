@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import test from "node:test";
 
 import { assertKey, assertKeyWith } from "./support/assert-key.js";
@@ -26,8 +25,9 @@ import {
   WebRtcTransportError,
 } from "../src/distributed.js";
 
-const here = dirname(fileURLToPath(import.meta.url));
-const specFixtures = join(here, "..", "..", "lazily-spec", "conformance");
+import { conformanceRoot } from "./spec-corpus.cjs";
+
+const specFixtures = conformanceRoot;
 
 function loadFixture(name) {
   const path = join(specFixtures, name);

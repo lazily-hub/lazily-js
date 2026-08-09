@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import test from "node:test";
 
 import { assertKey, assertKeyWith, subBlock } from "./support/assert-key.js";
@@ -9,8 +8,9 @@ import { assertKey, assertKeyWith, subBlock } from "./support/assert-key.js";
 import { Context } from "../src/reactive.js";
 import { CronCell, DeadlineCell, IntervalCell, TimerCell } from "../src/temporal.js";
 
-const here = dirname(fileURLToPath(import.meta.url));
-const specTemporal = join(here, "..", "..", "lazily-spec", "conformance", "temporal");
+import { specPath } from "./spec-corpus.cjs";
+
+const specTemporal = specPath("temporal");
 
 function loadFixture(name) {
   const path = join(specTemporal, name);

@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import test from "node:test";
 import { GraphView } from "../src/graph-view.js";
 import {
@@ -18,11 +17,12 @@ import {
   IpcValueInline,
 } from "../src/index.js";
 
+import { specPath } from "./spec-corpus.cjs";
+
 const bytes = (s) => [...Buffer.from(s, "utf8")];
 const str = (b) => Buffer.from(b).toString("utf8");
 
-const here = dirname(fileURLToPath(import.meta.url));
-const fixtureDir = join(here, "..", "..", "lazily-spec", "conformance", "agent-doc");
+const fixtureDir = specPath("agent-doc");
 const fixturesPresent = existsSync(join(fixtureDir, "snapshot_agent_doc_state.json"));
 const loadFixture = (name) => JSON.parse(readFileSync(join(fixtureDir, name), "utf8"));
 const phaseOf = (replica, id) => JSON.parse(str(replica.node(id).payload)).phase;

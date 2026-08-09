@@ -8,8 +8,7 @@ import {
   appendFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import test from "node:test";
 
 import { assertKey, assertKeyWith } from "./support/assert-key.js";
@@ -35,13 +34,14 @@ import {
   wireStampGreater,
 } from "../src/index.js";
 
+import { specPath } from "./spec-corpus.cjs";
+
 // Replays the canonical lazily-spec/conformance/reliable-sync fixtures against the
 // native ResyncCoordinator / InMemoryOutbox / OrSet / WireLwwRegister, and
 // round-trips the two control frames (ResyncRequest / OutboxAck) through JSON.
 // Cross-language pin with lazily-rs / lazily-kt; backstop lazily-formal ReliableSync.lean.
 
-const here = dirname(fileURLToPath(import.meta.url));
-const specDir = join(here, "..", "..", "lazily-spec", "conformance", "reliable-sync");
+const specDir = specPath("reliable-sync");
 
 function loadFixture(name) {
   const path = join(specDir, name);

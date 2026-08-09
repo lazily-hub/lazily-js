@@ -42,29 +42,18 @@
 // caller can assert the ledger exactly; nothing here calls `t.skip()`, because a
 // node:test skip would both hide the reason and trip the `skipped 0` gate in CI.
 import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 
 import { assertKeyWith, excuseKey, subBlock } from "../support/assert-key.js";
 import { recordScenario } from "../support/scenario.js";
 import { ComputeFailedError, DisposedNodeError } from "./models.js";
 
-const here = dirname(fileURLToPath(import.meta.url));
+import { CLONE_HINT, specPath } from "../spec-corpus.cjs";
 
-/** The single sibling-relative path constant. Mirrors `SPEC_DIR` in lazily-rs. */
-export const SPEC_DIR = join(
-  here,
-  "..",
-  "..",
-  "..",
-  "lazily-spec",
-  "conformance",
-  "reactive-graph",
-);
+/** Resolved through the ONE corpus seam, so `LAZILY_SPEC_CONFORMANCE_DIR` reaches this runner too. */
+export const SPEC_DIR = specPath("reactive-graph");
 
-export const CLONE_HINT =
-  "clone the canonical sibling: " +
-  "git clone --depth 1 https://github.com/lazily-hub/lazily-spec.git ../lazily-spec";
+export { CLONE_HINT };
 
 /**
  * The canonical fixture set, asserted against the directory listing so a fixture

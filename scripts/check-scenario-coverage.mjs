@@ -39,6 +39,7 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
+const SPEC_DIR_OVERRIDDEN = process.env.LAZILY_SPEC_CONFORMANCE_DIR !== undefined;
 const SPEC_DIR = process.env.LAZILY_SPEC_CONFORMANCE_DIR ?? "../lazily-spec/conformance";
 const SCENARIO_MANIFEST =
   process.env.LAZILY_CONFORMANCE_SCENARIO_MANIFEST ?? "build/conformance-scenarios.txt";
@@ -96,6 +97,19 @@ function fail(lines) {
 // already treated below: missing evidence, not evidence of absence. Locally it
 // stays a skip, because a contributor without the sibling is not making a false
 // claim.
+// An EXPLICIT override that cannot be read is never a skip and never a fallback
+// (#lzoverrideallrunners). This branch runs before the local-skip branch so the
+// skip cannot swallow it.
+if (SPEC_DIR_OVERRIDDEN && !existsSync(SPEC_DIR)) {
+  fail([
+    `ERROR: LAZILY_SPEC_CONFORMANCE_DIR is set to '${SPEC_DIR}' but that is not a`,
+    "       readable directory. An explicit corpus override must fail closed: falling",
+    "       back to the canonical sibling would audit a corpus nobody asked for, and",
+    "       skipping would report OK over zero scenarios (#lzvacuousrun).",
+  ]);
+  process.exit(1);
+}
+
 if (!existsSync(SPEC_DIR)) {
   if (process.env.CI) {
     fail([

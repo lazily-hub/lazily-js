@@ -39,6 +39,8 @@ import {
 } from "../src/thread-safe-queue.js";
 import { AsyncQueueCell, AsyncTopicCell, AsyncWorkQueueCell } from "../src/async-queue.js";
 
+import { specPath } from "./spec-corpus.cjs";
+
 const here = dirname(fileURLToPath(import.meta.url));
 const SRC = join(here, "..", "src");
 
@@ -124,14 +126,12 @@ function sources() {
   return out;
 }
 
+// No bundled-copy fallback: a mirrored corpus under test/ would shadow the
+// canonical one (conformance-guard.test.js forbids it) and would silently
+// survive a `LAZILY_SPEC_CONFORMANCE_DIR` override (#lzoverrideallrunners).
 function fixtureDir() {
-  for (const candidate of [
-    join(here, "..", "..", "lazily-spec", "conformance", "collections"),
-    join(here, "conformance", "collections"),
-  ]) {
-    if (existsSync(candidate)) return candidate;
-  }
-  return undefined;
+  const candidate = specPath("collections");
+  return existsSync(candidate) ? candidate : undefined;
 }
 
 function loadFixture(name) {

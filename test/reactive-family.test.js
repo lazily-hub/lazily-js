@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import test from "node:test";
 
 import { assertKey, assertKeyWith, subBlock } from "./support/assert-key.js";
@@ -9,14 +8,13 @@ import { assertKey, assertKeyWith, subBlock } from "./support/assert-key.js";
 import { Context } from "../src/reactive.js";
 import { SourceMap, EntryKind, ReactiveMap, ComputedMap } from "../src/reactive-family.js";
 
-const here = dirname(fileURLToPath(import.meta.url));
-// The canonical sibling, overridable by the SAME env var the three conformance
-// guard scripts already read (`LAZILY_SPEC_CONFORMANCE_DIR`). Without it the
-// guards and the suite can be pointed at two different corpora, and a
-// corpus-perturbation check cannot reach the runner at all.
-const specConformance =
-  process.env.LAZILY_SPEC_CONFORMANCE_DIR ?? join(here, "..", "..", "lazily-spec", "conformance");
-const specMaterialization = join(specConformance, "materialization");
+import { specPath } from "./spec-corpus.cjs";
+
+// The corpus root — and the `LAZILY_SPEC_CONFORMANCE_DIR` override — comes from
+// the ONE seam every runner shares (test/spec-corpus.cjs, #lzoverrideallrunners).
+// This file used to compute both for itself, which is how the rest of the suite
+// stayed unreachable by a corpus-perturbation probe.
+const specMaterialization = specPath("materialization");
 
 function loadFixture(name) {
   const path = join(specMaterialization, name);

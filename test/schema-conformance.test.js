@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import test from "node:test";
 
 import Ajv2020 from "ajv/dist/2020.js";
@@ -25,8 +24,9 @@ import {
   WireStamp,
 } from "../src/index.js";
 
-const here = dirname(fileURLToPath(import.meta.url));
-const schemaDir = join(here, "..", "..", "lazily-spec", "schemas");
+import { schemasRoot } from "./spec-corpus.cjs";
+
+const schemaDir = schemasRoot;
 
 function loadSchema(name) {
   return JSON.parse(readFileSync(join(schemaDir, `${name}.json`), "utf8"));

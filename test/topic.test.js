@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import test from "node:test";
 
 import { assertKey, subBlock } from "./support/assert-key.js";
@@ -9,8 +8,9 @@ import { assertKey, subBlock } from "./support/assert-key.js";
 import { TopicCell, TopicDurability } from "../src/queue.js";
 import { Context } from "../src/reactive.js";
 
-const here = dirname(fileURLToPath(import.meta.url));
-const specCollections = join(here, "..", "..", "lazily-spec", "conformance", "collections");
+import { specPath } from "./spec-corpus.cjs";
+
+const specCollections = specPath("collections");
 
 function loadFixture(name) {
   const path = join(specCollections, name);

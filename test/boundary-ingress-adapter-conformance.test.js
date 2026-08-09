@@ -2,18 +2,17 @@
 
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 import { assertKey } from "./support/assert-key.js";
 import { scenarios } from "./support/scenario.js";
 
-const here = dirname(fileURLToPath(import.meta.url));
+import { specPath } from "./spec-corpus.cjs";
+
 const FIXTURE = "ingress/boundary_ingress_adapter.json";
 
 function loadFixture() {
-  const path = join(here, "..", "..", "lazily-spec", "conformance", FIXTURE);
+  const path = specPath(FIXTURE);
   assert.ok(existsSync(path), `missing canonical spec fixture ${path}`);
   return JSON.parse(readFileSync(path, "utf8"));
 }

@@ -1,7 +1,5 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 import { assertKey } from "./support/assert-key.js";
@@ -13,20 +11,11 @@ import { DependencyAvailability, DependencyMap } from "../src/reactive-family.js
 import { ThreadSafeContext } from "../src/thread-safe.js";
 import { ThreadSafeDependencyMap } from "../src/thread-safe-reactive-family.js";
 
+import { specPath } from "./spec-corpus.cjs";
+
 test("exact-key availability is a direct reactive value transition", () => {
   const fixture = JSON.parse(
-    readFileSync(
-      join(
-        dirname(fileURLToPath(import.meta.url)),
-        "..",
-        "..",
-        "lazily-spec",
-        "conformance",
-        "collections",
-        "dependency_reactive_availability.json",
-      ),
-      "utf8",
-    ),
+    readFileSync(specPath("collections", "dependency_reactive_availability.json"), "utf8"),
   );
   const ctx = new Context();
   const dependencies = new DependencyMap(ctx);

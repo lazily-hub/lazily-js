@@ -87,7 +87,15 @@ const blockOut = process.env.LAZILY_CONFORMANCE_BLOCK_MANIFEST;
 const walkOut = keyOut || scenarioOut || blockOut;
 
 if (out || walkOut) {
-  const marker = `${path.sep}lazily-spec${path.sep}conformance${path.sep}`;
+  // Attribution is relative to the RESOLVED corpus root, never to a hardcoded
+  // "lazily-spec/conformance" substring (#lzoverrideallrunners). With the
+  // substring, pointing the suite at a scratch copy whose path does not contain
+  // it stopped recording opens entirely — every guard then reported OK over an
+  // empty ledger, which is the vacuous green the whole ladder exists to
+  // prevent. `test/spec-corpus.cjs` is the single seam the runners resolve
+  // through, so recorder and suite cannot disagree about which corpus is live.
+  const corpusRoot = require("../spec-corpus.cjs").conformanceRoot;
+  const marker = corpusRoot.endsWith(path.sep) ? corpusRoot : corpusRoot + path.sep;
   const opened = new Set();
   // `fixture\tblock\tkey\tP` present, `...\tR` read, `...\tA` asserted,
   // `...\tX\t<reason>` excused, `...\tD\t<names>` discharged as prose,
@@ -151,13 +159,15 @@ if (out || walkOut) {
 
   const relId = (file) => {
     try {
-      const p = typeof file === "string" ? file : file?.toString?.();
-      if (!p || !p.includes(marker)) return null;
+      const raw = typeof file === "string" ? file : file?.toString?.();
+      if (!raw) return null;
+      // The corpus root is absolute and normalized, so the prefix test is
+      // anchored rather than a substring search: a path that merely CONTAINS
+      // the root's spelling somewhere in the middle is not a corpus read.
+      const p = path.isAbsolute(raw) ? path.normalize(raw) : path.resolve(raw);
+      if (!p.startsWith(marker)) return null;
       // Store the id relative to the conformance root, matching the corpus listing.
-      return p
-        .slice(p.indexOf(marker) + marker.length)
-        .split(path.sep)
-        .join("/");
+      return p.slice(marker.length).split(path.sep).join("/");
     } catch {
       // Never let bookkeeping break a test run.
       return null;

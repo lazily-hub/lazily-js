@@ -1,8 +1,7 @@
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import test from "node:test";
-import { fileURLToPath } from "node:url";
 
 import { assertKey } from "./support/assert-key.js";
 import { scenarios } from "./support/scenario.js";
@@ -19,13 +18,14 @@ import {
   mergeCell,
 } from "../src/merge.js";
 
+import { ENV_VAR, overrideActive, specPath } from "./spec-corpus.cjs";
+
 // Phase 1 law-tests for the merge algebra (#relaycell). Every policy MUST be
 // associative; commutativity/idempotency are asserted per flag. Also proves
 // converged-state determinism (the doc §8 mandate for the stackless JS binding)
 // by replaying the cross-language mergecell_algebra.json fixture.
 
-const here = dirname(fileURLToPath(import.meta.url));
-const specCollections = join(here, "..", "..", "lazily-spec", "conformance", "collections");
+const specCollections = specPath("collections");
 
 const POLICIES = [KeepLatest, Sum, Max, SetUnion, RawFifo];
 
@@ -139,6 +139,15 @@ test("asSource adapts a plain cell to the Source shape (merge == replace)", () =
 test("mergecell_algebra.json fixture: cross-language converged determinism", (t) => {
   const path = join(specCollections, "mergecell_algebra.json");
   if (!existsSync(path)) {
+    // Absent sibling is a legitimate local state and stays a skip. An explicit
+    // `LAZILY_SPEC_CONFORMANCE_DIR` is not: a corpus someone deliberately
+    // pointed the suite at must fail loudly rather than convert a red into a
+    // green-looking skip (#lzoverrideallrunners).
+    assert.ok(
+      !overrideActive,
+      `${ENV_VAR} is set, but ${path} is missing from that corpus — an explicit ` +
+        "corpus override must not degrade into a skip.",
+    );
     t.skip("lazily-spec fixture not present as sibling");
     return;
   }

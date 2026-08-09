@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import test from "node:test";
 
 import { assertKey, assertKeyWith } from "./support/assert-key.js";
@@ -43,9 +42,9 @@ import {
   WireStamp,
 } from "../src/index.js";
 
-const here = dirname(fileURLToPath(import.meta.url));
-const specRoot = join(here, "..", "..", "lazily-spec");
-const specFixtures = join(specRoot, "conformance");
+import { conformanceRoot, schemaPath } from "./spec-corpus.cjs";
+
+const specFixtures = conformanceRoot;
 
 function loadFixture(name) {
   const path = join(specFixtures, name);
@@ -66,7 +65,7 @@ function loadAgentDocVocabulary() {
   if (agentDocTypeTags !== null) {
     return agentDocTypeTags;
   }
-  const path = join(specRoot, "schemas", "agent-doc-state.json");
+  const path = schemaPath("agent-doc-state.json");
   const schema = JSON.parse(readFileSync(path, "utf8"));
   agentDocTypeTags = new Set(schema?.$defs?.TypeTag?.enum ?? []);
   return agentDocTypeTags;
