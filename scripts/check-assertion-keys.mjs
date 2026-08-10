@@ -435,28 +435,33 @@ if (problems > 0) {
 // prints OK. That is the same hole MIN_FIXTURES and MIN_SCENARIOS close one and
 // two rungs up; this is the assertion-key rung of the same ladder.
 //
-// 546 = calibrated below the observed run, which asserts 573 of 612 present keys.
-// Deliberately set under the real number so ordinary corpus churn does not trip
-// it, and far enough above zero that a detached recorder cannot slip through.
-// (Was 520 against an observed 547/575; codec/blob_backend_discriminator.json
-// added 15 asserted keys, #lzblobbackendstrict, so the floor moved by 15 and
-// kept the same margin. Was 535 against an observed 562/596; that fixture's v2
-// hardening replaced `expect.epoch` with `frame_epoch` + `blob_epoch` and added
-// `rejection_kind`, `rejection_is_decode_error`, `backend_forms` and
-// `rejection_kinds`, so the observed run goes to 567 and the floor moves by the
-// same five. Was 540 against an observed 567/605; #lzprosekeyconvention added
-// `assertions.prose` to five codec fixtures — each one asserted by the
-// `verifyProse` comparison — unhid `note` in the two frame_roundtrip fixtures,
-// and turned `nodeid_exact_range.json`'s `outcomes` from an excuse into a
-// key-set assertion, so the observed run goes to 573/612 and the floor moves by
-// the same six. Was 546 against an observed 573/612; #lzsubblockkeyset bound
-// every object-valued assertion key's CONTENTS to a child tracker, so the ~124
-// object-valued keys this suite consumes now contribute their own sub-keys to
-// the population — the observed run goes to 970/1011 and the floor moves with
-// it, keeping the same margin.) NEVER lower this to make the gate green: a drop
-// means keys stopped being reached or stopped being asserted, and that is the
-// finding, not the floor.
-const MIN_ASSERTED_KEYS = Number(process.env.MIN_ASSERTED_KEYS ?? "940");
+// PINNED TO REALITY (#lzscenariofloordrift). This floor equals what CI actually
+// asserts, with NO margin: the run that pinned it ASSERTED exactly 1006 keys of
+// 1041 present, and 1007 fails.
+//
+// It replaces the convention this comment used to record — "that fixture added
+// 15 asserted keys, so the floor moved by 15 and kept the same margin",
+// deliberately "calibrated below the observed run ... so ordinary corpus churn
+// does not trip it". Raising by the delta and preserving the margin means the
+// gap never closes, only widens; here it had reached 66. A floor 66 below
+// reality tolerates 66 assertions silently ceasing to fire while this guard
+// still prints OK, which is precisely the detachment the floor exists to catch.
+//
+// The denominator being larger than the floor is not a reason to keep slack.
+// Every key that legitimately does not assert is already accounted for BY NAME
+// — excused in-runner at its call site, discharged as prose against a verified
+// fixture, or covered by a named entry in the static allowlist above — and each
+// of those names is itself gated against going stale. A numeric margin stacked
+// on top of that named accounting guards nothing; it only hides drift.
+//
+// When the corpus moves, re-derive from the gate's own output instead of adding
+// a delta: run `make check`, read the "assertion-key consumption OK: <n>/..."
+// line, set this to that <n>, then prove it exact by setting it to <n>+1 and
+// watching this guard fail. A floor you never watched fail is a floor you have
+// not verified. NEVER lower it to make the gate green: a drop means keys stopped
+// being reached or stopped being asserted, and that is the finding, not the
+// floor.
+const MIN_ASSERTED_KEYS = Number(process.env.MIN_ASSERTED_KEYS ?? "1006");
 if (present.size === 0) {
   fail([
     "ERROR: the manifest recorded ZERO tracked assertion keys.",
@@ -483,11 +488,36 @@ if (consumed < MIN_ASSERTED_KEYS) {
 // and this guard prints OK having examined none of them — the exact vacuity
 // shape MIN_ASSERTED_KEYS and MIN_BLOCKS close on the rungs either side.
 //
-// 130 = calibrated below the observed run, which declares 151 object-valued keys
-// across the corpus this suite replays. NEVER lower it to make the gate green: a
-// drop means fixtures stopped being opened or the recorder stopped declaring the
-// shape, and that is the finding.
-const MIN_OBJECT_VALUED_KEYS = Number(process.env.MIN_OBJECT_VALUED_KEYS ?? "130");
+// PINNED TO REALITY (#lzscenariofloordrift). Read what this floor is ON before
+// moving it: its subject is the DECLARED population — `objectValued.size`, the
+// DENOMINATOR of the OK line below — not the key-set-checked numerator beside
+// it. That is deliberate, because the vacuity described above is a declaration
+// that stops being emitted, and it is the denominator that collapses when it
+// does. The OK line prints "floor N" next to "<checked>/<declared>", which reads
+// as though it bounds the left-hand number; it does not.
+//
+// So the floor equals what CI actually declares, with NO margin: the run that
+// pinned it DECLARED exactly 206 object-valued keys (of which 196 were key-set
+// checked), and 207 fails.
+//
+// It replaces "130 = calibrated below the observed run, which declares 151
+// object-valued keys" — the same delta-and-keep-the-margin convention pinned out
+// of MIN_ASSERTED_KEYS above, and it had drifted 76 below reality here. A floor
+// 76 under tolerates 76 object-valued keys silently ceasing to be declared, and
+// every one of those takes its key-set obligation with it while this guard still
+// prints OK. The 10 declared keys that are not key-set checked are excused or
+// discharged BY NAME at their call sites, so the margin was never covering them;
+// it was covering nothing.
+//
+// When the corpus moves, re-derive from the gate's own output instead of adding
+// a delta: run `make check`, read the DENOMINATOR of the "object-valued
+// assertion key OK: <checked>/<n>" line, set this to that <n>, then prove it
+// exact by setting it to <n>+1 and watching this guard fail. A floor you never
+// watched fail is a floor you have not verified — and on this one, a floor set
+// from the numerator passes at +1 and looks verified while bounding nothing.
+// NEVER lower it to make the gate green: a drop means fixtures stopped being
+// opened or the recorder stopped declaring the shape, and that is the finding.
+const MIN_OBJECT_VALUED_KEYS = Number(process.env.MIN_OBJECT_VALUED_KEYS ?? "206");
 if (objectValued.size < MIN_OBJECT_VALUED_KEYS) {
   fail([
     `ERROR: only ${objectValued.size} assertion keys were declared OBJECT-VALUED, expected >= ${MIN_OBJECT_VALUED_KEYS}.`,
@@ -666,8 +696,8 @@ console.error(
 console.error(
   `object-valued assertion key OK: ${keySetChecked.size}/${objectValued.size} keys whose fixture value` +
     ` is a JSON OBJECT were consumed by a KEY-SET check — a deep equality, a descent into a child` +
-    ` tracker, or an explicit key-set assertion (floor ${MIN_OBJECT_VALUED_KEYS}; the rest are` +
-    ` excused or discharged with a reason)`,
+    ` tracker, or an explicit key-set assertion (floor ${MIN_OBJECT_VALUED_KEYS} on the DECLARED` +
+    ` count, the right-hand number; the rest are excused or discharged with a reason)`,
 );
 
 console.error(
