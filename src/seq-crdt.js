@@ -340,9 +340,37 @@ export class SeqCrdt {
     return count;
   }
 
-  // Deep-copy entries, mint a fresh Hlc for a new peer (stamps live in registers).
+  // Deep-copy entries onto a replica that CARRIES this clock's causal position
+  // forward under a NEW peer id (`#lzzigforkhlcpeer`, first found in lazily-zig).
+  //
+  // Both halves are load-bearing, and the constructor alone gets neither right:
+  //
+  // - CARRY THE POSITION. `new SeqCrdt(peer)` starts a fresh Hlc at (0, 0), but a
+  //   fork has already OBSERVED everything the source holds. Restart its clock and
+  //   its next local op — supplied a `nowMicros` BELOW the source's lastWall, which
+  //   is ordinary clock skew and the entire reason an HLC exists — mints a stamp
+  //   causally BEHIND state the fork already holds. LWW adopts only on `>`, so the
+  //   fork's OWN local write is then silently dropped.
+  //
+  // - DO NOT CARRY THE PEER. The peer is the stamp's final tiebreaker, so a fork
+  //   that inherited the source's peer id would mint the SAME (wall, logical, peer)
+  //   triple as the source. Neither side adopts a tie, and the two replicas diverge
+  //   permanently — the one outcome a CRDT exists to make impossible. So the copy
+  //   keeps its own fresh Hlc under the new peer and takes only the POSITION off
+  //   this clock, never the whole clock.
+  //
+  // `clone()` forks under the source's own peer and stays correct under both: it is
+  // the same replica continuing, so carrying the position is exactly right and
+  // reusing the peer is not a collision.
+  //
+  // `seqcrdt_convergence.json` cannot reach either failure — every fork in the
+  // corpus is followed by an op whose `now` exceeds the source's lastWall, so `send`
+  // takes the `now > lastWall` branch and the logical counter resets regardless of
+  // which clock the fork started from. The regression lives in test/seq-crdt.test.js.
   fork(peer) {
     const copy = new SeqCrdt(peer);
+    copy.#hlc.lastWall = this.#hlc.lastWall;
+    copy.#hlc.lastLogical = this.#hlc.lastLogical;
     for (const [id, e] of this.#entries) {
       copy.#entries.set(id, e.clone());
     }

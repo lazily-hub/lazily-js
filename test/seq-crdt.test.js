@@ -104,6 +104,53 @@ test("remove tombstone converges; merge is commutative", () => {
   assert.equal(ab.contains("b"), false);
 });
 
+test("a fork carries the source's clock forward but stamps with ITS OWN peer", () => {
+  // Two halves of one invariant, and this scenario fails on either one alone
+  // (`#lzzigforkhlcpeer`, first found and fixed in lazily-zig).
+  //
+  // CARRY THE POSITION. A fork has already OBSERVED everything the source
+  // holds, so its clock must not restart at zero. `new SeqCrdt(peer)` did
+  // exactly that, and then the fork's next local op — supplied a `now` BELOW
+  // the source's lastWall, which is ordinary clock skew and the entire reason
+  // an HLC exists — minted a stamp causally BEHIND state the fork already
+  // held. LWW adopts only on `>`, so the fork's OWN local write was silently
+  // dropped: below, b would read back 1 instead of the 99 it just wrote.
+  //
+  // DO NOT CARRY THE PEER. The peer is the stamp's final tiebreaker, so a fork
+  // that also inherited the source's peer id would mint the SAME
+  // (wall, logical, peer) triple as the source. A tie is not adopted by either
+  // side, and the replicas diverge permanently (a=55, b=99 forever) — the one
+  // outcome a CRDT exists to make impossible.
+  //
+  //   a@peer1  insertBack x=1  @ now=100  -> (100, 0, 1)
+  //   b = a.fork(2)                       -> clock at (100, 0), peer 2
+  //   b        setValue x=99   @ now=50   -> 50 <= 100, logical bumps -> (100, 1, 2)
+  //   a        setValue x=55   @ now=50   -> 50 <= 100, logical bumps -> (100, 1, 1)
+  //
+  // b's (100, 1, 2) dominates on the peer tiebreak, so both settle on 99.
+  //
+  // `seqcrdt_convergence.json` cannot reach this: every fork in the corpus is
+  // followed by an op whose `now` EXCEEDS the source's lastWall, so `send`
+  // takes the `now > lastWall` branch and the logical counter resets to 0
+  // regardless of which clock the fork started from.
+  const a = new SeqCrdt(1);
+  a.insertBack("x", 1, 100);
+  const b = a.fork(2);
+
+  b.setValue("x", 99, 50);
+  // The fork's own write, before any merge. This is the dropped-write half.
+  assert.equal(b.get("x"), 99);
+
+  a.setValue("x", 55, 50);
+  a.merge(b, 200);
+  b.merge(a, 200);
+
+  // Convergence FIRST: the replicas must agree at all before "which value won"
+  // is even a meaningful question. This is the shared-peer half.
+  assert.equal(a.get("x"), b.get("x"));
+  assert.equal(a.get("x"), 99);
+});
+
 test("gc collects stable tombstones only", () => {
   const s = new SeqCrdt(1);
   s.insertBack("a", 1, 1);
