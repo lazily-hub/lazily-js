@@ -367,7 +367,11 @@ if (problems > 0) {
 // and the margin of eight is unchanged.
 // Raised 124 -> 129 for the five negotiated-state scenarios in
 // codec/capability_handshake.json (#lzhandshakedeadfields).
-const MIN_SCENARIOS = Number(process.env.MIN_SCENARIOS ?? "129");
+// Raised 129 -> 130 for collections/textcrdt_convergence.json's seventh
+// scenario, `gc_keeps_a_tombstone_that_is_still_a_left_origin`
+// (#lzspecgcreferencedtombstone): the corpus grew by one, so the floor moves by
+// the same one and the margin is unchanged.
+const MIN_SCENARIOS = Number(process.env.MIN_SCENARIOS ?? "130");
 if (total === 0) {
   fail([
     "ERROR: ZERO scenarios were found across the opened fixtures.",
