@@ -197,11 +197,21 @@ fi
 # from "nothing was examined", so assert the magnitude explicitly before
 # reporting OK. Do not lower these to fix a red run — a drop here means the
 # corpus or the recorder shrank, which is the finding.
-# Raised 130 -> 131 when codec/blob_backend_discriminator.json landed
-# (#lzblobbackendstrict) and took the observed run from 135 to 136 opened.
-# Raised 131 -> 132 for capability-handshake negotiation
-# (#lzhandshakedeadfields), which took the observed run from 136 to 137 opened.
-MIN_FIXTURES="${MIN_FIXTURES:-132}"
+#
+# PINNED TO REALITY (#lzscenariofloordrift). This floor equals what CI actually
+# replays, with NO margin: the run that pinned it OPENED exactly 141 fixtures,
+# and 142 fails. The older convention visible in this file's history -- "the
+# observed run went from 135 to 136, so raise the floor by one and keep the
+# margin it had" -- is the bug it replaces. It only ever widens the gap, and
+# the gap had reached 9. A floor 9 below reality tolerates 9 fixtures silently
+# detaching, which is the exact failure this floor exists to catch.
+#
+# So when a change moves the count, re-derive the floor from the gate's own
+# output rather than adding a delta: run `make check`, read the "conformance
+# coverage OK: <n>/..." line, set this to that <n>, then prove it is exact by
+# temporarily setting it to <n>+1 and watching this guard fail. A floor you
+# never watched fail is a floor you have not verified.
+MIN_FIXTURES="${MIN_FIXTURES:-141}"
 if [ "$total" -eq 0 ]; then
   echo "ERROR: the corpus at $SPEC_DIR listed ZERO fixtures." >&2
   echo "       Every check above is vacuously green over an empty population." >&2

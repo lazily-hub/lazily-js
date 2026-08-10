@@ -358,20 +358,23 @@ if (problems > 0) {
 // claiming green. Do not lower MIN_SCENARIOS to fix a red run — a drop here means
 // a scenario dispatch stopped matching or the ledger detached, which is the
 // finding.
-// Raised 110 -> 118 when codec/blob_backend_discriminator.json landed
-// (#lzblobbackendstrict): its eight scenarios took the observed run from 118 to
-// 126, so the floor moves by the same eight and keeps the margin it had.
-// Raised 118 -> 124 when that same fixture hardened to v2 (8 -> 14 scenarios:
-// `in_process`, an explicit null and a non-string `backend`, each in both
-// codecs). The observed run goes 126 -> 132, so the floor moves by the same six
-// and the margin of eight is unchanged.
-// Raised 124 -> 129 for the five negotiated-state scenarios in
-// codec/capability_handshake.json (#lzhandshakedeadfields).
-// Raised 129 -> 130 for collections/textcrdt_convergence.json's seventh
-// scenario, `gc_keeps_a_tombstone_that_is_still_a_left_origin`
-// (#lzspecgcreferencedtombstone): the corpus grew by one, so the floor moves by
-// the same one and the margin is unchanged.
-const MIN_SCENARIOS = Number(process.env.MIN_SCENARIOS ?? "130");
+// PINNED TO REALITY (#lzscenariofloordrift). This floor equals what CI actually
+// replays, with NO margin: the run that pinned it REPLAYED exactly 153
+// scenarios, and 154 fails.
+//
+// It replaces the convention this comment used to record -- "its eight
+// scenarios took the observed run from 118 to 126, so the floor moves by the
+// same eight and keeps the margin it had". Raising by the delta and preserving
+// the margin means the gap never closes, only widens; here it had reached 23.
+// A floor 23 below reality tolerates 23 scenarios silently detaching, which is
+// precisely what this floor is for.
+//
+// When the corpus moves, re-derive from the gate's own output instead of adding
+// a delta: run `make check`, read the "scenario replay OK: <n>/..." line, set
+// this to that <n>, then prove it exact by setting it to <n>+1 and watching
+// this guard fail. A floor you never watched fail is a floor you have not
+// verified.
+const MIN_SCENARIOS = Number(process.env.MIN_SCENARIOS ?? "153");
 if (total === 0) {
   fail([
     "ERROR: ZERO scenarios were found across the opened fixtures.",

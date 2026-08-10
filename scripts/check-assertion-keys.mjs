@@ -534,7 +534,17 @@ const KNOWN_UNBOUND_BLOCKS = [];
 // Positive-evidence floor (#lzvacuousrun). Zero inventoried blocks means zero
 // unbound blocks, which reports OK having compared nothing. NEVER lower this to
 // make the gate green.
-const MIN_BLOCKS = Number(process.env.MIN_BLOCKS ?? "20");
+//
+// PINNED TO REALITY (#lzscenariofloordrift). This equals what CI actually
+// inventories, with NO margin: the run that pinned it declared exactly 32
+// blocks, and 33 fails. It previously sat at 20 -- twelve below reality, so
+// twelve blocks could have detached without reddening anything.
+//
+// When the corpus moves, re-derive from the gate's own output instead of adding
+// a delta: run `make check`, read the "assertion-block bind OK: <n>/<n>" line,
+// set this to that <n>, then prove it exact by setting it to <n>+1 and watching
+// this guard fail.
+const MIN_BLOCKS = Number(process.env.MIN_BLOCKS ?? "32");
 
 function blockDigest(object) {
   let text;
