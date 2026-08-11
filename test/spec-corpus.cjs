@@ -23,10 +23,25 @@
 // drift.
 //
 // Scope of the override: the CONFORMANCE corpus only, which is what the env var
-// names. `lazily-spec/schemas` and the other non-corpus subtrees always resolve
-// against the canonical sibling (see `schemaPath`), because a scratch copy of
-// the conformance corpus does not carry them and silently resolving them under
-// it would turn a schema gate green over nothing.
+// names. `lazily-spec/schemas` and the other non-corpus subtrees are NOT moved
+// by it, because a scratch copy of the conformance corpus does not carry them
+// and silently resolving them under it would turn a schema gate green over
+// nothing.
+//
+// That scoping is preserved and its consequence is not (#lzspecschemasoverride).
+// The schemas root used to be a hardcoded `../lazily-spec/schemas` with no
+// override at all, so a probe that needed to perturb a SCHEMA — flip a
+// `type_tag` out of the closed `agent-doc-state.json` enum, change a `required`
+// list `schema-conformance.test.js` validates against — had nowhere to point
+// except the shared sibling checkout. Perturbing that dirties a repo ten
+// bindings read and reddens all ten at once, so nobody did, and "these runners
+// really validate against these bytes" stayed an untested claim — the same
+// defect #lzoverrideallrunners fixed one level up for the corpus.
+//
+// `LAZILY_SPEC_SCHEMAS_DIR` is therefore a SECOND, INDEPENDENT override. Neither
+// variable derives from the other, so a corpus-only scratch copy still resolves
+// schemas canonically (the property the hardcoded path was buying), and a
+// schemas-only scratch copy still replays the canonical corpus.
 const fs = require("node:fs");
 const path = require("node:path");
 
@@ -112,11 +127,55 @@ function listFixtures(...segments) {
     .sort();
 }
 
+// ---------------------------------------------------------------------------
+// Schemas seam (#lzspecschemasoverride)
+// ---------------------------------------------------------------------------
+
+const SCHEMAS_ENV_VAR = "LAZILY_SPEC_SCHEMAS_DIR";
+
+const canonicalSchemasRoot = path.join(canonicalSpecRoot, "schemas");
+
+const schemasOverride = process.env[SCHEMAS_ENV_VAR];
+const schemasOverrideActive = schemasOverride !== undefined;
+
+// Same fail-closed rule as `resolveConformanceRoot`, for the same reason. An
+// explicitly-set-but-unreadable schemas root must never fall back to the
+// canonical sibling (a probe would then validate against the UNPERTURBED
+// schemas and report a vacuous green) and must never degrade to a skip. An
+// empty value is a set value: a broken path, not an absent one.
+//
+// Resolution is EAGER and throws at module load, which is this binding's
+// equivalent of lazily-go's TestMain guard: every runner imports this module, so
+// a broken override cannot be routed around by running a subset of the suite.
+function resolveSchemasRoot() {
+  if (!schemasOverrideActive) return canonicalSchemasRoot;
+  const resolved = schemasOverride === "" ? "" : path.resolve(schemasOverride);
+  let stat = null;
+  try {
+    stat = fs.statSync(resolved);
+  } catch (cause) {
+    throw new Error(
+      `${SCHEMAS_ENV_VAR}=${JSON.stringify(schemasOverride)} is set but cannot be read (${cause.code ?? cause.message}). ` +
+        "An explicit schemas override must not fall back to the canonical sibling: " +
+        "falling back would validate against the UNPERTURBED schemas and report a green that proves nothing.",
+      { cause },
+    );
+  }
+  if (!stat.isDirectory()) {
+    throw new Error(
+      `${SCHEMAS_ENV_VAR}=${JSON.stringify(schemasOverride)} is set but is not a directory. ` +
+        "An explicit schemas override must name the JSON-schema root, e.g. /tmp/scratch-schemas.",
+    );
+  }
+  return resolved;
+}
+
 /**
- * Non-corpus spec assets (JSON Schema, proto, docs). ALWAYS canonical: the
- * conformance override deliberately does not move these, see the header.
+ * Non-corpus spec assets (JSON Schema, proto, docs). The canonical sibling
+ * unless `LAZILY_SPEC_SCHEMAS_DIR` names another root; the CONFORMANCE override
+ * deliberately does not move these, see the header.
  */
-const schemasRoot = path.join(canonicalSpecRoot, "schemas");
+const schemasRoot = resolveSchemasRoot();
 
 function schemaPath(relativePath) {
   return path.join(schemasRoot, relativePath);
@@ -124,11 +183,14 @@ function schemaPath(relativePath) {
 
 module.exports = {
   ENV_VAR,
+  SCHEMAS_ENV_VAR,
   CLONE_HINT,
   canonicalSpecRoot,
   canonicalConformanceRoot,
+  canonicalSchemasRoot,
   conformanceRoot,
   overrideActive,
+  schemasOverrideActive,
   specPath,
   fixtureExists,
   readFixtureText,

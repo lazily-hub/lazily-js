@@ -219,6 +219,21 @@ function stringLiterals(code) {
 const SEGMENT = new RegExp(`(^|[/\\\\])${SIBLING}([/\\\\]|$)`);
 const spellsSiblingPath = (value) => !/\s/.test(value) && SEGMENT.test(value);
 
+// The JSON-schema directory as a whole PATH SEGMENT (#lzspecschemasoverride).
+//
+// Written as a regex literal rather than assembled from string literals on
+// purpose: the tokenizer below skips regexes, so this guard does not match its
+// own source and exempt itself the way `SIBLING` has to work around.
+//
+// Two exemptions, both load-bearing. Whitespace, for the same reason as above —
+// every schema runner's test NAME says "validates against schemas/snapshot.json"
+// and none of those is a resolution. And `://`, because a JSON-Schema `$id`
+// (`https://lazily.dev/schemas/delta.json`) IDENTIFIES a schema rather than
+// locating a file; ajv resolves those against its own registry, never the disk.
+const SCHEMAS_SEGMENT = /(^|[/\\])schemas([/\\]|$)/;
+const spellsSchemasPath = (value) =>
+  !/\s/.test(value) && !value.includes("://") && SCHEMAS_SEGMENT.test(value);
+
 // Adjacent literals are joined before testing, which is what closes the
 // split-constant hole: `join(here, "..", "..", "lazily", "-spec")` and
 // `"lazily" + "-spec"` both spell the segment across two literals that neither a
@@ -230,9 +245,12 @@ const MAX_RUN = 8;
 function siblingPathEvidence(code) {
   const literals = stringLiterals(code);
   const evidence = new Set();
-  for (const literal of literals) {
-    if (spellsSiblingPath(literal.value)) evidence.add(`literal ${JSON.stringify(literal.value)}`);
-  }
+  const schemasEvidence = new Set();
+  const record = (kind, value) => {
+    if (spellsSiblingPath(value)) evidence.add(`${kind} ${JSON.stringify(value)}`);
+    if (spellsSchemasPath(value)) schemasEvidence.add(`${kind} ${JSON.stringify(value)}`);
+  };
+  for (const literal of literals) record("literal", literal.value);
   for (let k = 0; k < literals.length; k++) {
     const run = [literals[k].value];
     let j = k;
@@ -246,13 +264,14 @@ function siblingPathEvidence(code) {
     ) {
       run.push(literals[j + 1].value);
       j++;
-      for (const separator of ["", "/"]) {
-        const joined = run.join(separator);
-        if (spellsSiblingPath(joined)) evidence.add(`joined ${JSON.stringify(joined)}`);
-      }
+      for (const separator of ["", "/"]) record("joined", run.join(separator));
     }
   }
-  return { literals: literals.length, evidence: [...evidence] };
+  return {
+    literals: literals.length,
+    evidence: [...evidence],
+    schemasEvidence: [...schemasEvidence],
+  };
 }
 
 // Shell has no literal-concatenation form worth modelling, so its rule is the
@@ -263,10 +282,12 @@ function shellPathEvidence(code) {
     .split("\n")
     .filter((line) => !/^\s*#/.test(line))
     .join("\n");
-  const words = stripped.split(/[\s"'`(){}$]+/).filter((word) => spellsSiblingPath(word));
+  const words = stripped.split(/[\s"'`(){}$]+/);
+  const label = (list) => [...new Set(list.map((w) => `shell word ${JSON.stringify(w)}`))];
   return {
     literals: 0,
-    evidence: [...new Set(words.map((w) => `shell word ${JSON.stringify(w)}`))],
+    evidence: label(words.filter((word) => spellsSiblingPath(word))),
+    schemasEvidence: label(words.filter((word) => spellsSchemasPath(word))),
   };
 }
 
@@ -326,6 +347,19 @@ const ALLOWED_TO_SPELL_SIBLING = [
   "scripts/check-scenario-coverage.mjs",
   "test/spec-corpus.cjs",
 ];
+
+// The files allowed to compute the JSON-SCHEMA root (#lzspecschemasoverride).
+//
+// Exactly one: the same seam, which is what makes `LAZILY_SPEC_SCHEMAS_DIR`
+// reach `schema-conformance.test.js`, `lossless-tree-crdt.test.js` and
+// `ipc.test.js` rather than the zero files that could honour it before the
+// override existed. A runner that joins its own schemas path silently opts out
+// of every schema-perturbation probe, which is what forced such a probe to
+// perturb the shared ../lazily-spec checkout and redden all ten bindings.
+//
+// Doubles as the schemas matcher's POSITIVE CONTROL, exactly as the list above
+// does for the sibling matcher.
+const ALLOWED_TO_SPELL_SCHEMAS = ["test/spec-corpus.cjs"];
 
 // PINNED TO REALITY. The scan covered exactly this many files when it was
 // written; it is a floor, so adding files is free and REMOVING a subtree is what
@@ -558,5 +592,41 @@ test("no runner computes the sibling corpus path for itself (#lzoverrideallrunne
       "test/spec-corpus.cjs. A per-file path is a per-file corpus: " +
       "LAZILY_SPEC_CONFORMANCE_DIR cannot reach it, so a corpus-perturbation probe would " +
       "report a vacuous green for it.",
+  );
+});
+
+test("the schemas-path matcher still fires on the file that legitimately spells it", () => {
+  const silent = ALLOWED_TO_SPELL_SCHEMAS.filter(
+    (rel) => (SCAN.results.get(rel)?.schemasEvidence.length ?? 0) === 0,
+  );
+  assert.deepEqual(
+    silent,
+    [],
+    "the corpus seam DOES compute the JSON-schema root and the matcher did not see it. " +
+      "Either the seam stopped computing it — in which case the override reaches nothing — " +
+      "or the matcher is broken and every 'clean' verdict below is worthless.",
+  );
+});
+
+test("no runner computes the JSON-schema root for itself (#lzspecschemasoverride)", () => {
+  assert.ok(
+    SCAN.results.size > 0,
+    "the schemas-path walk examined ZERO files. This assertion is otherwise vacuously " +
+      "green: no files means no offenders (#lzvacuousrun).",
+  );
+  const offenders = [];
+  for (const [rel, result] of SCAN.results) {
+    if ((result.schemasEvidence?.length ?? 0) === 0) continue;
+    if (ALLOWED_TO_SPELL_SCHEMAS.includes(rel)) continue;
+    offenders.push(`${rel} (${result.schemasEvidence.join("; ")})`);
+  }
+  assert.deepEqual(
+    offenders,
+    [],
+    "these files compute the JSON-schema directory themselves instead of importing " +
+      "schemasRoot/schemaPath from test/spec-corpus.cjs. A per-file schemas path is a " +
+      "per-file schema set: LAZILY_SPEC_SCHEMAS_DIR cannot reach it, so perturbing a schema " +
+      `to test it means perturbing the shared ../${SIBLING} checkout — which reddens every ` +
+      "binding in the family at once.",
   );
 });
