@@ -660,6 +660,28 @@ if (out || walkOut) {
 
   if (walkOut) {
     const originalParse = JSON.parse;
+    // The DELIBERATE bypass (#lzstdlibmutantsallbindings).
+    //
+    // Instrumentation here is automatic — it rides on `JSON.parse` — so a runner
+    // cannot opt out the way lazily-py does by simply not calling `instrument()`.
+    // One shape genuinely needs to: a MUTATION replay, which reads a fixture's
+    // scenarios through an independent model that is being deliberately
+    // perturbed, and whose whole point is that most of those replays DIVERGE.
+    // Feeding them through the tracker would book every `expect` key as READ on
+    // the strength of a run that is not asserting conformance and is not
+    // supposed to, leaving them read-but-never-asserted (rung 3), and would book
+    // scenarios as REPLAYED (rung 4) on the strength of the model rather than
+    // the library.
+    //
+    // This hatch hands back the pristine parser, so such a replay gets plain
+    // data with no accessors, no owner, no scenario registration and no presence
+    // records. It cannot be used to hide a defect: the tracked reading of the
+    // same fixture still has to happen — for the stdlib corpus that is
+    // `test/stdlib-conformance.test.js`'s canonical replay against the shipped
+    // implementation — and a key nothing asserts there still fails the guard,
+    // because an untracked parse contributes nothing in EITHER direction.
+    globalThis.__lazilyConformanceUntrackedParse = (text, reviver) =>
+      originalParse.call(JSON, text, reviver);
     JSON.parse = function (text, reviver) {
       const value = originalParse.call(this, text, reviver);
       if (corpusText.size !== 0) {
