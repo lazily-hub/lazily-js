@@ -188,12 +188,16 @@ test("anti_spoof_session.json replays through SignalingRoom", () => {
 
     assert.equal(emitted.length, step.expect.length, `step conn=${conn} emit count`);
     for (let i = 0; i < emitted.length; i += 1) {
-      assert.equal(emitted[i].to, step.expect[i].to, "routed connection id");
-      assert.deepEqual(
-        emitted[i].message.toWire(),
-        step.expect[i].frame,
-        `frame ${i} for conn=${conn}`,
-      );
+      // Each element of the per-step `expect` LIST is an assertion block in its
+      // own right (#lzunboundblockguard). These eight lists used to sit outside
+      // every rung: the recorder only instrumented an OBJECT-valued tracked
+      // block, so an array of them was walked straight past, and the two lines
+      // that compared them were audited by nothing. Routing them through the
+      // helpers binds `to` and `frame` the way any other assertion key is bound,
+      // so a field the corpus adds to a frame fails here instead of vanishing.
+      const want = step.expect[i];
+      assertKey(want, "to", emitted[i].to, `routed connection id ${i} for conn=${conn}`);
+      assertKey(want, "frame", emitted[i].message.toWire(), `frame ${i} for conn=${conn}`);
 
       const out = emitted[i].message;
       if (out instanceof ServerWelcome) {

@@ -157,11 +157,21 @@ const verifiedFixtures = new Set();
 // sub-fields and stopped.
 const objectValued = new Set();
 const keySetChecked = new Set();
+// Rung 3c (#lzunboundblockguard). `assertKeyWith` hands the fixture value to an
+// opaque closure, and the mark used to ride on the CALL. lazily-spec's
+// `check-assert-with-consumption.py` already rejects a callback whose parameter
+// never occurs in its body; what no source parser can see is a parameter that is
+// mentioned and never DEREFERENCED — `(want) => assert.ok(want !== null)` reads
+// `want`, satisfies that gate, and compares nothing about the fixture's
+// contents. So the helper wraps an object or array value in a recording Proxy
+// and records `N` instead of `A` when the check never touched it.
+const untouchedByCheck = new Set();
 for (const line of readFileSync(KEY_MANIFEST, "utf8").split("\n")) {
   if (line.trim() === "") continue;
   const [fixture, block, key, tag, reason] = line.split("\t");
   const id = `${fixture}\t${block}\t${key}`;
-  if (tag === "R") read.add(id);
+  if (tag === "N") untouchedByCheck.add(id);
+  else if (tag === "R") read.add(id);
   else if (tag === "A") asserted.add(id);
   else if (tag === "X") excusedInRunner.set(id, reason ?? "");
   else if (tag === "D") dischargedInRunner.set(id, reason ?? "");
@@ -292,6 +302,27 @@ for (const entry of [...present].sort()) {
   }
   if (runnerExcuse !== undefined) {
     declaredHere += 1;
+    continue;
+  }
+
+  // Rung 3c: an `assertKeyWith` check that received the fixture's value and never
+  // consumed it (#lzunboundblockguard). Reported BEFORE the object-valued and
+  // asserted branches, because both of those describe a different defect and the
+  // reader would go looking in the wrong place. It is not softened by the key
+  // being asserted somewhere else in the run: a vacuous call site stays vacuous,
+  // and letting a good sibling site cover it is exactly the masking rung 3 is
+  // about.
+  if (untouchedByCheck.has(entry)) {
+    fail([
+      `ERROR: assertion key '${key}' in ${block} of '${fixture}' was handed to an`,
+      "       assertKeyWith CHECK THAT NEVER DEREFERENCED IT. The callback received the",
+      "       fixture's own object or array and never read a field, a member, a key set or",
+      "       its contents, so the assertion is vacuously true and editing the fixture here",
+      "       changes no outcome. Compare what the value CARRIES, use assertKey for a plain",
+      "       deep equality, or declare the exception with excuseKey(block, key, reason).",
+    ]);
+    unasserted += 1;
+    problems += 1;
     continue;
   }
 
@@ -436,8 +467,10 @@ if (problems > 0) {
 // two rungs up; this is the assertion-key rung of the same ladder.
 //
 // PINNED TO REALITY (#lzscenariofloordrift). This floor equals what CI actually
-// asserts, with NO margin: the run that pinned it ASSERTED exactly 1006 keys of
-// 1041 present, and 1007 fails.
+// asserts, with NO margin: the run that pinned it ASSERTED exactly 1012 keys of
+// 1047 present, and 1013 fails. (It was 1006/1041 before the per-step `expect`
+// LISTS of `signaling/anti_spoof_session.json` entered the ladder at all,
+// #lzunboundblockguard.)
 //
 // It replaces the convention this comment used to record — "that fixture added
 // 15 asserted keys, so the floor moved by 15 and kept the same margin",
@@ -461,7 +494,7 @@ if (problems > 0) {
 // not verified. NEVER lower it to make the gate green: a drop means keys stopped
 // being reached or stopped being asserted, and that is the finding, not the
 // floor.
-const MIN_ASSERTED_KEYS = Number(process.env.MIN_ASSERTED_KEYS ?? "1006");
+const MIN_ASSERTED_KEYS = Number(process.env.MIN_ASSERTED_KEYS ?? "1012");
 if (present.size === 0) {
   fail([
     "ERROR: the manifest recorded ZERO tracked assertion keys.",
@@ -497,8 +530,8 @@ if (consumed < MIN_ASSERTED_KEYS) {
 // as though it bounds the left-hand number; it does not.
 //
 // So the floor equals what CI actually declares, with NO margin: the run that
-// pinned it DECLARED exactly 206 object-valued keys (of which 196 were key-set
-// checked), and 207 fails.
+// pinned it DECLARED exactly 209 object-valued keys (of which 199 were key-set
+// checked), and 210 fails.
 //
 // It replaces "130 = calibrated below the observed run, which declares 151
 // object-valued keys" — the same delta-and-keep-the-margin convention pinned out
@@ -517,7 +550,7 @@ if (consumed < MIN_ASSERTED_KEYS) {
 // from the numerator passes at +1 and looks verified while bounding nothing.
 // NEVER lower it to make the gate green: a drop means fixtures stopped being
 // opened or the recorder stopped declaring the shape, and that is the finding.
-const MIN_OBJECT_VALUED_KEYS = Number(process.env.MIN_OBJECT_VALUED_KEYS ?? "206");
+const MIN_OBJECT_VALUED_KEYS = Number(process.env.MIN_OBJECT_VALUED_KEYS ?? "209");
 if (objectValued.size < MIN_OBJECT_VALUED_KEYS) {
   fail([
     `ERROR: only ${objectValued.size} assertion keys were declared OBJECT-VALUED, expected >= ${MIN_OBJECT_VALUED_KEYS}.`,
@@ -547,18 +580,49 @@ if (objectValued.size < MIN_OBJECT_VALUED_KEYS) {
 // name is outside TRACKED, because it uses TRACKED to decide what to look for.
 //
 // So the declaring side here reads the corpus off DISK and inventories every
-// `assertions` block by the cross-binding definition, and the binding side is
-// the recorder's own ledger. The two are matched by the block's CONTENT digest,
-// never by its name — the recorder books every per-frame block under the bare
-// name `assertions`, so a name-keyed ledger would collapse them all together and
-// silently miss the mismatch instead of reporting it.
+// assertion block, and the binding side is the recorder's own ledger. The two
+// are matched by the block's CONTENT digest, never by its name — the recorder
+// books every per-frame block under the bare name `assertions`, so a name-keyed
+// ledger would collapse them all together and silently miss the mismatch
+// instead of reporting it.
+//
+// TWO THINGS THE DECLARING SIDE MUST NOT DO (#lzunboundblockguard), because it
+// used to do both:
+//
+//   1. Reuse the recorder's TRACKED list. TRACKED is what the recorder BINDS; a
+//      declaring side scoped to it can only ever report a block the recorder was
+//      already looking for, so a block name the corpus grows (`expect_final`,
+//      `expects`, `assert`) is invisible on BOTH sides at once and the guard
+//      prints OK. Proven: an `expect_final` block with two live assertion keys,
+//      added to an OPENED fixture, left every rung green. So the rule here is
+//      NAME-OPEN — anything spelled `assert*` / `expect*` — and a block it
+//      inventories that TRACKED does not carry is reported UNBOUND, which is the
+//      correct verdict for a block nothing instruments.
+//
+//   2. Enumerate a fixed handful of container paths. It inventoried exactly
+//      `assertions`, plus `assertions` one level inside `frames` / `scenarios` /
+//      `rejects` — 32 of the 583 blocks the opened corpus actually carries, a 5%
+//      sample standing in for the whole. A per-step `expect`, a block under any
+//      other container, or a block nested two levels down was outside it. The
+//      walk below is FULL and recursive, so nesting depth and container spelling
+//      stop mattering.
+//
+// An ARRAY-valued block counts, element by element. `steps[].expect` in
+// `signaling/anti_spoof_session.json` is a list of expected emissions; the
+// object-only inventory walked past all eight, and so did the recorder.
 const BLOCK_MANIFEST =
   process.env.LAZILY_CONFORMANCE_BLOCK_MANIFEST ?? "build/conformance-assertion-blocks.txt";
 
 // An assertion block that genuinely cannot be bound belongs HERE, as a
 // documented excuse read on every run, not as a runner fabricated to manufacture
-// coverage. Format: `fixture|where|reason`; a reason is required, because an
-// excuse with no reason is an unexplained gap wearing a green badge.
+// coverage. Format: `fixture|where|reason`, where `where` is the JSON path the
+// failure below prints; a reason is required, because an excuse with no reason is
+// an unexplained gap wearing a green badge.
+//
+// Checked in BOTH directions, like DECLARED_UNCONSUMED and excuseKey()
+// (#lzunboundblockguard): an entry naming a site no opened fixture carries fails
+// as stale, and so does an entry naming a site a runner DOES bind. A one-way
+// excuse only ever gets quieter.
 const KNOWN_UNBOUND_BLOCKS = [];
 
 // Positive-evidence floor (#lzvacuousrun). Zero inventoried blocks means zero
@@ -566,15 +630,19 @@ const KNOWN_UNBOUND_BLOCKS = [];
 // make the gate green.
 //
 // PINNED TO REALITY (#lzscenariofloordrift). This equals what CI actually
-// inventories, with NO margin: the run that pinned it declared exactly 32
-// blocks, and 33 fails. It previously sat at 20 -- twelve below reality, so
-// twelve blocks could have detached without reddening anything.
+// inventories, with NO margin: the run that pinned it declared exactly 596
+// blocks, and 597 fails.
+//
+// It was 32 -- not a drifted floor but an accurate count of a declaring side
+// that only ever looked at four container paths (#lzunboundblockguard). The
+// walk is now full and recursive under a name-open rule, so the inventory is
+// the corpus's real assertion-block population rather than a 5% sample of it.
 //
 // When the corpus moves, re-derive from the gate's own output instead of adding
 // a delta: run `make check`, read the "assertion-block bind OK: <n>/<n>" line,
 // set this to that <n>, then prove it exact by setting it to <n>+1 and watching
 // this guard fail.
-const MIN_BLOCKS = Number(process.env.MIN_BLOCKS ?? "32");
+const MIN_BLOCKS = Number(process.env.MIN_BLOCKS ?? "596");
 
 function blockDigest(object) {
   let text;
@@ -620,7 +688,18 @@ for (const raw of KNOWN_UNBOUND_BLOCKS) {
   blockExcuses.set(`${fixture}|${where}`, reason);
 }
 
+// The NAME-OPEN rule. Not the recorder's TRACKED list, and deliberately a
+// PREFIX rather than an enumeration: a phase-qualified name the corpus grows
+// (`expect_final`, `expect_before`, `asserts`) is inventoried the day it appears
+// rather than the day someone remembers to extend a list.
+const ASSERTION_BLOCK_NAME = /^(assert|expect)/i;
+
+const isPlain = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+
 const declaredBlocks = new Map();
+// Every site the walk inventoried, so an excuse can be checked in BOTH
+// directions: site -> digest.
+const declaredSites = new Map();
 if (existsSync(FIXTURE_MANIFEST)) {
   const openedFixtures = readFileSync(FIXTURE_MANIFEST, "utf8")
     .split("\n")
@@ -635,24 +714,35 @@ if (existsSync(FIXTURE_MANIFEST)) {
     } catch {
       continue;
     }
-    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) continue;
     const declare = (where, block) => {
-      if (block === null || typeof block !== "object" || Array.isArray(block)) return;
+      if (!isPlain(block)) return;
       const digest = blockDigest(block);
       if (digest === null) return;
+      const site = `${fixture}|${where}`;
       if (!declaredBlocks.has(digest)) declaredBlocks.set(digest, new Set());
-      declaredBlocks.get(digest).add(`${fixture}|${where}`);
+      declaredBlocks.get(digest).add(site);
+      declaredSites.set(site, digest);
     };
-    declare("assertions", parsed.assertions);
-    for (const container of ["frames", "scenarios", "rejects"]) {
-      const items = parsed[container];
-      if (!Array.isArray(items)) continue;
-      items.forEach((item, index) => {
-        if (item !== null && typeof item === "object" && !Array.isArray(item)) {
-          declare(`${container}[${index}].assertions`, item.assertions);
+    // Full recursive descent. `where` is the JSON path, so the failure below
+    // names the block a reader has to go and look at.
+    const descend = (node, where) => {
+      if (Array.isArray(node)) {
+        node.forEach((item, index) => descend(item, `${where}[${index}]`));
+        return;
+      }
+      if (!isPlain(node)) return;
+      for (const [key, value] of Object.entries(node)) {
+        const path = where === "" ? key : `${where}.${key}`;
+        if (ASSERTION_BLOCK_NAME.test(key)) {
+          if (isPlain(value)) declare(path, value);
+          else if (Array.isArray(value)) {
+            value.forEach((item, index) => declare(`${path}[${index}]`, item));
+          }
         }
-      });
-    }
+        descend(value, path);
+      }
+    };
+    descend(parsed, "");
   }
 }
 
@@ -664,6 +754,34 @@ for (const [digest, sites] of [...declaredBlocks.entries()].sort()) {
     unboundBlocks.push(site);
   }
 }
+
+// An excuse is stale in BOTH directions, exactly as DECLARED_UNCONSUMED and
+// excuseKey() are. A site the walk no longer inventories means the corpus moved
+// and the claim outlived it; a site whose block IS bound means the gap the
+// excuse described is already closed, and leaving it behind understates what
+// this binding checks while wearing a green badge.
+for (const [site, reason] of [...blockExcuses].sort()) {
+  const digest = declaredSites.get(site);
+  if (digest === undefined) {
+    fail([
+      `ERROR: KNOWN_UNBOUND_BLOCKS names '${site}', which no OPENED fixture carries as an`,
+      "       assertion block. The corpus moved, or the fixture stopped being opened.",
+      `       Reason on file: ${reason}`,
+      "       Delete the entry — an excuse for a block that is not there hides nothing and",
+      "       cannot go red when the block comes back.",
+    ]);
+    process.exit(1);
+  }
+  if (boundBlocks.has(digest)) {
+    fail([
+      `ERROR: KNOWN_UNBOUND_BLOCKS names '${site}', which a runner DOES bind.`,
+      `       Reason on file: ${reason}`,
+      "       The excuse is stale — the gap it described is already closed. Delete the",
+      "       entry; an excuse that hides nothing understates coverage.",
+    ]);
+    process.exit(1);
+  }
+}
 if (unboundBlocks.length > 0) {
   fail([
     `ERROR: ${unboundBlocks.length} assertion block(s) were carried by an OPENED fixture`,
@@ -671,9 +789,11 @@ if (unboundBlocks.length > 0) {
     "       recorder reached, so these report nothing at all rather than reporting a",
     "       gap — their keys are not unread, nothing reads them:",
     ...unboundBlocks.map((site) => `         ${site}`),
-    "       Parse the fixture with JSON.parse of its bytes so the recorder sees it, or",
-    "       add it to KNOWN_UNBOUND_BLOCKS with a reason so the gap is visible on every",
-    "       run instead of invisible.",
+    "       Parse the fixture with JSON.parse of its bytes so the recorder sees it; add",
+    "       the block's NAME to TRACKED in test/support/conformance-manifest.cjs if the",
+    "       corpus grew a spelling that list does not carry; or add the site to",
+    "       KNOWN_UNBOUND_BLOCKS with a reason so the gap is visible on every run instead",
+    "       of invisible.",
   ]);
   process.exit(1);
 }

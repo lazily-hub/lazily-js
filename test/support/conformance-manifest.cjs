@@ -190,6 +190,15 @@ if (out || walkOut) {
   // phase-qualified name (`collections/semtree_incremental.json`). Leaving them
   // out let a whole assertion block sit outside both rungs, which is the gap
   // the tracked-name list exists to close.
+  //
+  // This list is a CLOSED set, and that is the point of the rung-0 cross-check
+  // (#lzunboundblockguard): a block name the corpus grows and this list does not
+  // carry is invisible HERE by construction — no accessor, no presence record,
+  // no key. So the guard's declaring side does NOT reuse this list. It reads the
+  // corpus off disk under an OPEN name rule (anything spelled `assert*` /
+  // `expect*`) and reports any block it inventories that this recorder did not
+  // bind. A name added upstream therefore fails the build with a message naming
+  // the block, instead of silently sitting outside every rung.
   const TRACKED = new Set(["assertions", "expect", "expected", "expect_initial", "expect_after"]);
 
   // Prose keys inside a tracked block. Their values are English sentences about
@@ -419,6 +428,18 @@ if (out || walkOut) {
       walk(rel, value);
       if ((keyOut || blockOut) && TRACKED.has(key) && isPlainObject(value)) {
         instrumentBlock(rel, key, value);
+      }
+      // An ARRAY-valued tracked block (#lzunboundblockguard). `steps[].expect` in
+      // `signaling/anti_spoof_session.json` is a LIST of expected emissions, and
+      // the object-only test above walked straight past all eight of them: every
+      // rung is scoped to a block the recorder instrumented, so those blocks had
+      // no presence record, no keys, and reported exactly nothing while the
+      // runner compared them by hand. Each plain-object element is a block in its
+      // own right, named `<key>[<index>]`.
+      if ((keyOut || blockOut) && TRACKED.has(key) && Array.isArray(value)) {
+        value.forEach((item, index) => {
+          if (isPlainObject(item)) instrumentBlock(rel, `${key}[${index}]`, item);
+        });
       }
       // AFTER the descent, never before: registration installs payload accessors
       // on each scenario, and the walk above reads every one of those keys. Doing

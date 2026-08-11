@@ -93,25 +93,98 @@ export function assertKey(block, key, actual, where) {
   return want;
 }
 
+// ---- The check must really CONSUME the fixture value (#lzunboundblockguard) ----
+//
+// `assertKeyWith` hands the fixture's value to an opaque closure and marked the
+// key ASSERTED on the strength of the call alone. That is the vacuous-callback
+// defect lazily-cs shipped live: a check asserting a property of an enum while
+// never touching the replay, satisfied on an empty array and still marked
+// asserted.
+//
+// The COARSE half of that hole is already closed here, and not by this file:
+// lazily-spec's `check-assert-with-consumption.py` (the `assertion-ordering-check`
+// gate) parses every `assertKeyWith` call site and rejects a callback whose
+// fixture-value parameter never occurs in its body. `() => {...}` and
+// `(want) => { assert.ok(other); }` both fail that gate today. Do not duplicate it
+// here — a second, weaker copy of a source parser is a place for the two to
+// disagree.
+//
+// What a source parser cannot see is whether a parameter that IS mentioned was
+// actually USED. `(want) => assert.ok(want !== null)` reads `want`, passes the
+// static gate, compares nothing about the fixture's contents, and flipping every
+// field of that value changes no outcome. So this is the RUNTIME half: for an
+// object or an array the argument is a recording Proxy over the fixture's own
+// value, and only a witness the check really dereferenced marks the key. A read,
+// a membership test, a key enumeration and a prototype lookup all trip it, so
+// `deepStrictEqual`, a spread, a destructure and an index count; binding the
+// witness and comparing its identity does not.
+//
+// A PRIMITIVE cannot be proxied and there is no runtime way to observe that a
+// number was compared, so a primitive is left to the static gate above. Prefer
+// `assertKey` for one whenever the relation is equality: it threads the fixture's
+// value into the comparison itself and needs no witness at all.
+function objectWitness(want) {
+  const state = { touched: false };
+  const touch = () => {
+    state.touched = true;
+  };
+  state.witness = new Proxy(want, {
+    get(target, property, receiver) {
+      touch();
+      return Reflect.get(target, property, receiver);
+    },
+    has(target, property) {
+      touch();
+      return Reflect.has(target, property);
+    },
+    ownKeys(target) {
+      touch();
+      return Reflect.ownKeys(target);
+    },
+    getOwnPropertyDescriptor(target, property) {
+      touch();
+      return Reflect.getOwnPropertyDescriptor(target, property);
+    },
+    getPrototypeOf(target) {
+      touch();
+      return Reflect.getPrototypeOf(target);
+    },
+    apply(target, thisArg, args) {
+      touch();
+      return Reflect.apply(target, thisArg, args);
+    },
+  });
+  return state;
+}
+
 /**
  * Assert a non-equality relation — a tolerance, a containment, a regex — while
  * still routing the fixture's value into the comparison. `check` receives the
  * fixture value; whatever it does with it is the assertion. The point is that the
  * fixture's value reaches the comparison, not that the comparison is `===`.
+ *
+ * A check handed an object or an array and never dereferencing it marks the key
+ * unconsumed, and the guard in `scripts/check-assertion-keys.mjs` names it.
  */
 export function assertKeyWith(block, key, check, where) {
   const want = fetch(block, key, "assertKeyWith");
   if (typeof check !== "function") {
     throw new TypeError(`assertKeyWith(${label(block, key, where)}): check must be a function`);
   }
-  const result = check(want);
+  const proxyable = want !== null && (typeof want === "object" || typeof want === "function");
+  const state = proxyable ? objectWitness(want) : null;
+  const settle = () => {
+    // A primitive has no witness; the static gate owns that case.
+    mark(block, key, state === null || state.touched ? "A" : "N");
+  };
+  const result = check(state === null ? want : state.witness);
   if (result && typeof result.then === "function") {
     return result.then((value) => {
-      mark(block, key, "A");
+      settle();
       return value;
     });
   }
-  mark(block, key, "A");
+  settle();
   return result;
 }
 
