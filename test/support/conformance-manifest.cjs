@@ -55,10 +55,13 @@
 // fixture with several named scenarios can be PARTIALLY replayed and nothing
 // notices: rung 1 asks only whether the FILE was opened, and rungs 2-3 bind only
 // the blocks a runner reaches, so an unreplayed scenario contributes no
-// unconsumed and no unasserted key. Worse, key records are keyed by
-// `fixture\tblock\tkey`, so sibling scenarios sharing an `expect` key name mask
-// each other outright — `collections/stableid_alignment.json` had a scenario
-// this runner never touched, hidden behind another scenario's `key_equal`.
+// unconsumed and no unasserted key. Worse, key records USED to be keyed by
+// `fixture\t<bare block name>\tkey`, so sibling scenarios sharing an `expect` key
+// name masked each other outright — `collections/stableid_alignment.json` had a
+// scenario this runner never touched, hidden behind another scenario's
+// `key_equal`. The `block` component is now the block's JSON PATH
+// (#lzjsblocknamemasking), so that half is closed; the rung remains, because a
+// scenario nothing entered still produces no record for any rung to read.
 //
 // So this recorder also registers every element of a `scenarios` array against
 // its fixture, resolving the scenario's id in the corpus-wide fixed order
@@ -402,15 +405,31 @@ if (out || walkOut) {
     });
   };
 
-  const walk = (rel, node) => {
+  // `where` is the block's JSON PATH inside the fixture, not its bare name
+  // (#lzjsblocknamemasking). A key record is `fixture\tblock\tkey`, so booking
+  // every per-frame block under the bare name `assertions` made SIBLINGS COLLAPSE
+  // ONTO ONE RECORD: `frames[0].assertions` and `frames[3].assertions` were the
+  // same id, and a key asserted in one marked the other asserted too. That is the
+  // same masking `#lzscenariocoverage` found between sibling SCENARIOS, one level
+  // down and inside a single fixture, and it hid the defect in both directions —
+  // a key read in one sibling and never asserted in another reported consumed,
+  // and an object-valued key key-set-checked in one sibling discharged the
+  // obligation for all of them.
+  //
+  // The path spelling is the SAME one the guard's disk-side inventory prints
+  // (`frames[0].assertions`, `steps[2].expect[1]`), so a failure here names a
+  // site a reader can go and open, and a KNOWN_UNBOUND_BLOCKS entry and a key
+  // record talk about the same coordinates.
+  const walk = (rel, node, where) => {
     if (Array.isArray(node)) {
-      for (const item of node) walk(rel, item);
+      node.forEach((item, index) => walk(rel, item, `${where}[${index}]`));
       return;
     }
     if (!isPlainObject(node)) return;
     // Read the raw entries BEFORE any accessor is installed on this node, so the
     // walk never records itself as a consumer.
     for (const [key, value] of Object.entries(node)) {
+      const path = where === "" ? key : `${where}.${key}`;
       if (key === "invariants" && isPlainObject(value)) {
         for (const [name, claim] of Object.entries(value)) {
           if (typeof claim !== "string") {
@@ -425,9 +444,9 @@ if (out || walkOut) {
         }
         continue;
       }
-      walk(rel, value);
+      walk(rel, value, path);
       if ((keyOut || blockOut) && TRACKED.has(key) && isPlainObject(value)) {
-        instrumentBlock(rel, key, value);
+        instrumentBlock(rel, path, value);
       }
       // An ARRAY-valued tracked block (#lzunboundblockguard). `steps[].expect` in
       // `signaling/anti_spoof_session.json` is a LIST of expected emissions, and
@@ -435,10 +454,10 @@ if (out || walkOut) {
       // rung is scoped to a block the recorder instrumented, so those blocks had
       // no presence record, no keys, and reported exactly nothing while the
       // runner compared them by hand. Each plain-object element is a block in its
-      // own right, named `<key>[<index>]`.
+      // own right, named `<path>[<index>]`.
       if ((keyOut || blockOut) && TRACKED.has(key) && Array.isArray(value)) {
         value.forEach((item, index) => {
-          if (isPlainObject(item)) instrumentBlock(rel, `${key}[${index}]`, item);
+          if (isPlainObject(item)) instrumentBlock(rel, `${path}[${index}]`, item);
         });
       }
       // AFTER the descent, never before: registration installs payload accessors
@@ -656,7 +675,7 @@ if (out || walkOut) {
           // handed the parsed fixture itself, and a runner that never names its
           // own fixture id cannot name the wrong one.
           if (isPlainObject(value)) fixtureRoot.set(value, rel);
-          walk(rel, value);
+          walk(rel, value, "");
         }
       }
       return value;

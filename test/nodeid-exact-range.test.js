@@ -31,6 +31,7 @@ import {
   assertKey,
   assertKeySet,
   assertKeyWith,
+  excuseKey,
   fnv1a64Hex,
   proseKey,
   verifyProse,
@@ -185,17 +186,51 @@ test("NodeId exact-representation bound is enforced by refusal, never rounding",
     const result = decodeScenario(scenario, expect, observedCodecs);
 
     if (!result.ok) {
-      assert.ok(
-        !representable,
-        `${scenarioWhere}: lazily-js represents ${expected} exactly, so this frame ` +
-          `must decode; got ${result.error}`,
+      // The refusal is correct only BECAUSE the fixture's own identifier is
+      // outside the exact range, so `node_id_decimal` is threaded through the
+      // comparison rather than compared to the derived `representable` flag. A
+      // fixture edit that brought this identifier inside the range would make
+      // the refusal the very silent-substitution failure the clause exists to
+      // prevent, and this reddens instead of staying green on a stale local.
+      assertKeyWith(
+        expect,
+        "node_id_decimal",
+        (want) => {
+          assert.ok(
+            BigInt(want) > MAX_EXACT,
+            `${scenarioWhere}: lazily-js represents ${want} exactly, so this frame ` +
+              `must decode; got ${result.error}`,
+          );
+        },
+        scenarioWhere,
       );
-      // No excuseKey() for this scenario's value keys. The assertion-key ledger
-      // namespaces by `fixture\tblock\tkey`, so every scenario's `expect` shares
-      // one namespace: excusing `node_id_decimal` here while the 2^53 - 1
-      // scenario asserts it would register as a stale excuse — an excuse that
-      // hides nothing. The refusal is asserted by `refused` below instead, which
-      // is the stronger claim anyway: it counts, rather than merely permitting.
+      // The keys that describe the SNAPSHOT this frame would have decoded to are
+      // excused here, per scenario (#lzjsblocknamemasking). There is no decoded
+      // message to compare them against: `decodeScenario` threw, which is the
+      // conforming outcome for an identifier a JavaScript number cannot hold, so
+      // asserting them would mean fabricating an observation.
+      //
+      // This used to be impossible to declare. The assertion-key ledger booked
+      // every scenario's `expect` under the bare block name `assertions`/`expect`,
+      // so all six scenarios of this fixture shared ONE namespace: excusing
+      // `type_tag` here while the two 2^53 - 1 scenarios asserted it registered as
+      // an excuse that hides nothing, and the guard failed it as stale. The ledger
+      // is now keyed by the block's JSON PATH (`scenarios[3].expect`), so a
+      // sibling's assertion no longer satisfies this one — which is also why these
+      // five keys showed up as NEVER CONSUMED the moment the collapse was removed:
+      // scenario 0's assertions had been marking them for all six.
+      for (const key of ["epoch", "node_count", "type_tag", "payload", "root_id_decimal"]) {
+        excuseKey(
+          expect,
+          key,
+          `${scenario.id}: the frame is REFUSED because its identifier is outside the ` +
+            "IEEE-754 exact range, so no decoded snapshot exists to compare this key " +
+            "against; asserting it would mean fabricating an observation. The refusal " +
+            "itself is asserted through node_id_decimal above and counted by " +
+            "scenario_count/refused. A binding that gains exact decoding asserts this " +
+            "key and fails this excuse as stale.",
+        );
+      }
       refused += 1;
       continue;
     }

@@ -18,12 +18,21 @@
 // Skipping a whole scenario is invisible to a guard that only inspects the
 // scenarios you ran.
 //
-// In this binding it was worse than invisible. Key records are keyed by
-// `fixture\tblock\tkey`, so sibling scenarios that share an `expect` key name
-// mask each other: `collections/stableid_alignment.json` scenario "anchored key
-// survives full body rewrite" fell straight through the runner's name-matching
-// if/else chain, and its `key_equal` was already marked asserted by the scenario
-// before it. Two guards, both green, over a scenario nothing ran.
+// In this binding it was worse than invisible. Key records were keyed by
+// `fixture\t<bare block name>\tkey`, so sibling scenarios that share an `expect`
+// key name masked each other: `collections/stableid_alignment.json` scenario
+// "anchored key survives full body rewrite" fell straight through the runner's
+// name-matching if/else chain, and its `key_equal` was already marked asserted by
+// the scenario before it. Two guards, both green, over a scenario nothing ran.
+//
+// That particular masking is gone — the `block` component of a key record is now
+// the block's JSON PATH, so `scenarios[0].expect` and `scenarios[1].expect` are
+// distinct records (#lzjsblocknamemasking). This rung is NOT thereby redundant.
+// It reports the scenario nothing entered at all, which even a fully
+// path-qualified key ledger cannot: an unreplayed scenario's keys are not
+// unasserted, nothing reads them, so the rungs below still see exactly nothing.
+// De-masking turns the failure from "another scenario covered for it" into "this
+// scenario reports nothing", and naming it is this guard's job.
 //
 // The evidence is the RUNTIME ledger in
 // `build/conformance-scenarios.txt`, written by

@@ -166,6 +166,17 @@ const keySetChecked = new Set();
 // contents. So the helper wraps an object or array value in a recording Proxy
 // and records `N` instead of `A` when the check never touched it.
 const untouchedByCheck = new Set();
+// A key record is `fixture \t block \t key`, and `block` is the block's JSON PATH
+// — `frames[3].assertions`, `scenarios[1].expect`, `steps[2].expect[0]`
+// (#lzjsblocknamemasking). It used to be the block's BARE NAME, which made every
+// sibling block of a fixture share one record: `frames[0].assertions` and
+// `frames[3].assertions` were the same id, so a key asserted in ONE marked the
+// OTHER asserted, an object-valued key key-set-checked in one discharged the
+// obligation for all of them, and an excuse for a key a sibling asserted failed as
+// stale even though it hid nothing. That is the same masking `#lzscenariocoverage`
+// found between sibling SCENARIOS, one level further down and inside a single
+// fixture. Removing it took the examined population from 1047 keys to 3797 and
+// exposed 24 findings the collapse had been holding green.
 for (const line of readFileSync(KEY_MANIFEST, "utf8").split("\n")) {
   if (line.trim() === "") continue;
   const [fixture, block, key, tag, reason] = line.split("\t");
@@ -467,10 +478,14 @@ if (problems > 0) {
 // two rungs up; this is the assertion-key rung of the same ladder.
 //
 // PINNED TO REALITY (#lzscenariofloordrift). This floor equals what CI actually
-// asserts, with NO margin: the run that pinned it ASSERTED exactly 1012 keys of
-// 1047 present, and 1013 fails. (It was 1006/1041 before the per-step `expect`
-// LISTS of `signaling/anti_spoof_session.json` entered the ladder at all,
-// #lzunboundblockguard.)
+// asserts, with NO margin: the run that pinned it ASSERTED exactly 3721 keys of
+// 3797 present, and 3722 fails. (It was 1012/1047 while sibling assertion blocks
+// COLLAPSED onto one key record, #lzjsblocknamemasking: the recorder booked
+// `frames[0].assertions` and `frames[3].assertions` under the same bare name, so
+// a key asserted in one sibling marked every other sibling asserted too and the
+// population was 2750 records short of the corpus. And 1006/1041 before that,
+// when the per-step `expect` LISTS of `signaling/anti_spoof_session.json` were
+// outside the ladder entirely, #lzunboundblockguard.)
 //
 // It replaces the convention this comment used to record — "that fixture added
 // 15 asserted keys, so the floor moved by 15 and kept the same margin",
@@ -494,7 +509,7 @@ if (problems > 0) {
 // not verified. NEVER lower it to make the gate green: a drop means keys stopped
 // being reached or stopped being asserted, and that is the finding, not the
 // floor.
-const MIN_ASSERTED_KEYS = Number(process.env.MIN_ASSERTED_KEYS ?? "1012");
+const MIN_ASSERTED_KEYS = Number(process.env.MIN_ASSERTED_KEYS ?? "3721");
 if (present.size === 0) {
   fail([
     "ERROR: the manifest recorded ZERO tracked assertion keys.",
@@ -530,17 +545,20 @@ if (consumed < MIN_ASSERTED_KEYS) {
 // as though it bounds the left-hand number; it does not.
 //
 // So the floor equals what CI actually declares, with NO margin: the run that
-// pinned it DECLARED exactly 209 object-valued keys (of which 199 were key-set
-// checked), and 210 fails.
+// pinned it DECLARED exactly 887 object-valued keys (of which 861 were key-set
+// checked), and 888 fails.
 //
-// It replaces "130 = calibrated below the observed run, which declares 151
-// object-valued keys" — the same delta-and-keep-the-margin convention pinned out
-// of MIN_ASSERTED_KEYS above, and it had drifted 76 below reality here. A floor
-// 76 under tolerates 76 object-valued keys silently ceasing to be declared, and
-// every one of those takes its key-set obligation with it while this guard still
-// prints OK. The 10 declared keys that are not key-set checked are excused or
-// discharged BY NAME at their call sites, so the margin was never covering them;
-// it was covering nothing.
+// It was 209/199 while sibling assertion blocks COLLAPSED onto one key record
+// (#lzjsblocknamemasking). That collapse was worse here than one rung up: an
+// object-valued key key-set-checked in `frames[0].assertions` discharged the
+// obligation for the same key name in EVERY sibling frame at once, so 678
+// object-valued keys were never examined and the floor sat on a population a
+// quarter the size of the corpus's. Before that it was "130 = calibrated below
+// the observed run, which declares 151 object-valued keys" — the same
+// delta-and-keep-the-margin convention pinned out of MIN_ASSERTED_KEYS above.
+// The 26 declared keys that are not key-set checked are excused or discharged BY
+// NAME at their call sites, so a margin was never covering them; it was covering
+// nothing.
 //
 // When the corpus moves, re-derive from the gate's own output instead of adding
 // a delta: run `make check`, read the DENOMINATOR of the "object-valued
@@ -550,7 +568,7 @@ if (consumed < MIN_ASSERTED_KEYS) {
 // from the numerator passes at +1 and looks verified while bounding nothing.
 // NEVER lower it to make the gate green: a drop means fixtures stopped being
 // opened or the recorder stopped declaring the shape, and that is the finding.
-const MIN_OBJECT_VALUED_KEYS = Number(process.env.MIN_OBJECT_VALUED_KEYS ?? "209");
+const MIN_OBJECT_VALUED_KEYS = Number(process.env.MIN_OBJECT_VALUED_KEYS ?? "887");
 if (objectValued.size < MIN_OBJECT_VALUED_KEYS) {
   fail([
     `ERROR: only ${objectValued.size} assertion keys were declared OBJECT-VALUED, expected >= ${MIN_OBJECT_VALUED_KEYS}.`,
@@ -581,10 +599,13 @@ if (objectValued.size < MIN_OBJECT_VALUED_KEYS) {
 //
 // So the declaring side here reads the corpus off DISK and inventories every
 // assertion block, and the binding side is the recorder's own ledger. The two
-// are matched by the block's CONTENT digest, never by its name — the recorder
-// books every per-frame block under the bare name `assertions`, so a name-keyed
-// ledger would collapse them all together and silently miss the mismatch
-// instead of reporting it.
+// are matched by the block's CONTENT digest, never by its name. The recorder now
+// books a block under its JSON PATH (#lzjsblocknamemasking) rather than the bare
+// name it used to, so the two sides finally SPELL sites the same way — and the
+// digest key stays anyway, because a path key would only prove that something at
+// those coordinates was instrumented, while the digest proves the bytes on disk
+// were. A block that moved inside its fixture is then reported by content rather
+// than reported twice, once missing and once unexplained.
 //
 // TWO THINGS THE DECLARING SIDE MUST NOT DO (#lzunboundblockguard), because it
 // used to do both:
