@@ -205,6 +205,83 @@ for (const name of [
   test(`conformance: ${name}`, () => runFixture(name));
 }
 
+// -- diff op ORDER is a cross-binding contract (#lzdifforderallbindings) ------
+//
+// `diff` sorts by `(counter, peer)`. That sort looks like a cosmetic tidy-up and
+// nothing pinned it, but the shared corpus addresses diff results POSITIONALLY:
+// `lossless-tree/non_contiguous_anti_entropy.json` delivers `only: [0, 2]`,
+// which indexes into whatever `diff` returns. The fixture therefore means the
+// same thing in rs / py / js / zig only while all four return the same order.
+//
+// The corpus cannot defend the contract itself. Measured in lazily-zig (commit
+// e8a2a28): reversing the sort, and deleting it outright, both left the whole
+// suite green — the two delivered indices select the same SET either way, and
+// `applyUpdate` is order-tolerant by design. So the order needs a direct test.
+//
+// The trap in writing one is vacuity: if the ops enter the log already in
+// canonical order, a reversed or absent sort satisfies "strictly increasing" by
+// luck. So the state below is built so ARRIVAL order and CANONICAL order
+// genuinely differ — `a` runs ahead to counter 4 while `b`'s op stays at
+// counter 3, and that lower-counter remote op arrives LAST — and the test
+// asserts that difference EXPLICITLY first. If a refactor ever makes the two
+// coincide, this test fails loudly rather than degrading into a tautology.
+test("diff returns ops in canonical (counter, peer) order", () => {
+  const a = new LosslessTreeCrdt(1);
+  const para = a.createNode(ROOT, null, { type: "element", kind: "para" });
+  const base = a.createNode(para, null, { type: "leaf", leafKind: LeafKind.Trivia, text: "0" });
+
+  const b = a.fork(2);
+
+  // `a` runs ahead to counter 4; `b`'s single op stays at counter 3.
+  const one = a.createNode(para, base, { type: "leaf", leafKind: LeafKind.Trivia, text: "1" });
+  const two = a.createNode(para, one, { type: "leaf", leafKind: LeafKind.Trivia, text: "2" });
+  const remote = b.createNode(para, base, { type: "leaf", leafKind: LeafKind.Trivia, text: "9" });
+
+  const fromB = b.diff(a.frontier());
+  assert.equal(fromB.ops.length, 1, "only b's own op is unknown to a");
+  a.applyUpdate(fromB);
+
+  const all = a.diff(new TreeVersionFrontier());
+
+  // The order the ops entered `a`: its four local ops as committed, then the
+  // remote op, which lands last despite sorting fourth. (`createNode` returns
+  // the node id, which is its op id, so this is built from real values rather
+  // than from hardcoded counters.)
+  const arrival = [para, base, one, two, remote];
+  const key = (id) => `${id.counter}:${id.peer}`;
+
+  // Same ops, so the comparison below is about ORDER and nothing else. If the
+  // library ever mints a different op set here, this fails instead of letting
+  // the order assertions compare against a stale list.
+  assert.deepEqual(
+    all.ops.map((op) => key(op.id)).sort(),
+    arrival.map(key).sort(),
+    "diff returns exactly the ops that entered the replica",
+  );
+
+  // Non-vacuity, asserted against a canonical order the TEST computes rather
+  // than one the library hands back: if a refactor ever made ops arrive already
+  // sorted, every check below would hold for an unsorted or reversed `diff` too
+  // and this test would silently pin nothing. This fails loudly instead.
+  const canonical = [...arrival].sort((x, y) =>
+    x.counter !== y.counter ? x.counter - y.counter : x.peer - y.peer,
+  );
+  assert.notDeepEqual(
+    arrival.map(key),
+    canonical.map(key),
+    "arrival order must differ from canonical order or this test pins nothing",
+  );
+
+  // The contract: strictly increasing by (counter, peer).
+  for (let i = 1; i < all.ops.length; i++) {
+    const prev = all.ops[i - 1].id;
+    const curr = all.ops[i].id;
+    const ordered =
+      prev.counter !== curr.counter ? prev.counter < curr.counter : prev.peer < curr.peer;
+    assert.ok(ordered, `diff op ${i - 1} (${key(prev)}) must sort before op ${i} (${key(curr)})`);
+  }
+});
+
 // -- Wire schema compliance: emitted TreeUpdate validates against the schema ---
 
 const schemaDir = schemasRoot;
