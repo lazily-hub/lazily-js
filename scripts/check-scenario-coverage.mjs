@@ -384,8 +384,10 @@ if (problems > 0) {
 // a scenario dispatch stopped matching or the ledger detached, which is the
 // finding.
 // PINNED TO REALITY (#lzscenariofloordrift). This floor equals what CI actually
-// replays, with NO margin: the run that pinned it REPLAYED exactly 153
-// scenarios, and 154 fails.
+// replays, with NO margin: the run that pinned it REPLAYED exactly 155
+// scenarios, and 156 fails. (153 -> 155: the two lossless-tree apply_update
+// fixtures lazily-spec 39df4b3 added carry one scenario each,
+// #lzspecoutoforderfixtures.)
 //
 // It replaces the convention this comment used to record -- "its eight
 // scenarios took the observed run from 118 to 126, so the floor moves by the
@@ -399,7 +401,7 @@ if (problems > 0) {
 // this to that <n>, then prove it exact by setting it to <n>+1 and watching
 // this guard fail. A floor you never watched fail is a floor you have not
 // verified.
-const MIN_SCENARIOS = Number(process.env.MIN_SCENARIOS ?? "153");
+const MIN_SCENARIOS = Number(process.env.MIN_SCENARIOS ?? "155");
 if (total === 0) {
   fail([
     "ERROR: ZERO scenarios were found across the opened fixtures.",

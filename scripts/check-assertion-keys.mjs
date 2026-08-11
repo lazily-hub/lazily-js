@@ -478,8 +478,10 @@ if (problems > 0) {
 // two rungs up; this is the assertion-key rung of the same ladder.
 //
 // PINNED TO REALITY (#lzscenariofloordrift). This floor equals what CI actually
-// asserts, with NO margin: the run that pinned it ASSERTED exactly 3721 keys of
-// 3797 present, and 3722 fails. (It was 1012/1047 while sibling assertion blocks
+// asserts, with NO margin: the run that pinned it ASSERTED exactly 3730 keys of
+// 3806 present, and 3731 fails. (3721 -> 3730: the two lossless-tree
+// apply_update fixtures lazily-spec 39df4b3 added, #lzspecoutoforderfixtures.
+// It was 1012/1047 while sibling assertion blocks
 // COLLAPSED onto one key record, #lzjsblocknamemasking: the recorder booked
 // `frames[0].assertions` and `frames[3].assertions` under the same bare name, so
 // a key asserted in one sibling marked every other sibling asserted too and the
@@ -509,7 +511,7 @@ if (problems > 0) {
 // not verified. NEVER lower it to make the gate green: a drop means keys stopped
 // being reached or stopped being asserted, and that is the finding, not the
 // floor.
-const MIN_ASSERTED_KEYS = Number(process.env.MIN_ASSERTED_KEYS ?? "3721");
+const MIN_ASSERTED_KEYS = Number(process.env.MIN_ASSERTED_KEYS ?? "3730");
 if (present.size === 0) {
   fail([
     "ERROR: the manifest recorded ZERO tracked assertion keys.",
@@ -545,8 +547,9 @@ if (consumed < MIN_ASSERTED_KEYS) {
 // as though it bounds the left-hand number; it does not.
 //
 // So the floor equals what CI actually declares, with NO margin: the run that
-// pinned it DECLARED exactly 887 object-valued keys (of which 861 were key-set
-// checked), and 888 fails.
+// pinned it DECLARED exactly 889 object-valued keys (of which 863 were key-set
+// checked), and 890 fails. (887 -> 889: the two lossless-tree apply_update
+// fixtures lazily-spec 39df4b3 added, #lzspecoutoforderfixtures.)
 //
 // It was 209/199 while sibling assertion blocks COLLAPSED onto one key record
 // (#lzjsblocknamemasking). That collapse was worse here than one rung up: an
@@ -568,7 +571,7 @@ if (consumed < MIN_ASSERTED_KEYS) {
 // from the numerator passes at +1 and looks verified while bounding nothing.
 // NEVER lower it to make the gate green: a drop means fixtures stopped being
 // opened or the recorder stopped declaring the shape, and that is the finding.
-const MIN_OBJECT_VALUED_KEYS = Number(process.env.MIN_OBJECT_VALUED_KEYS ?? "887");
+const MIN_OBJECT_VALUED_KEYS = Number(process.env.MIN_OBJECT_VALUED_KEYS ?? "889");
 if (objectValued.size < MIN_OBJECT_VALUED_KEYS) {
   fail([
     `ERROR: only ${objectValued.size} assertion keys were declared OBJECT-VALUED, expected >= ${MIN_OBJECT_VALUED_KEYS}.`,
@@ -651,8 +654,10 @@ const KNOWN_UNBOUND_BLOCKS = [];
 // make the gate green.
 //
 // PINNED TO REALITY (#lzscenariofloordrift). This equals what CI actually
-// inventories, with NO margin: the run that pinned it declared exactly 596
-// blocks, and 597 fails.
+// inventories, with NO margin: the run that pinned it declared exactly 598
+// blocks, and 599 fails. (596 -> 598: the two lossless-tree apply_update
+// fixtures lazily-spec 39df4b3 added contribute four assertion-block sites,
+// two of whose digests are new, #lzspecoutoforderfixtures.)
 //
 // It was 32 -- not a drifted floor but an accurate count of a declaring side
 // that only ever looked at four container paths (#lzunboundblockguard). The
@@ -663,7 +668,7 @@ const KNOWN_UNBOUND_BLOCKS = [];
 // a delta: run `make check`, read the "assertion-block bind OK: <n>/<n>" line,
 // set this to that <n>, then prove it exact by setting it to <n>+1 and watching
 // this guard fail.
-const MIN_BLOCKS = Number(process.env.MIN_BLOCKS ?? "596");
+const MIN_BLOCKS = Number(process.env.MIN_BLOCKS ?? "598");
 
 function blockDigest(object) {
   let text;

@@ -76,6 +76,66 @@ class World {
   }
 }
 
+// A PARTIAL delivery step. Both selectors index POSITIONALLY into the very same
+// list `sync` would have sent — `from.diff(to.frontier())`, which `diff` returns
+// sorted by dotted `(counter, peer)`. That shared derivation is the whole reason
+// the corpus can address a diff by index at all (#lzdifforderallbindings), so it
+// is computed here exactly once and neither selector is allowed to recompute or
+// re-sort it.
+//
+//   only:  that SUBSET, delivered in canonical order.
+//   order: exactly those entries, delivered in the LISTED SEQUENCE, as ONE
+//          `applyUpdate` call. `order` need not be a permutation of the whole
+//          diff, and it is never re-sorted — reordering it would destroy the
+//          only thing `lossless-tree/out_of_order_delivery_buffers.json` tests,
+//          which is that `apply_update` buffers an op whose dependency has not
+//          arrived and retries it as the rest of the SAME batch lands.
+//
+// Three ways a lenient reading of this step would report a false green, so all
+// three are hard errors rather than defaults:
+//
+//   * BOTH selectors present — the two disagree about order, and silently
+//     preferring one replays a step the fixture did not write.
+//   * NEITHER present — a `deliver` that selects nothing is not a full sync; it
+//     would deliver an empty (or complete) batch and assert against it.
+//   * an index outside the diff — clamping or `undefined`-padding turns a
+//     fixture that means "deliver op 2 first" into one that delivers fewer ops,
+//     or into an `applyUpdate` over holes, and still renders convergently.
+function applyDeliver(world, deliver) {
+  const { from, to, only, order } = deliver;
+  const hasOnly = only !== undefined;
+  const hasOrder = order !== undefined;
+  if (hasOnly && hasOrder) {
+    throw new Error(
+      "deliver names BOTH `only` and `order`; exactly one selector is allowed, " +
+        "because they disagree about delivery order and picking one silently " +
+        "replays a step the fixture did not write",
+    );
+  }
+  if (!hasOnly && !hasOrder) {
+    throw new Error("deliver names NEITHER `only` nor `order`; exactly one selector is required");
+  }
+  const selector = hasOnly ? only : order;
+  if (!Array.isArray(selector)) {
+    throw new Error(`deliver.${hasOnly ? "only" : "order"} must be an array of diff indexes`);
+  }
+  const full = world.replicas.get(from).diff(world.replicas.get(to).frontier());
+  const pick = (i) => {
+    if (!Number.isInteger(i) || i < 0 || i >= full.ops.length) {
+      throw new Error(
+        `deliver.${hasOnly ? "only" : "order"} index ${JSON.stringify(i)} is out of range for a ` +
+          `diff of ${full.ops.length} op(s) from \`${from}\` to \`${to}\``,
+      );
+    }
+    return full.ops[i];
+  };
+  // `only` is a SET selector: resolve every index (so an out-of-range one still
+  // fails) and then emit them in canonical order regardless of how the fixture
+  // listed them. `order` is a SEQUENCE selector and keeps the listed order.
+  const indexes = hasOnly ? [...selector].sort((x, y) => x - y) : selector;
+  world.replicas.get(to).applyUpdate({ ops: indexes.map(pick) });
+}
+
 function applyStep(world, step) {
   if (typeof step.fork === "string") {
     world.replicas.set(step.fork, world.replicas.get("a").fork(step.peer));
@@ -84,9 +144,7 @@ function applyStep(world, step) {
     const update = world.replicas.get(from).diff(world.replicas.get(to).frontier());
     world.replicas.get(to).applyUpdate(update);
   } else if (step.deliver) {
-    const { from, to, only } = step.deliver;
-    const full = world.replicas.get(from).diff(world.replicas.get(to).frontier());
-    world.replicas.get(to).applyUpdate({ ops: only.map((i) => full.ops[i]) });
+    applyDeliver(world, step.deliver);
   } else if (typeof step.on === "string") {
     applyOp(world, step.on, step);
   } else {
@@ -201,9 +259,110 @@ for (const name of [
   "token_trivia_preservation.json",
   "invalid_source_roundtrip.json",
   "concurrent_conflict_preserves_text.json",
+  // The two apply_update rules no earlier fixture could see (lazily-spec
+  // 39df4b3, #lzspecoutoforderfixtures). Both were motivated by a real defect in
+  // lazily-cpp, and both are invisible to `converged` alone:
+  //
+  //   apply_update_advances_counter — the Lamport counter must advance past
+  //     every observed op UNCONDITIONALLY and BEFORE the idempotence skip, so a
+  //     write minted after a sync outranks the stamps that sync delivered. Every
+  //     older lossless-tree fixture is fork -> concurrent edits -> sync and never
+  //     mutates a replica AFTER a sync into it, so none of them can see it. A
+  //     binding that skips the advance still CONVERGES — on `yx` instead of
+  //     `xy` — which is why `render_on` is the load-bearing assertion here.
+  //
+  //   out_of_order_delivery_buffers — an op whose dependency has not arrived
+  //     must be BUFFERED and retried as later ops in the same batch land, not
+  //     dropped-while-recording-its-dot. It needs `deliver.order` (see
+  //     `applyDeliver`) to hand the batch over reversed in ONE `applyUpdate`
+  //     call; the loss it detects is permanent, and the fixture's trailing full
+  //     `sync` proves it — both frontiers already hold every op, so nothing is
+  //     left to repair.
+  "apply_update_advances_counter.json",
+  "out_of_order_delivery_buffers.json",
 ]) {
   test(`conformance: ${name}`, () => runFixture(name));
 }
+
+// -- the `deliver` step's own contract (#lzspecoutoforderfixtures) ------------
+//
+// `deliver` is the only step that addresses a diff POSITIONALLY, so its failure
+// modes are all silent: a clamped index, a dropped selector, or a re-sorted
+// `order` each still produce a batch that applies cleanly and a tree that
+// converges. Nothing in the corpus can catch that — a fixture cannot assert on
+// how its own step was interpreted — so the interpretation is pinned here.
+function deliverWorld() {
+  const world = new World();
+  const a = new LosslessTreeCrdt(1);
+  world.replicas.set("a", a);
+  const para = a.createNode(ROOT, null, { type: "element", kind: "para" });
+  world.ids.set("para", para);
+  world.replicas.set("b", a.fork(2));
+  // Three ops `b` has never seen, so every diff below has exactly three entries.
+  for (const text of ["1", "2", "3"]) {
+    a.createNode(para, null, { type: "leaf", leafKind: LeafKind.Raw, text });
+  }
+  return world;
+}
+
+test("deliver.order rejects an out-of-range index instead of clamping it", () => {
+  const world = deliverWorld();
+  assert.equal(world.replicas.get("a").diff(world.replicas.get("b").frontier()).ops.length, 3);
+  assert.throws(
+    () => applyStep(world, { deliver: { from: "a", to: "b", order: [2, 3, 0] } }),
+    /out of range for a diff of 3 op\(s\)/,
+    "an index past the end must fail the fixture, not silently deliver fewer ops",
+  );
+  assert.throws(
+    () => applyStep(world, { deliver: { from: "a", to: "b", order: [-1] } }),
+    /out of range/,
+    "a negative index must fail rather than wrap or clamp to 0",
+  );
+  // `only` indexes the same list and gets the same treatment.
+  assert.throws(
+    () => applyStep(world, { deliver: { from: "a", to: "b", only: [0, 7] } }),
+    /out of range/,
+  );
+});
+
+test("deliver requires EXACTLY one of `only` / `order`", () => {
+  assert.throws(
+    () => applyStep(deliverWorld(), { deliver: { from: "a", to: "b", only: [0], order: [0] } }),
+    /BOTH `only` and `order`/,
+  );
+  assert.throws(
+    () => applyStep(deliverWorld(), { deliver: { from: "a", to: "b" } }),
+    /NEITHER `only` nor `order`/,
+  );
+});
+
+test("deliver.order hands the listed sequence to ONE applyUpdate call, unsorted", () => {
+  const world = deliverWorld();
+  const b = world.replicas.get("b");
+  const canonical = world.replicas.get("a").diff(b.frontier()).ops;
+
+  const calls = [];
+  const real = b.applyUpdate.bind(b);
+  b.applyUpdate = (update) => {
+    calls.push(update.ops.map((op) => `${op.id.counter}:${op.id.peer}`));
+    return real(update);
+  };
+
+  applyStep(world, { deliver: { from: "a", to: "b", order: [2, 0] } });
+
+  assert.equal(calls.length, 1, "a reversed batch must arrive as ONE call, not split per op");
+  assert.deepEqual(
+    calls[0],
+    [canonical[2], canonical[0]].map((op) => `${op.id.counter}:${op.id.peer}`),
+    "`order` selects by index into the canonical diff and preserves the listed sequence",
+  );
+  // Non-vacuity: canonical order really does differ from what was delivered, so
+  // a runner that re-sorted would be caught by the assertion above.
+  assert.notDeepEqual(
+    calls[0],
+    canonical.slice(0, 3).map((op) => `${op.id.counter}:${op.id.peer}`),
+  );
+});
 
 // -- diff op ORDER is a cross-binding contract (#lzdifforderallbindings) ------
 //

@@ -199,8 +199,10 @@ fi
 # corpus or the recorder shrank, which is the finding.
 #
 # PINNED TO REALITY (#lzscenariofloordrift). This floor equals what CI actually
-# replays, with NO margin: the run that pinned it OPENED exactly 141 fixtures,
-# and 142 fails. The older convention visible in this file's history -- "the
+# replays, with NO margin: the run that pinned it OPENED exactly 143 fixtures,
+# and 144 fails. (141 -> 143: lazily-spec 39df4b3 added
+# lossless-tree/apply_update_advances_counter.json and
+# lossless-tree/out_of_order_delivery_buffers.json, #lzspecoutoforderfixtures.) The older convention visible in this file's history -- "the
 # observed run went from 135 to 136, so raise the floor by one and keep the
 # margin it had" -- is the bug it replaces. It only ever widens the gap, and
 # the gap had reached 9. A floor 9 below reality tolerates 9 fixtures silently
@@ -211,7 +213,7 @@ fi
 # coverage OK: <n>/..." line, set this to that <n>, then prove it is exact by
 # temporarily setting it to <n>+1 and watching this guard fail. A floor you
 # never watched fail is a floor you have not verified.
-MIN_FIXTURES="${MIN_FIXTURES:-141}"
+MIN_FIXTURES="${MIN_FIXTURES:-143}"
 if [ "$total" -eq 0 ]; then
   echo "ERROR: the corpus at $SPEC_DIR listed ZERO fixtures." >&2
   echo "       Every check above is vacuously green over an empty population." >&2
