@@ -380,7 +380,7 @@ const AREA_OF_FIXTURE = /^([A-Za-z][A-Za-z0-9._-]*)\/[^/]+\.json$/;
 // A bare area name handed to the corpus seam, `specPath("windowing")`. The
 // runners that list a directory spell the area this way and never name a file.
 const BARE_AREA = /^[A-Za-z][A-Za-z0-9_-]*$/;
-const SEAM_CALL = /(?:specPath|listFixtures|fixtureExists|readFixtureText|loadFixture)\(\s*$/;
+const SEAM_CALL = /(?:specPath|fixtureExists|readFixtureText|loadFixture)\(\s*$/;
 
 const GUARD_FILE = "test/conformance-guard.test.js";
 

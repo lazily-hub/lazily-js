@@ -199,8 +199,24 @@ for (const fixture of corpusFixtures()) {
   let parsed;
   try {
     parsed = JSON.parse(readFileSync(join(SPEC_DIR, fixture), "utf8"));
-  } catch {
-    continue;
+  } catch (error) {
+    // The only unnamed swallow in this ladder used to live here: `catch { continue; }`
+    // dropped an unparseable corpus fixture without saying which one
+    // (#lzjsscenarioswallow). It could not hide a coverage gap — rung 1 still
+    // demands the file be opened, and any runner that opens it dies on
+    // JSON.parse — but a fixture that vanishes from scenario accounting without
+    // naming itself is the shape every other rung here refuses. A corpus file
+    // that is PRESENT but unreadable is a broken input, not the absent-corpus
+    // case this script skips on a checkout without the sibling.
+    console.error(
+      `ERROR: canonical fixture '${fixture}' (${join(SPEC_DIR, fixture)}) is not valid JSON: ${error.message}\n` +
+        `       It is PRESENT but unusable, so scenario coverage computed without it\n` +
+        `       would be an undercount reported as a pass. Restore it from a clean\n` +
+        `       lazily-spec checkout. If this is a perturbation probe under\n` +
+        `       LAZILY_SPEC_CONFORMANCE_DIR, the PROBE is broken: a truncated fixture perturbs nothing\n` +
+        `       a runner can disagree with — flip an assertion VALUE instead.`,
+    );
+    process.exit(1);
   }
   if (parsed === null || typeof parsed !== "object" || !Array.isArray(parsed.scenarios)) continue;
   corpusScenarios.set(

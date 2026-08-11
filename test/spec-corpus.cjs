@@ -117,15 +117,22 @@ function loadFixture(...segments) {
   return JSON.parse(readFixtureText(...segments));
 }
 
-/** `.json` entries of a corpus directory, sorted. Throws when the directory is absent. */
-function listFixtures(...segments) {
-  const dir = specPath(...segments);
-  if (!fs.existsSync(dir)) throw new Error(missingFixtureMessage(...segments));
-  return fs
-    .readdirSync(dir)
-    .filter((name) => name.endsWith(".json"))
-    .sort();
-}
+// There is deliberately NO listFixtures() here (#lzjsscenarioswallow).
+//
+// One existed, exported, with zero call sites. It is the exact primitive that
+// introduces the enumerating-host shape #lzledgeragreementaudit exists to catch:
+// a runner that DISCOVERS fixtures by reading the corpus directory replays
+// whatever lands there, including a shape it has never been taught, while the
+// shell guard's KNOWN_UNCOVERED says the fixture is a declared gap. lazily-cs
+// died on exactly that — a bare KeyNotFoundException naming neither the fixture
+// nor the reason — when a fixture was added upstream.
+//
+// Every runner here NAMES its fixtures, which is why a new upstream fixture
+// reddens the "not opened and not excused" rung instead of crashing a runner.
+// Keeping an unused enumeration helper around is an invitation to reach for it.
+// If a runner ever genuinely needs to enumerate, add the drift assertion FIRST:
+// compare the listing against a hardcoded set before reading a byte, the way
+// test/reactive-graph-conformance.test.js does.
 
 // ---------------------------------------------------------------------------
 // Schemas seam (#lzspecschemasoverride)
@@ -195,7 +202,6 @@ module.exports = {
   fixtureExists,
   readFixtureText,
   loadFixture,
-  listFixtures,
   schemasRoot,
   schemaPath,
   missingFixtureMessage,
