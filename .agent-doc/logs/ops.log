@@ -1,0 +1,7 @@
+[2026-08-11T11:49:52Z] ffi_ensure_controller_running_failed project_root=/home/brian/work/btakita/agent-loop/src/lazily-js error=failed to connect to project controller: No such file or directory (os error 2) doc=lazily-js
+[2026-08-11T11:57:08Z] ffi_ensure_controller_running_failed project_root=/home/brian/work/btakita/agent-loop/src/lazily-js error=failed to connect to project controller: No such file or directory (os error 2) doc=lazily-js
+[2026-08-11T13:32:33Z] ffi_ensure_controller_running_failed project_root=/home/brian/work/btakita/agent-loop/src/lazily-js error=failed to connect to project controller: No such file or directory (os error 2) doc=lazily-js
+[2026-08-11T13:36:18Z] ffi_ensure_controller_running_failed project_root=/home/brian/work/btakita/agent-loop/src/lazily-js error=failed to connect to project controller: No such file or directory (os error 2) doc=lazily-js
+[2026-08-11T13:37:18Z] ffi_ensure_controller_running_failed project_root=/home/brian/work/btakita/agent-loop/src/lazily-js error=failed to connect to project controller: No such file or directory (os error 2) doc=lazily-js
+[2026-08-11T14:02:34Z] ffi_ensure_controller_running_failed project_root=/home/brian/work/btakita/agent-loop/src/lazily-js error=failed to connect to project controller: No such file or directory (os error 2) doc=lazily-js
+[2026-08-11T14:04:04Z] ffi_ensure_controller_running_failed project_root=/home/brian/work/btakita/agent-loop/src/lazily-js error=failed to connect to project controller: No such file or directory (os error 2) doc=lazily-js
