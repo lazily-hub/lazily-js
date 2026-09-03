@@ -2687,3 +2687,4 @@ export {
   TimerError,
   checkedDeadline,
 } from "./stdlib.js";
+export * from "./latest-durable-projection.js";

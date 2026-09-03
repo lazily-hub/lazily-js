@@ -112,6 +112,28 @@ and JSON Schemas in `lazily-spec` and the Lean models in `lazily-formal`.
 | `@lazily-hub/lazily-js/ingress` | Single-threaded ingress shell: `IngressCell` over `Context` — four reader kinds per scope (`value` / `readiness` / `authority` / `retry`), three receipt readers, and a derived schedule (`#designimplementtransport`) |
 | `@lazily-hub/lazily-js/thread-safe-ingress` | `Send + Sync` ingress shell: `ThreadSafeIngressCell` — the core guarded by its own mutex, invalidation run with that lock released and fanned out in ONE frontier walk (`#designimplementtransport`) |
 | `@lazily-hub/lazily-js/async-ingress` | Async ingress shell: `AsyncIngressCell` over `AsyncContext` — admission stays synchronous; only reader materialization is async-coloured (`#designimplementtransport`) |
+| `@lazily-hub/lazily-js/latest-durable-projection-core` | Graph-independent `LatestDurableProjectionCore<K,V>` state machine for conflated, retryable, generation-fenced egress |
+| `@lazily-hub/lazily-js/latest-durable-projection` | Sync, thread-safe, and async reactive shells over the latest-durable core |
+
+## Latest durable projection
+
+`LatestDurableProjectionCore<K,V>` keeps the newest desired value per key while
+allowing at most one claimed effect for that key. `upsertDesired` assigns a
+monotone epoch, `claim` returns the exact generation/epoch/value envelope to
+send, and `ackApplied` advances `durableThrough` only for that claimed envelope.
+`failRetryable` returns an unsuperseded failure to pending state. `reconnect`
+advances the generation fence and requeues old in-flight work unless a newer
+desired epoch has already superseded it, so acknowledgements from an old actor
+cannot erase current intent.
+
+Use `LatestDurableProjection` with `Context`,
+`ThreadSafeLatestDurableProjection` with `ThreadSafeContext`, or
+`AsyncLatestDurableProjection` with `AsyncContext`. The shells expose
+`generationState`, `snapshotState`, and memoized `entryState(key)` readers;
+transitions remain synchronous in every flavor. Their behavior replays
+`lazily-spec` v0.38.0's canonical
+`conformance/egress/latest_durable_projection.json` fixture and corresponds to
+`LazilyFormal.LatestDurableProjectionCore` in lazily-formal v0.38.1.
 
 ## Reactive graph
 
@@ -770,7 +792,7 @@ shipped bytes.
 
 <!-- size-limits:start -->
 
-Generated for package `@lazily-hub/lazily-js` version `0.31.0`. Every entry is **minified + brotlied, tree-shaken to the named import** (`size-limit` + esbuild, the same pipeline Webpack/Rollup/Vite apply via `"sideEffects": false`).
+Generated for package `@lazily-hub/lazily-js` version `0.32.0`. Every entry is **minified + brotlied, tree-shaken to the named import** (`size-limit` + esbuild, the same pipeline Webpack/Rollup/Vite apply via `"sideEffects": false`).
 
 Refresh command:
 

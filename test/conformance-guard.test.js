@@ -418,13 +418,11 @@ const AREAS = [...DERIVED.areas.keys()].sort();
 // individual fixtures: an entry is a claim that somebody looked, and it is
 // verified in both directions below so it cannot rot into something that used to
 // be true.
-const AREAS_NOT_REPLAYED = {
-  egress: "reactive egress is Rust-only; JavaScript has no egress replay runner.",
-};
+const AREAS_NOT_REPLAYED = {};
 
-// PINNED TO REALITY, read the note on MIN_SCANNED_FILES. Twenty-five replayed
-// areas plus the excused `egress` is the whole corpus.
-const MIN_AREAS = 25;
+// PINNED TO REALITY, read the note on MIN_SCANNED_FILES. All twenty-six corpus
+// areas are replayed by this binding.
+const MIN_AREAS = 26;
 
 const corpusAreas = () =>
   readdirSync(specConformance, { withFileTypes: true })
