@@ -52,6 +52,10 @@ jobs:
         working-directory: lazily-js
         run: npm ci
 
+      - name: Build generated artifacts
+        working-directory: lazily-js
+        run: npm run build
+
       - name: Test
         working-directory: lazily-js
         run: npm test
