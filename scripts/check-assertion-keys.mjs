@@ -656,8 +656,12 @@ const KNOWN_UNBOUND_BLOCKS = [];
 // make the gate green.
 //
 // PINNED TO REALITY (#lzscenariofloordrift). This equals what CI actually
-// inventories, with NO margin: the run that pinned it declared exactly 635
-// blocks, and 636 fails. (598 -> 635: the three conformance/replay/ fixtures
+// inventories, with NO margin: the run that pinned it declared exactly 638
+// blocks, and 639 fails. (635 -> 638: lazily-spec 4010d99 added three
+// member-framing steps to conformance/replay/canonical_encoding_equality.json,
+// one `expected` block each, #lzreplayframing. A CI clone of published
+// lazily-spec carries those three rows, so 638 is what a clean clone
+// guarantees. 598 -> 635: the three conformance/replay/ fixtures
 // this binding now replays contribute one `expected` block per step,
 // #lzreplayjs. 596 -> 598: the two lossless-tree apply_update fixtures
 // lazily-spec 39df4b3 added contribute four assertion-block sites, two of whose
@@ -672,7 +676,7 @@ const KNOWN_UNBOUND_BLOCKS = [];
 // a delta: run `make check`, read the "assertion-block bind OK: <n>/<n>" line,
 // set this to that <n>, then prove it exact by setting it to <n>+1 and watching
 // this guard fail.
-const MIN_BLOCKS = Number(process.env.MIN_BLOCKS ?? "635");
+const MIN_BLOCKS = Number(process.env.MIN_BLOCKS ?? "638");
 
 function blockDigest(object) {
   let text;

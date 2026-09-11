@@ -332,8 +332,37 @@ test("a mapping's property order and a set's insertion order are not part of the
 });
 
 test("members are framed, so a concatenation is never ambiguous", () => {
+  // These two rows assert the equality CLASS the corpus pins, and nothing more:
+  // every member carries a type tag, so `s1:a` + `s2:bc` and `s2:ab` + `s1:c`
+  // already differ as byte strings BEFORE the length is consulted. An encoder
+  // that emitted `<tag><body>` with no length at all would pass both of them.
+  // This binding ran exactly that mutation during the phase-2 rollout, watched
+  // it survive, and wrongly filed it benign because "the tag still delimits".
   assert.notEqual(canonicalDigest(["a", "bc"]), canonicalDigest(["ab", "c"]));
   assert.notEqual(canonicalDigest({ a: "", bc: "" }), canonicalDigest({ ab: "", c: "" }));
+
+  // The rows that actually pin the LENGTH (#lzreplayframing). A colliding pair
+  // is layout-specific, so it can only be written against a known byte layout,
+  // and only this repo knows this binding's. `frame()` in src/replay.js emits
+  // `<tag><decimal byte length>:<body>` with the string tag `s`, the sequence
+  // tag `l` and the mapping tag `m` — that IS the reference layout the corpus
+  // describes, so the corpus's own pairs are this binding's pairs too and are
+  // reproduced here rather than replaced.
+  //
+  // Strip the `<length>:` and the bytes below collide outright:
+  //   ["a","sbc"] -> "sa" + "ssbc" == "sas" + "sbc" <- ["as","bc"]
+  // The first member's content SPELLS the second member's tag, so the tag stops
+  // being a boundary and only the length separates them.
+  assert.notEqual(canonicalDigest(["a", "sbc"]), canonicalDigest(["as", "bc"]));
+  // The mapping analogue: a key is framed apart from its value, so the same
+  // spelled-tag trick must not slide the boundary between them.
+  //   {"a":"sb"} -> "sa" + "ssb" == "sas" + "sb" <- {"as":"b"}
+  assert.notEqual(canonicalDigest({ a: "sb" }), canonicalDigest({ as: "b" }));
+  // The layout-INDEPENDENT one: a nested container boundary has no tag to hide
+  // behind, so this pair collides under ANY unframed concatenation, whatever
+  // the tag bytes are.
+  //   [["a"],"b"] -> "l" + ("l" + "sa") + "sb" == "l" + ("l" + "sa" + "sb") <- [["a","b"]]
+  assert.notEqual(canonicalDigest([["a"], "b"]), canonicalDigest([["a", "b"]]));
 });
 
 test("bigint is the integer and number is the double", () => {
