@@ -107,24 +107,59 @@ function finalSumOf(build, log) {
 
 // -- obligations 1 and 2 ------------------------------------------------------
 
-function driveHarnessFixture(name, minimumSteps) {
+/**
+ * Every `op.type` this driver knows how to execute.
+ *
+ * Checked BEFORE the step is dispatched, so an op the corpus grows tomorrow
+ * names itself here instead of arriving at some later branch's lookup and
+ * failing on a misleading message — or, worse, falling through it
+ * (#lzcorpusfloorguard).
+ */
+const KNOWN_HARNESS_OPS = new Set(["log_digest_equal", "record", "prove", "verify", "check"]);
+
+// There is no minimum-step floor in this driver, deliberately.
+//
+// It used to carry one (`steps.length >= minimumSteps`, declared per fixture at
+// the call sites). That constant had to be raised BY HAND every time the corpus
+// grew, and when `#lzreplayframing` added three steps to an existing fixture,
+// eight of nine bindings were still pinned at the old number — the new rows sat
+// inside the slack and would have reported green WITHOUT EXECUTING
+// (#lzcorpusfloorguard).
+//
+// What replaces it is two constant-free obligations, both below:
+//
+//   1. every step LOADED was EXECUTED — counted in the dispatch loop and
+//      compared to the loaded length at the end. Exact, no number, cannot drift.
+//   2. an unknown `op.type` is a hard failure, never a silent skip.
+//
+// The one thing a floor did do — notice the corpus SHRINKING — is now caught at
+// the single place it can happen: `lazily-spec/corpus-counts.json` pins each
+// fixture's step count and `lazily-spec/scripts/check-corpus-floors.mjs` fails
+// when a fixture moves without that pin moving.
+function driveHarnessFixture(name) {
   const fixture = load(name);
   assert.equal(fixture.model, "ReplayHarness", `${name}: model`);
   const config = fixture.config;
   const logs = new Map(Object.entries(config.logs).map(([key, value]) => [key, logOf(value)]));
   const fingerprints = new Map();
   const steps = fixture.steps;
-  assert.ok(steps.length >= minimumSteps, `${name}: expected >= ${minimumSteps} steps`);
+  let executed = 0;
 
   for (const [index, step] of steps.entries()) {
     const op = step.op;
     const where = `${name} step ${index} (${op.type})`;
     const expected = step.expected;
+    assert.ok(
+      KNOWN_HARNESS_OPS.has(op.type),
+      `${where}: unknown canonical replay operation '${op.type}' — an unknown op must FAIL, ` +
+        "never be skipped or counted as passing",
+    );
 
     if (op.type === "log_digest_equal") {
       const actual = logs.get(op.left).digest === logs.get(op.right).digest;
       assert.equal(actual, step.returns, `${where}: returns`);
       consumeNote(expected, where);
+      executed += 1;
       continue;
     }
 
@@ -163,6 +198,7 @@ function driveHarnessFixture(name, minimumSteps) {
         `${where}: the recorded 'sum' digest is not the digest of the subject's final sum`,
       );
       consumeNote(expected, where);
+      executed += 1;
       continue;
     }
 
@@ -171,13 +207,21 @@ function driveHarnessFixture(name, minimumSteps) {
       assertKey(expected, "outcome", "ok", where);
       assertKey(expected, "divergences", 0, where);
       consumeNote(expected, where);
+      executed += 1;
       continue;
     }
 
-    const fingerprint = fingerprints.get(op.fingerprint);
-    assert.ok(fingerprint !== undefined, `${where}: no fingerprint named '${op.fingerprint}'`);
+    // Resolved inside the two branches that need it, not before them: hoisted,
+    // it would intercept a known-but-unhandled op ahead of the guard at the
+    // bottom of the loop and report a missing fingerprint instead.
+    const fingerprintFor = () => {
+      const found = fingerprints.get(op.fingerprint);
+      assert.ok(found !== undefined, `${where}: no fingerprint named '${op.fingerprint}'`);
+      return found;
+    };
 
     if (op.type === "verify") {
+      const fingerprint = fingerprintFor();
       let outcome = "ok";
       let first = null;
       try {
@@ -202,10 +246,12 @@ function driveHarnessFixture(name, minimumSteps) {
         assertKey(expected, "first_divergent_kind", first.kind, where);
       }
       consumeNote(expected, where);
+      executed += 1;
       continue;
     }
 
     if (op.type === "check") {
+      const fingerprint = fingerprintFor();
       let divergences = null;
       try {
         divergences = harness.check(log, fingerprint).length;
@@ -217,24 +263,37 @@ function driveHarnessFixture(name, minimumSteps) {
         assertKey(expected, "outcome", "log_mismatch", where);
         assertKey(expected, "divergences", 0, where);
         consumeNote(expected, where);
+        executed += 1;
         continue;
       }
       assertKey(expected, "outcome", "ok", where);
       assertKey(expected, "divergences", divergences, where);
       consumeNote(expected, where);
+      executed += 1;
       continue;
     }
 
-    throw new Error(`unknown canonical replay operation '${op.type}'`);
+    // Reachable only when `KNOWN_HARNESS_OPS` names an op no branch above
+    // executes — i.e. someone widened the set without wiring the behaviour.
+    assert.fail(`${where}: '${op.type}' is declared known but no branch executes it`);
   }
+
+  // Obligation 1: everything loaded ran. A step the dispatch loop skipped — for
+  // any reason, including one added by a future corpus — is named here.
+  assert.equal(
+    executed,
+    steps.length,
+    `${name}: executed ${executed} of ${steps.length} loaded steps — a step that is ` +
+      "loaded and not executed reports green while proving nothing",
+  );
 }
 
 test("canonical replay: the fingerprint is bound to its log", () => {
-  driveHarnessFixture("fingerprint_log_binding.json", 8);
+  driveHarnessFixture("fingerprint_log_binding.json");
 });
 
 test("canonical replay: a divergence is localized to its first checkpoint", () => {
-  driveHarnessFixture("divergence_localization.json", 7);
+  driveHarnessFixture("divergence_localization.json");
 });
 
 // -- obligation 3 -------------------------------------------------------------
@@ -277,18 +336,31 @@ function valueOf(tagged) {
   }
 }
 
+/** Every `op.type` the encoding driver below knows how to execute. */
+const KNOWN_ENCODING_OPS = new Set(["digest_equal", "digest_defined"]);
+
+// No minimum-step floor here either, and for the same reason: this is the very
+// fixture `#lzreplayframing` grew from 11 steps to 14 while every floor in the
+// family stayed pinned at 11. See the note above `driveHarnessFixture` — the
+// shrink guard now lives in `lazily-spec/corpus-counts.json` +
+// `lazily-spec/scripts/check-corpus-floors.mjs`.
 test("canonical replay: the observation encoding's equality classes", () => {
   const name = "canonical_encoding_equality.json";
   const fixture = load(name);
   assert.equal(fixture.model, "CanonicalEncoding", `${name}: model`);
   const values = fixture.config.values;
   const steps = fixture.steps;
-  assert.ok(steps.length >= 11, `${name}: expected >= 11 steps`);
   const outcomes = new Set();
+  let executed = 0;
 
   for (const [index, step] of steps.entries()) {
     const op = step.op;
     const where = `${name} step ${index} (${op.type})`;
+    assert.ok(
+      KNOWN_ENCODING_OPS.has(op.type),
+      `${where}: unknown canonical encoding operation '${op.type}' — an unknown op must FAIL, ` +
+        "never be skipped or counted as passing",
+    );
 
     if (op.type === "digest_equal") {
       const actual =
@@ -296,6 +368,7 @@ test("canonical replay: the observation encoding's equality classes", () => {
       assert.equal(actual, step.returns, `${where}: returns`);
       outcomes.add(actual);
       consumeNote(step.expected, where);
+      executed += 1;
       continue;
     }
 
@@ -310,11 +383,20 @@ test("canonical replay: the observation encoding's equality classes", () => {
       assert.equal(defined, step.returns, `${where}: returns`);
       assertKey(step.expected, "outcome", "encoding_error", where);
       consumeNote(step.expected, where);
+      executed += 1;
       continue;
     }
 
-    throw new Error(`unknown canonical encoding operation '${op.type}'`);
+    assert.fail(`${where}: '${op.type}' is declared known but no branch executes it`);
   }
+
+  // Obligation 1: everything loaded ran.
+  assert.equal(
+    executed,
+    steps.length,
+    `${name}: executed ${executed} of ${steps.length} loaded steps — a step that is ` +
+      "loaded and not executed reports green while proving nothing",
+  );
 
   // Both outcomes really occurred. A runner that only ever saw `false` would
   // satisfy every inequality claim in the fixture with a completely broken
