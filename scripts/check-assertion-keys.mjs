@@ -478,9 +478,11 @@ if (problems > 0) {
 // two rungs up; this is the assertion-key rung of the same ladder.
 //
 // PINNED TO REALITY (#lzscenariofloordrift). This floor equals what CI actually
-// asserts, with NO margin: the run that pinned it ASSERTED exactly 3730 keys of
-// 3806 present, and 3731 fails. (3721 -> 3730: the two lossless-tree
-// apply_update fixtures lazily-spec 39df4b3 added, #lzspecoutoforderfixtures.
+// asserts, with NO margin: the run that pinned it ASSERTED exactly 3813 keys of
+// 3889 present, and 3814 fails. (3730 -> 3813: the three conformance/replay/
+// fixtures this binding now replays, #lzreplayjs. 3721 -> 3730: the two
+// lossless-tree apply_update fixtures lazily-spec 39df4b3 added,
+// #lzspecoutoforderfixtures.
 // It was 1012/1047 while sibling assertion blocks
 // COLLAPSED onto one key record, #lzjsblocknamemasking: the recorder booked
 // `frames[0].assertions` and `frames[3].assertions` under the same bare name, so
@@ -511,7 +513,7 @@ if (problems > 0) {
 // not verified. NEVER lower it to make the gate green: a drop means keys stopped
 // being reached or stopped being asserted, and that is the finding, not the
 // floor.
-const MIN_ASSERTED_KEYS = Number(process.env.MIN_ASSERTED_KEYS ?? "3730");
+const MIN_ASSERTED_KEYS = Number(process.env.MIN_ASSERTED_KEYS ?? "3813");
 if (present.size === 0) {
   fail([
     "ERROR: the manifest recorded ZERO tracked assertion keys.",
@@ -654,10 +656,12 @@ const KNOWN_UNBOUND_BLOCKS = [];
 // make the gate green.
 //
 // PINNED TO REALITY (#lzscenariofloordrift). This equals what CI actually
-// inventories, with NO margin: the run that pinned it declared exactly 598
-// blocks, and 599 fails. (596 -> 598: the two lossless-tree apply_update
-// fixtures lazily-spec 39df4b3 added contribute four assertion-block sites,
-// two of whose digests are new, #lzspecoutoforderfixtures.)
+// inventories, with NO margin: the run that pinned it declared exactly 635
+// blocks, and 636 fails. (598 -> 635: the three conformance/replay/ fixtures
+// this binding now replays contribute one `expected` block per step,
+// #lzreplayjs. 596 -> 598: the two lossless-tree apply_update fixtures
+// lazily-spec 39df4b3 added contribute four assertion-block sites, two of whose
+// digests are new, #lzspecoutoforderfixtures.)
 //
 // It was 32 -- not a drifted floor but an accurate count of a declaring side
 // that only ever looked at four container paths (#lzunboundblockguard). The
@@ -668,7 +672,7 @@ const KNOWN_UNBOUND_BLOCKS = [];
 // a delta: run `make check`, read the "assertion-block bind OK: <n>/<n>" line,
 // set this to that <n>, then prove it exact by setting it to <n>+1 and watching
 // this guard fail.
-const MIN_BLOCKS = Number(process.env.MIN_BLOCKS ?? "598");
+const MIN_BLOCKS = Number(process.env.MIN_BLOCKS ?? "635");
 
 function blockDigest(object) {
   let text;
