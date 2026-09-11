@@ -46,7 +46,7 @@
 // assumed: their values are English prose naming a property the fixture's `steps`
 // encode, and the recorder throws if one ever carries a non-string, so a
 // machine-checkable assertion cannot hide in the one block nothing checks.
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 const SPEC_DIR_OVERRIDDEN = process.env.LAZILY_SPEC_CONFORMANCE_DIR !== undefined;
@@ -538,7 +538,8 @@ if (consumed < MIN_ASSERTED_KEYS) {
 // only the keys the recorder DECLARED object-valued, so deleting the one line
 // that emits the `O` record makes every object-valued key vacuously compliant
 // and this guard prints OK having examined none of them — the exact vacuity
-// shape MIN_ASSERTED_KEYS and MIN_BLOCKS close on the rungs either side.
+// shape MIN_ASSERTED_KEYS and the derived assertion-block equality close on the
+// rungs either side.
 //
 // PINNED TO REALITY (#lzscenariofloordrift). Read what this floor is ON before
 // moving it: its subject is the DECLARED population — `objectValued.size`, the
@@ -650,33 +651,6 @@ const BLOCK_MANIFEST =
 // as stale, and so does an entry naming a site a runner DOES bind. A one-way
 // excuse only ever gets quieter.
 const KNOWN_UNBOUND_BLOCKS = [];
-
-// Positive-evidence floor (#lzvacuousrun). Zero inventoried blocks means zero
-// unbound blocks, which reports OK having compared nothing. NEVER lower this to
-// make the gate green.
-//
-// PINNED TO REALITY (#lzscenariofloordrift). This equals what CI actually
-// inventories, with NO margin: the run that pinned it declared exactly 638
-// blocks, and 639 fails. (635 -> 638: lazily-spec 4010d99 added three
-// member-framing steps to conformance/replay/canonical_encoding_equality.json,
-// one `expected` block each, #lzreplayframing. A CI clone of published
-// lazily-spec carries those three rows, so 638 is what a clean clone
-// guarantees. 598 -> 635: the three conformance/replay/ fixtures
-// this binding now replays contribute one `expected` block per step,
-// #lzreplayjs. 596 -> 598: the two lossless-tree apply_update fixtures
-// lazily-spec 39df4b3 added contribute four assertion-block sites, two of whose
-// digests are new, #lzspecoutoforderfixtures.)
-//
-// It was 32 -- not a drifted floor but an accurate count of a declaring side
-// that only ever looked at four container paths (#lzunboundblockguard). The
-// walk is now full and recursive under a name-open rule, so the inventory is
-// the corpus's real assertion-block population rather than a 5% sample of it.
-//
-// When the corpus moves, re-derive from the gate's own output instead of adding
-// a delta: run `make check`, read the "assertion-block bind OK: <n>/<n>" line,
-// set this to that <n>, then prove it exact by setting it to <n>+1 and watching
-// this guard fail.
-const MIN_BLOCKS = Number(process.env.MIN_BLOCKS ?? "638");
 
 function blockDigest(object) {
   let text;
@@ -831,20 +805,234 @@ if (unboundBlocks.length > 0) {
   ]);
   process.exit(1);
 }
-if (declaredBlocks.size < MIN_BLOCKS) {
+// ---- Positive-evidence magnitude (#lzvacuousrun, #lzblockfloorpin) ----
+//
+// Zero inventoried blocks means zero unbound blocks, which reports OK having
+// compared nothing. So the SIZE of what the walk inventoried is asserted too, and
+// not merely that nothing it inventoried was unbound.
+//
+// This number is DERIVED, and it is an EQUALITY. It used to be `MIN_BLOCKS`, a
+// typed constant compared with `>=`, whose own comment was the ledger of its
+// drift: 32 -> 596 -> 598 -> 635 -> 638, every step the same event — the corpus
+// moved, CI went red, someone copied the gate's own output back into the source.
+// A number a person retypes after reading a log lags the corpus by however long
+// nobody reads the log, and `>=` cannot notice the lag at all: a floor 9 below
+// reality tolerates 9 blocks silently detaching, which is the failure the floor
+// existed to catch (#lzscenariofloordrift).
+//
+// The two inputs both move on their own, and neither is typed here:
+//
+//   1. the canonical corpus directory listing under SPEC_DIR, and
+//   2. this binding's own committed ledger of the fixtures it does NOT open --
+//      `KNOWN_UNCOVERED` in scripts/check-conformance-coverage.sh, PARSED out of
+//      that script rather than restated here. A second copy would be one more
+//      thing to re-pin by hand, which is the defect being removed, and the array
+//      has to stay over there anyway: lazily-spec's check-corpus-floors.mjs
+//      classifies the ledger arrays declared in it and fails on an unclassified
+//      one.
+//
+// Corpus MINUS ledger is exactly the set this suite opens. check-conformance-coverage.sh
+// asserts that same identity from the other side, failing both when a corpus
+// fixture outside the ledger is not opened and when one inside it is. So a
+// fixture landing upstream moves this number with no edit here, and a fixture
+// this binding stops opening moves it only through a committed ledger line.
+//
+// What it deliberately does NOT read: BLOCK_MANIFEST, FIXTURE_MANIFEST, or
+// anything else this run produced. An expectation derived from what the run read
+// drops to zero alongside the actual count the moment the recorder detaches, and
+// the comparison is vacuously green again — the #lzvacuousrun failure this rung
+// exists to prevent. Both inputs above are on disk whether or not a test ran.
+//
+// The walk mirrors the RECORDER's rule in test/support/conformance-manifest.cjs:
+// its TRACKED name list, read out of that file so the two cannot drift apart,
+// descending everywhere, and counting each plain-object element of an
+// ARRAY-valued tracked block as a block in its own right. That array clause is
+// why this binding derives 638 where lazily-py derives 620 over an almost
+// identical opened set — `steps[].expect` in signaling/anti_spoof_session.json is
+// a LIST of expected emissions. Blocks are counted as distinct DIGESTS under
+// blockDigest(), the same content key the recorder books a bound block under, so
+// the two sides are counting the same things.
+const COVERAGE_GUARD = "scripts/check-conformance-coverage.sh";
+const RECORDER_SOURCE = "test/support/conformance-manifest.cjs";
+
+// The ledger, read out of the bash array. A missing or unparsable array is a HARD
+// failure and never an empty set: deriving over corpus-minus-nothing would build a
+// larger expectation out of fixtures this suite never opens, and report this
+// guard's own blindness as a corpus problem.
+function knownUncoveredFixtures() {
+  if (!existsSync(COVERAGE_GUARD)) {
+    fail([
+      `ERROR: cannot read ${COVERAGE_GUARD}, which holds the KNOWN_UNCOVERED ledger the`,
+      "       assertion-block expectation is derived from.",
+    ]);
+    process.exit(1);
+  }
+  const text = readFileSync(COVERAGE_GUARD, "utf8");
+  const marker = "\nKNOWN_UNCOVERED=(\n";
+  const start = text.indexOf(marker);
+  if (start < 0) {
+    fail([
+      `ERROR: ${COVERAGE_GUARD} no longer declares a KNOWN_UNCOVERED=( array. The`,
+      "       assertion-block expectation is derived from it, so a rename has to be",
+      "       mirrored here rather than quietly deriving over a different set.",
+    ]);
+    process.exit(1);
+  }
+  const body = text.slice(start + marker.length);
+  const end = body.indexOf("\n)\n");
+  if (end < 0) {
+    fail([
+      `ERROR: ${COVERAGE_GUARD}: the KNOWN_UNCOVERED=( array is never closed by a line`,
+      "       holding only ')'.",
+    ]);
+    process.exit(1);
+  }
+  const entries = new Set();
+  for (const line of body.slice(0, end).split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed === "" || trimmed.startsWith("#")) continue;
+    for (const match of trimmed.matchAll(/"([^"]+)"/g)) entries.add(match[1]);
+  }
+  if (entries.size === 0) {
+    fail([
+      `ERROR: ${COVERAGE_GUARD}: KNOWN_UNCOVERED parsed as EMPTY. Shrinking that list to`,
+      "       nothing is the goal state, but so is a parser that has stopped matching its",
+      "       entries, and the two are indistinguishable from here. If the list is",
+      "       genuinely empty, relax this check deliberately.",
+    ]);
+    process.exit(1);
+  }
+  return entries;
+}
+
+// The recorder's own TRACKED names, read from its source. Restating the five
+// spellings here would be a second list to keep in step, and a derivation that
+// walked the corpus differently from the recorder it is compared against would be
+// worse than the constant it replaces.
+function recorderTrackedNames() {
+  if (!existsSync(RECORDER_SOURCE)) {
+    fail([
+      `ERROR: cannot read ${RECORDER_SOURCE}, whose TRACKED list is the walk rule the`,
+      "       assertion-block expectation is derived with.",
+    ]);
+    process.exit(1);
+  }
+  const match = readFileSync(RECORDER_SOURCE, "utf8").match(
+    /const TRACKED = new Set\(\[([^\]]*)\]\)/,
+  );
+  const names = match === null ? [] : [...match[1].matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+  if (names.length === 0) {
+    fail([
+      `ERROR: ${RECORDER_SOURCE} no longer declares a readable`,
+      "       `const TRACKED = new Set([...])`. The expectation below is derived with that",
+      "       list; deriving with an empty one would expect zero blocks and pass over a",
+      "       corpus carrying hundreds.",
+    ]);
+    process.exit(1);
+  }
+  return new Set(names);
+}
+
+function corpusFixtures(dir, base) {
+  const out = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) out.push(...corpusFixtures(full, base));
+    else if (entry.isFile() && entry.name.endsWith(".json")) out.push(full.slice(base.length + 1));
+  }
+  return out.sort();
+}
+
+const trackedNames = recorderTrackedNames();
+const excusedFixtures = knownUncoveredFixtures();
+const corpusRoot = join(SPEC_DIR, ".");
+const derivedDigests = new Set();
+let derivedSites = 0;
+let derivedFixtures = 0;
+for (const fixture of corpusFixtures(corpusRoot, corpusRoot)) {
+  if (excusedFixtures.has(fixture)) continue;
+  derivedFixtures += 1;
+  let parsed;
+  try {
+    parsed = JSON.parse(readFileSync(join(corpusRoot, fixture), "utf8"));
+  } catch (error) {
+    // NOT a `continue`, unlike the inventory walk above: there the fixture is one
+    // the run already parsed, here an unparsable file would silently subtract its
+    // blocks from the expectation and make the comparison agree with a corpus
+    // nobody can read.
+    fail([
+      `ERROR: cannot derive the assertion-block expectation: '${fixture}' under ${corpusRoot}`,
+      `       is unreadable or is not JSON (${error.message}). A fixture that cannot be`,
+      "       parsed is missing evidence, not a fixture carrying no blocks.",
+    ]);
+    process.exit(1);
+  }
+  const take = (block) => {
+    if (!isPlain(block)) return;
+    const digest = blockDigest(block);
+    if (digest === null) return;
+    derivedSites += 1;
+    derivedDigests.add(digest);
+  };
+  const derive = (node) => {
+    if (Array.isArray(node)) {
+      node.forEach(derive);
+      return;
+    }
+    if (!isPlain(node)) return;
+    for (const [key, value] of Object.entries(node)) {
+      if (trackedNames.has(key)) {
+        if (isPlain(value)) take(value);
+        else if (Array.isArray(value)) value.forEach(take);
+      }
+      derive(value);
+    }
+  };
+  derive(parsed);
+}
+const EXPECTED_BLOCKS = derivedDigests.size;
+if (derivedFixtures === 0 || EXPECTED_BLOCKS === 0) {
   fail([
-    `ERROR: only ${declaredBlocks.size} distinct assertion blocks were inventoried, expected >= ${MIN_BLOCKS}.`,
-    "       The disk-side inventory detached, or fixtures stopped being opened. Zero",
-    "       inventoried blocks means zero unbound blocks, which is OK over nothing.",
-    "       Do not lower MIN_BLOCKS to fix this.",
+    `ERROR: deriving the assertion-block expectation over ${corpusRoot} found`,
+    `       ${derivedFixtures} fixture(s) and ${EXPECTED_BLOCKS} block(s). An expectation of zero`,
+    "       is satisfied by an inventory of zero, which is this rung reporting OK over",
+    "       nothing at all. The corpus path is wrong, or the ledger excused all of it.",
+  ]);
+  process.exit(1);
+}
+
+if (declaredBlocks.size !== EXPECTED_BLOCKS) {
+  const fewer = declaredBlocks.size < EXPECTED_BLOCKS;
+  fail([
+    `ERROR: the disk-side walk inventoried ${declaredBlocks.size} distinct assertion blocks, but the`,
+    `       canonical corpus plus this binding's own ledger say ${EXPECTED_BLOCKS} —` +
+      ` ${Math.abs(declaredBlocks.size - EXPECTED_BLOCKS)} ${fewer ? "FEWER" : "MORE"}.`,
+    `       Expected: every assertion block carried by the ${derivedFixtures} fixture(s) under`,
+    `       ${corpusRoot} that are not among the ${excusedFixtures.size} in KNOWN_UNCOVERED`,
+    `       (${COVERAGE_GUARD}) — ${derivedSites} site(s), ${EXPECTED_BLOCKS} distinct digest(s).`,
+    fewer
+      ? "       FEWER: either the corpus moved under this checkout (re-pull lazily-spec, then"
+      : "       MORE: either the corpus moved under this checkout (re-pull lazily-spec, then",
+    fewer
+      ? `       re-run), or the disk-side inventory DETACHED — ${FIXTURE_MANIFEST} stopped naming`
+      : `       re-run), or ${FIXTURE_MANIFEST} names fixtures the ledger says are not opened,`,
+    fewer
+      ? "       every fixture this binding opens, and every rung above is then green over a"
+      : "       or the corpus grew a block spelling outside the recorder's TRACKED list in",
+    fewer
+      ? "       population smaller than the one the ledger claims."
+      : `       ${RECORDER_SOURCE}, which the walk above inventories and this derivation does not.`,
+    "       There is nothing to re-pin: this number is derived, not typed.",
   ]);
   process.exit(1);
 }
 
 console.error(
   `assertion-block bind OK: ${declaredBlocks.size}/${declaredBlocks.size} assertion blocks carried by` +
-    ` opened fixtures were instrumented (${blockExcuses.size} declared unbindable; floor ${MIN_BLOCKS};` +
-    ` content-keyed, so a runner's block NAME cannot satisfy it)`,
+    ` opened fixtures were instrumented (${blockExcuses.size} declared unbindable; population` +
+    ` ${EXPECTED_BLOCKS}, DERIVED from the ${derivedFixtures} fixture(s) the corpus carries minus` +
+    ` KNOWN_UNCOVERED and asserted EQUAL, not floored -- ${derivedSites} site(s) deduplicated by` +
+    ` content digest, the same key the recorder books a bound block under)`,
 );
 
 console.error(
