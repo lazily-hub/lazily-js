@@ -46,6 +46,7 @@
 // replayed"; it means the suite was not run with the recorder attached, and
 // passing in that state is the vacuous green the whole ladder exists to prevent.
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { evidenceRecords } from "./evidence-run-id.mjs";
 import { join } from "node:path";
 
 const SPEC_DIR_OVERRIDDEN = process.env.LAZILY_SPEC_CONFORMANCE_DIR !== undefined;
@@ -153,18 +154,16 @@ if (!existsSync(FIXTURE_MANIFEST) || statSync(FIXTURE_MANIFEST).size === 0) {
   process.exit(1);
 }
 
+// Both files EXISTING says nothing about WHEN they were written, and this guard
+// runs in a different process from the suite that wrote them. Both reads below go
+// through evidenceRecords(), which refuses evidence not stamped with this
+// invocation's LAZILY_CONFORMANCE_RUN_ID (#lzstalemanifest) and refuses a
+// stamp-only file, which the size checks above now read as non-empty.
+
 const replayed = new Set(
-  readFileSync(SCENARIO_MANIFEST, "utf8")
-    .split("\n")
-    .map((l) => l.trim())
-    .filter(Boolean),
+  evidenceRecords(SCENARIO_MANIFEST, "scenario manifest").map((l) => l.trim()),
 );
-const opened = new Set(
-  readFileSync(FIXTURE_MANIFEST, "utf8")
-    .split("\n")
-    .map((l) => l.trim())
-    .filter(Boolean),
-);
+const opened = new Set(evidenceRecords(FIXTURE_MANIFEST, "fixture manifest").map((l) => l.trim()));
 
 // The corpus-wide fixed resolution order, identical in every binding:
 //   1. `id` if present   2. else `name` if present.

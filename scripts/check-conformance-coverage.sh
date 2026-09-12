@@ -106,7 +106,70 @@ if [ ! -s "$MANIFEST" ]; then
   echo "      is missing evidence, not evidence of absence." >&2
   exit 1
 fi
-OPENED="$(sort -u "$MANIFEST")"
+
+# ---- The manifest must be evidence of THIS run (#lzstalemanifest) ----
+#
+# Everything below asks what the suite opened and answers it out of a file this
+# script did not write. `npm test` writes it, in a different process, and
+# `node --test` has no test cache -- so the exposure is not a cached test task
+# but the LEFTOVER FILE: build/ keeps whatever the last writer left, and the four
+# manifest env vars can be set by hand around a single-file run, which is how
+# #lzsiblingrunnermasking bisected 70 runners. Measured with no node process
+# started at all, this guard printed "conformance coverage OK: 147/156" off a
+# manifest written hours earlier.
+#
+# MIN_FIXTURES and the per-fixture loop catch the UNDER-populated leftover (the
+# one-file manifest reported 126 uncovered fixtures). Neither can see a leftover
+# from a COMPLETE run, which satisfies every check here exactly as the current run
+# would. So date the file instead of sizing it.
+#
+# Unset is a refusal, not a skip: accepting unstamped evidence when the variable
+# is absent is the same hole with one more step in front of it. `make check`
+# generates the id; see the Makefile header for adopting a previous run's id
+# explicitly.
+RUN_ID_STAMP_PREFIX="# lazily-run-id "
+if [ -z "${LAZILY_CONFORMANCE_RUN_ID-}" ]; then
+  echo "FAIL: LAZILY_CONFORMANCE_RUN_ID is not set, so $MANIFEST cannot be dated and" >&2
+  echo "      nothing in it can be shown to describe THIS run (#lzstalemanifest)." >&2
+  echo "      Run this guard in the same make invocation as the tests -- \`make check\`," >&2
+  echo "      or \`make test conformance-coverage\` for a single gate." >&2
+  exit 1
+fi
+manifest_stamp="$(head -n 1 "$MANIFEST")"
+case "$manifest_stamp" in
+  "$RUN_ID_STAMP_PREFIX"*)
+    manifest_run_id="${manifest_stamp#"$RUN_ID_STAMP_PREFIX"}"
+    ;;
+  *)
+    echo "FAIL: $MANIFEST carries no '# lazily-run-id <id>' first line, so it cannot be" >&2
+    echo "      shown to describe THIS run (#lzstalemanifest). Wanted id" >&2
+    echo "      '$LAZILY_CONFORMANCE_RUN_ID'. A manifest predating the run-id protocol" >&2
+    echo "      has no stamp, and that is a failure rather than a pass: it is exactly" >&2
+    echo "      the file an earlier or partial run leaves behind." >&2
+    exit 1
+    ;;
+esac
+if [ "$manifest_run_id" != "$LAZILY_CONFORMANCE_RUN_ID" ]; then
+  echo "FAIL: $MANIFEST is evidence from a DIFFERENT run (#lzstalemanifest)." >&2
+  echo "      manifest stamped:  $manifest_run_id" >&2
+  echo "      this invocation:   $LAZILY_CONFORMANCE_RUN_ID" >&2
+  echo "      It was left by an earlier \`npm test\`, by a single-file run with the" >&2
+  echo "      manifest env vars set by hand, or by another make invocation. Re-run the" >&2
+  echo "      tests and the guards together (\`make check\`)." >&2
+  exit 1
+fi
+
+# The stamp is written when the file is TRUNCATED, before the suite runs, so a
+# stamp-only manifest is non-empty and records nothing: the `-s` check above
+# cannot see that state any more, and this is that check restated against
+# RECORDS.
+OPENED="$(tail -n +2 "$MANIFEST" | sed '/^[[:space:]]*$/d' | sort -u)"
+if [ -z "$OPENED" ]; then
+  echo "FAIL: $MANIFEST carries this run's id and NO records (#lzstalemanifest)." >&2
+  echo "      \`npm test\` ran without the recorder preloaded, or every test process" >&2
+  echo "      died before its exit hook. That is missing evidence." >&2
+  exit 1
+fi
 
 missing=0
 total=0

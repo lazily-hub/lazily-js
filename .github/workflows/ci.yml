@@ -12,6 +12,20 @@ jobs:
     name: Node
     runs-on: ubuntu-latest
 
+    # One run id for this whole job (#lzstalemanifest). The evidence files the
+    # conformance rungs audit are written by the `npm test` step and read by
+    # later, SEPARATE steps; each guard now requires the id stamped in the file
+    # to equal this value, so a build/ directory restored from a cache, carried
+    # in as an artifact, or left by any other invocation cannot stand in for
+    # evidence of THIS run. `run_attempt` is part of it because re-running a
+    # workflow reuses `run_id`, and a re-run is a different invocation.
+    #
+    # This is the env var the Makefile generates locally. It is set at JOB level
+    # and not per step on purpose: the test step and the rung steps have to agree
+    # on it, and a per-step value would guarantee they never could.
+    env:
+      LAZILY_CONFORMANCE_RUN_ID: ci-${{ github.run_id }}-${{ github.run_attempt }}
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -181,8 +195,20 @@ jobs:
       # guard is broken"; this names the real cause — the recorder was not
       # attached to the test run — and proves the coupling between the test
       # step and these steps is live rather than assumed.
+      # Freshness is checked here as well as inside every guard
+      # (#lzstalemanifest), because this step is where the coupling between the
+      # test step and the rungs is asserted rather than assumed, and "the file
+      # exists" was the whole of that assertion. Two dimensions: the stamp must
+      # be this job's LAZILY_CONFORMANCE_RUN_ID, and the file must hold at least
+      # one RECORD below the stamp — `npm test` writes the stamp while truncating,
+      # before the suite runs, so a stamp-only file passes `test -s` and proves
+      # nothing.
       - name: Assert the conformance recorder produced evidence (#lzguardsnotinci)
         run: |
+          test -n "$LAZILY_CONFORMANCE_RUN_ID" || {
+            echo "::error::LAZILY_CONFORMANCE_RUN_ID is empty — the job-level env is gone,"
+            echo "::error::and every rung below would refuse its evidence (#lzstalemanifest)."
+            exit 1; }
           for f in build/conformance-fixtures-loaded.txt \
                    build/conformance-assertion-keys.txt \
                    build/conformance-assertion-blocks.txt \
@@ -192,7 +218,18 @@ jobs:
               echo "::error::conformance recorder preloaded, so rungs 1-4 below would be"
               echo "::error::auditing nothing. Check the \`test\` script in package.json."
               exit 1; }
-            echo "$f: $(wc -l < "$f") record(s)"
+            stamped="$(head -n 1 "$f")"
+            [ "$stamped" = "# lazily-run-id $LAZILY_CONFORMANCE_RUN_ID" ] || {
+              echo "::error::$f is not evidence of THIS run (#lzstalemanifest)."
+              echo "::error::first line: $stamped"
+              echo "::error::wanted:     # lazily-run-id $LAZILY_CONFORMANCE_RUN_ID"
+              exit 1; }
+            records="$(tail -n +2 "$f" | grep -c . || true)"
+            [ "$records" -gt 0 ] || {
+              echo "::error::$f holds this run's id and ZERO records — the recorder wrote"
+              echo "::error::nothing, so rungs 1-4 would audit an empty ledger."
+              exit 1; }
+            echo "$f: $records record(s), stamped $LAZILY_CONFORMANCE_RUN_ID"
           done
 
       # All three guards exit 0 with `SKIP:` when ../lazily-spec/conformance is

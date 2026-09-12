@@ -47,6 +47,7 @@
 // encode, and the recorder throws if one ever carries a non-string, so a
 // machine-checkable assertion cannot hide in the one block nothing checks.
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { evidenceRecords } from "./evidence-run-id.mjs";
 import { join } from "node:path";
 
 const SPEC_DIR_OVERRIDDEN = process.env.LAZILY_SPEC_CONFORMANCE_DIR !== undefined;
@@ -138,6 +139,12 @@ if (!existsSync(KEY_MANIFEST) || statSync(KEY_MANIFEST).size === 0) {
   process.exit(1);
 }
 
+// A file that EXISTS is still only evidence of some run; every read below now
+// goes through evidenceRecords(), which refuses anything not stamped with this
+// invocation's LAZILY_CONFORMANCE_RUN_ID (#lzstalemanifest). It also carries the
+// records floor the stamp made invisible to the size check above: a stamp-only
+// file is non-empty and holds nothing.
+
 const present = new Set();
 const read = new Set();
 const asserted = new Set();
@@ -177,8 +184,7 @@ const untouchedByCheck = new Set();
 // found between sibling SCENARIOS, one level further down and inside a single
 // fixture. Removing it took the examined population from 1047 keys to 3797 and
 // exposed 24 findings the collapse had been holding green.
-for (const line of readFileSync(KEY_MANIFEST, "utf8").split("\n")) {
-  if (line.trim() === "") continue;
+for (const line of evidenceRecords(KEY_MANIFEST, "assertion-key manifest")) {
   const [fixture, block, key, tag, reason] = line.split("\t");
   const id = `${fixture}\t${block}\t${key}`;
   if (tag === "N") untouchedByCheck.add(id);
@@ -212,10 +218,7 @@ let problems = 0;
 // absent manifest, one fixture at a time.
 if (existsSync(FIXTURE_MANIFEST)) {
   const opened = new Set(
-    readFileSync(FIXTURE_MANIFEST, "utf8")
-      .split("\n")
-      .map((l) => l.trim())
-      .filter(Boolean),
+    evidenceRecords(FIXTURE_MANIFEST, "fixture manifest").map((l) => l.trim()),
   );
   for (const fixture of [...opened].sort()) {
     const path = join(SPEC_DIR, fixture);
@@ -678,7 +681,7 @@ if (!existsSync(BLOCK_MANIFEST) || statSync(BLOCK_MANIFEST).size === 0) {
 }
 
 const boundBlocks = new Set();
-for (const line of readFileSync(BLOCK_MANIFEST, "utf8").split("\n")) {
+for (const line of evidenceRecords(BLOCK_MANIFEST, "assertion-block ledger")) {
   const [tag, digest] = line.split("\t");
   if (tag === "bound" && digest) boundBlocks.add(digest);
 }
@@ -882,10 +885,7 @@ const declaredBlocks = new Map();
 // directions: site -> digest.
 const declaredSites = new Map();
 if (existsSync(FIXTURE_MANIFEST)) {
-  const openedFixtures = readFileSync(FIXTURE_MANIFEST, "utf8")
-    .split("\n")
-    .map((l) => l.trim())
-    .filter(Boolean);
+  const openedFixtures = evidenceRecords(FIXTURE_MANIFEST, "fixture manifest").map((l) => l.trim());
   for (const fixture of [...new Set(openedFixtures)].sort()) {
     const file = join(SPEC_DIR, fixture);
     if (!existsSync(file)) continue;

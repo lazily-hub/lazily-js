@@ -25,6 +25,14 @@ jobs:
       id-token: write
       contents: read
 
+    # `npm test` stamps this into every conformance evidence file it writes and
+    # refuses to run without it (#lzstalemanifest). This job runs no conformance
+    # rung, so the value is never compared against; it exists so the publish
+    # gate's test step is not the one place in the repo that can write undatable
+    # evidence.
+    env:
+      LAZILY_CONFORMANCE_RUN_ID: release-${{ github.run_id }}-${{ github.run_attempt }}
+
     steps:
       - uses: actions/checkout@v6
         with:
