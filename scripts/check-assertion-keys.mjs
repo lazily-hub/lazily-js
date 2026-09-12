@@ -747,17 +747,36 @@ for (const raw of KNOWN_UNBOUND_BLOCKS) {
 // defaulted. `EXPECTED_`, not `MAX_`: the old prefix stated `<=` and would now be
 // a lie, and it is deliberately not kept as an alias, because two spellings for
 // one knob is how the next person reintroduces the old semantics.
+//
+// ONE parse for the whole family (#lzpinparsestrict): a NON-EMPTY run of bare
+// ASCII digits `0`-`9`, and nothing else, tested BEFORE any numeric coercion
+// runs. `Number()` was the loosest reader of the ten and it does not look it:
+// `Number(" 7 ")` is 7 because it trims, `Number("+1")` is 1, `Number("1.0")` is
+// 1 and `Number.isInteger` agrees, and `Number("0x19")` is TWENTY-FIVE, because
+// `Number` honours radix prefixes. So four values nobody typed parsed here, one
+// of them into a completely unrelated number. Refused now: whitespace around or
+// inside, a leading `+` or `-`, separators, a radix prefix, a float or an
+// exponent, and any non-ASCII digit (`[0-9]` in a JS regex is ASCII-exact; the
+// `\d` shorthand is too, unlike Python's, but the class is spelled out so the
+// rule reads the same in every binding). Leading zeros are fine and `0` stays
+// valid — this binding pins at zero.
+//
+// An UNSET variable takes the committed literal. An EXPLICITLY EMPTY one is a
+// REJECTION, not a fall-through to it: `??` falls back only on `undefined`, so
+// an empty string reaches the test and is refused there — whoever exported the
+// wrong thing is the one person who cannot see that it was ignored.
 const LEDGER_PIN_RAW = process.env.EXPECTED_LEDGERED_BLOCKS ?? "0";
-const EXPECTED_LEDGERED_BLOCKS = LEDGER_PIN_RAW.trim() === "" ? Number.NaN : Number(LEDGER_PIN_RAW);
-if (!Number.isInteger(EXPECTED_LEDGERED_BLOCKS) || EXPECTED_LEDGERED_BLOCKS < 0) {
+if (!/^[0-9]+$/.test(LEDGER_PIN_RAW)) {
   fail([
     `ERROR: EXPECTED_LEDGERED_BLOCKS is set to '${LEDGER_PIN_RAW}', which is not a`,
-    "       non-negative integer. A pin that cannot be read is not compared to anything, and",
-    "       would silently disable the one rung a consistent detach-plus-excuse pair cannot",
-    "       satisfy, so an unreadable override fails closed instead of falling back to a default.",
+    "       non-negative integer in bare ASCII digits (#lzpinparsestrict). A pin that cannot",
+    "       be read is not compared to anything, and would silently disable the one rung a",
+    "       consistent detach-plus-excuse pair cannot satisfy, so an unreadable override fails",
+    "       closed instead of falling back to a default -- an empty one included.",
   ]);
   process.exit(1);
 }
+const EXPECTED_LEDGERED_BLOCKS = Number(LEDGER_PIN_RAW);
 if (blockExcuses.size !== EXPECTED_LEDGERED_BLOCKS) {
   const grew = blockExcuses.size > EXPECTED_LEDGERED_BLOCKS;
   const entr = (n) => `${n} entr${n === 1 ? "y" : "ies"}`;
