@@ -245,8 +245,24 @@ test("distributed/anti_entropy_converge.json converges and is idempotent", () =>
         sameUnderReversal,
         `${scenario.name} reverse-order converged`,
       );
-    } else if (scenario.reverse_order_equivalent) {
-      assert.equal(sameUnderReversal, true, `${scenario.name} reverse-order converged`);
+    } else if ("reverse_order_equivalent" in scenario) {
+      // `in` for presence, `assertKey` for the verdict (#lzsiblingrunnermasking).
+      // This arm used to be `else if (scenario.reverse_order_equivalent)` guarding
+      // `assert.equal(sameUnderReversal, true)`, which is both weak spellings at
+      // once: a truthiness read of the fixture's flag deciding whether to compare,
+      // and then a comparison against a hardcoded `true` rather than against the
+      // fixture's own value. A scenario spelling the flag `"false"` read as
+      // asserting order DEPENDENCE while this demanded equivalence, and a
+      // scenario spelling it `false` silently asserted nothing at all. It is also
+      // the arm no corpus scenario currently reaches — every fixture carrying
+      // `reverse_order_equivalent` also carries `expect.order_independent`, so the
+      // branch above wins — which is precisely why nothing reddened.
+      assertKey(
+        scenario,
+        "reverse_order_equivalent",
+        sameUnderReversal,
+        `${scenario.name} reverse-order converged`,
+      );
     }
   }
 });

@@ -738,8 +738,15 @@ test("reliable-sync: liveness_orset_lww.json", () => {
   }
 
   const death = scenario(fx, "whole_editor_death_cascades");
+  // `.filter((e) => e.present)` is a truthiness verdict with no `if` in sight
+  // (#lzsiblingrunnermasking): the callback's return value IS the decision, so a
+  // `"false"` entry read as absent-from-the-open-set while the model kept it, and
+  // `live_docs_before` then asserted a doc list the fixture never described. The
+  // whole liveness model below is driven from this filter.
   const open = death.open_set
-    .filter((e) => e.present)
+    .filter((e) =>
+      requireFlag(e.present, `whole_editor_death_cascades: open_set[${e.key}].present`),
+    )
     .map((e) => {
       const [doc, pid] = e.key.split("/");
       return [doc, Number(pid.replace("pid", ""))];
@@ -751,8 +758,22 @@ test("reliable-sync: liveness_orset_lww.json", () => {
       new WireLwwRegister(new WireStamp({ wallTime: 1, logical: 0, peer: 1 }), v),
     );
   }
+  // `alive.get(p)?.value` is the fixture's own `alive_before` value (and, after the
+  // op, the fixture's `op.value`) carried through an LWW register. `=== true` is
+  // the shape lazily-go shipped: SILENTLY FALSE for a wrong type rather than an
+  // error, so a string-spelled liveness flag dropped every doc of that pid and
+  // `live_docs_before` asserted the cascade's own answer before the cascade ran.
+  // `?.` still has to mean something, so absent stays a legitimate "not alive".
   const liveDocs = () =>
-    [...new Set(open.filter(([, p]) => alive.get(p)?.value === true).map(([doc]) => doc))].sort();
+    [
+      ...new Set(
+        open
+          .filter(([, p]) =>
+            requireFlag(alive.get(p)?.value, `whole_editor_death_cascades: alive[${p}]`, false),
+          )
+          .map(([doc]) => doc),
+      ),
+    ].sort();
   const liveBefore = liveDocs();
   const op = death.op;
   const pid = Number(op.key.replace("alive/pid", ""));
@@ -811,7 +832,16 @@ test("reliable-sync: liveness_orset_lww.json", () => {
     const docs = new Set();
     for (const [key, set] of sets) {
       const [doc, pidKey] = key.split("/");
-      if (set.present() && regs.get(`alive/${pidKey}`)?.value === true) docs.add(doc);
+      // `set.present()` is the OR-set's own observation; the register's value is
+      // the fixture's `ops[].value`, so it is type-required rather than compared
+      // with `=== true`, which is silently false for a wrong type
+      // (#lzsiblingrunnermasking). A pid with no `alive/` register is not alive.
+      const alivePid = requireFlag(
+        regs.get(`alive/${pidKey}`)?.value,
+        `${agg.name}: alive/${pidKey}`,
+        false,
+      );
+      if (set.present() && alivePid) docs.add(doc);
     }
     return [...docs].sort();
   };

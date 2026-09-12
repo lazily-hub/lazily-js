@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 
-import { assertKey, assertKeyWith, subBlock } from "./support/assert-key.js";
+import { assertKey, assertKeyWith, requireFlag, subBlock } from "./support/assert-key.js";
 import { scenarios } from "./support/scenario.js";
 
 import { CrdtSync } from "../src/index.js";
@@ -65,7 +65,14 @@ test("family-granularity sync: materialize on ingest (#lzfamilysync)", () => {
     );
     assert.ok(applied > 0, `[${name}] ingest applied at least one op`);
 
-    if (scenario.reingest) {
+    // `reingest` DRIVES the replay and, with it, decides whether
+    // `expect.reingest_applied` is asserted at all — the `inbound.dropped` shape
+    // from #lzflagcoercion. `if ("false")` is TRUE, so a string-spelled flag reads
+    // as "do not re-ingest" while the replay re-ingests and asserts idempotence;
+    // a falsy non-boolean reads as "re-ingest" while the whole claim is skipped.
+    // Type-required at the boundary, absent meaning `false` because two of the
+    // three scenarios in the fixture omit it (#lzsiblingrunnermasking).
+    if (requireFlag(scenario.reingest, `[${name}]: reingest`, false)) {
       const reapplied = target.ingest(
         new CrdtSync({ frontier: origin.frontierEntries(), ops: frame.ops }),
         1001,

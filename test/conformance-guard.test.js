@@ -333,17 +333,24 @@ const SCAN = scanSources();
 //
 //   * `test/spec-corpus.cjs` is the corpus seam — the one resolution the whole
 //     suite routes through, and the reason the override reaches every runner.
-//   * The three coverage guards read `LAZILY_SPEC_CONFORMANCE_DIR` and fall back
+//   * The four coverage guards read `LAZILY_SPEC_CONFORMANCE_DIR` and fall back
 //     to the canonical sibling when it is unset, which is the same seam
 //     expressed in the languages those guards are written in.
+//     `check-flag-hygiene.mjs` (#lzsiblingrunnermasking) is one of them: it
+//     derives its flag vocabulary from the corpus and honours the override the
+//     same way, so a perturbation probe reaches it. It is a GUARD, not a runner
+//     — it opens no fixture during the test run and imports nothing from
+//     `test/`, so routing it through the seam would make a build gate depend on
+//     a test-only CJS module.
 //
 // This list is also the matcher's POSITIVE CONTROL. Each entry must still be
 // detected as spelling the path; if the tokenizer ever desyncs and starts
-// returning nothing, these four stop matching and the guard fails loudly rather
+// returning nothing, these five stop matching and the guard fails loudly rather
 // than reporting a clean tree it never really read.
 const ALLOWED_TO_SPELL_SIBLING = [
   "scripts/check-assertion-keys.mjs",
   "scripts/check-conformance-coverage.sh",
+  "scripts/check-flag-hygiene.mjs",
   "scripts/check-scenario-coverage.mjs",
   "test/spec-corpus.cjs",
 ];

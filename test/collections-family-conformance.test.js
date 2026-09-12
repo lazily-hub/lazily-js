@@ -238,8 +238,14 @@ async function replay(FlavorCls, fixtureName) {
     // The invalidation matrix, read from expected.invalidates - where the
     // fixtures actually nest it. lazily-rs read it off the step instead, so its
     // assertion never ran once.
+    // `in`, not truthiness (#lzsiblingrunnermasking). `assert.ok(expected.invalidates)`
+    // is a presence test spelled as a boolean verdict, and the two disagree:
+    // `invalidates: "false"` and `invalidates: 0` are PRESENT and would have been
+    // reported as missing, while the name is one the corpus also spells as a bare
+    // boolean elsewhere. Presence is presence; `subBlock` below is what refuses a
+    // value that is not an object.
     assert.ok(
-      expected.invalidates,
+      "invalidates" in expected,
       `${where(i)}: expected.invalidates is missing - the matrix is the contract`,
     );
     matrices += 1;

@@ -230,6 +230,21 @@ jobs:
       - name: Assertion observation ordering (#lzassertordering)
         run: python3 ../lazily-spec/scripts/check-assertion-ordering.py --binding js --root .
 
+      # Rung 5 — a fixture flag may not reach a boolean position by COERCION
+      # (#lzsiblingrunnermasking). Unlike rungs 1-4 this one reads no evidence
+      # file: it derives the flag vocabulary from the corpus and walks the test
+      # sources' AST, so it is independent of whether `npm test` ran. It skips
+      # when the corpus is absent, and the grep below closes that escape hatch
+      # here exactly as it does for the rungs above.
+      - name: Rung 5 — fixture flags are type-required, not coerced (#lzsiblingrunnermasking)
+        run: |
+          set -o pipefail
+          node scripts/check-flag-hygiene.mjs 2>&1 | tee rung5.txt
+          grep -q '^SKIP:' rung5.txt && {
+            echo "::error::rung 5 skipped — the canonical corpus was not found, so the flag vocabulary was empty"
+            exit 1; }
+          exit 0
+
       # The gate that keeps every step above honest (#lzcheckcireachguard). It
       # compares `make check`'s prerequisite closure against the run: bodies in
       # this file and fails on any target CI does not reach. Comments inside run:

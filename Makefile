@@ -1,5 +1,6 @@
 .PHONY: check fmt fmt-fix build typecheck test test-interop-peer conformance-coverage assertion-keys \
-scenario-coverage assertion-ordering-check ci-reach bench bench-scale benchmark benchmark-update benchmark-check
+scenario-coverage assertion-ordering-check flag-hygiene ci-reach bench bench-scale benchmark benchmark-update \
+benchmark-check
 
 # Every gate is its own target rather than a line in one monolithic recipe. A
 # monolithic `check` is opaque to the CI-reachability guard below: it can only
@@ -8,7 +9,7 @@ scenario-coverage assertion-ordering-check ci-reach bench bench-scale benchmark 
 # The order here is the order the gates must run in: the conformance rungs audit
 # evidence files that `test` writes, so they are useless before it.
 check: fmt build typecheck test test-interop-peer conformance-coverage assertion-keys \
-scenario-coverage assertion-ordering-check ci-reach
+scenario-coverage assertion-ordering-check flag-hygiene ci-reach
 
 # The formatting GATE (#lazilyformattinggate). This binding had no formatting
 # floor: `build` is the lint equivalent (node --check per entry point) and
@@ -55,6 +56,12 @@ scenario-coverage:
 
 assertion-ordering-check:
 	python3 ../lazily-spec/scripts/check-assertion-ordering.py --binding js --root .
+
+# Fails when a test COERCES a value the canonical corpus spells as a JSON boolean
+# (#lzsiblingrunnermasking). Reads only the corpus and the test sources, so unlike
+# the four rungs above it needs no evidence file and does not depend on `test`.
+flag-hygiene:
+	node scripts/check-flag-hygiene.mjs
 
 # Fails when `make check` runs a gate no CI workflow reaches (#lzcheckcireachguard).
 # The interop peer gate sat in every binding's `check` and in no binding's
