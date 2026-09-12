@@ -696,6 +696,61 @@ for (const raw of KNOWN_UNBOUND_BLOCKS) {
   blockExcuses.set(`${fixture}|${where}`, reason);
 }
 
+// ---- The CEILING on the ledger (#lzledgerceiling) ----
+//
+// The both-direction staleness checks below are set EQUALITY against the run,
+// and set equality is satisfied by any CONSISTENT pair. A commit that detaches
+// N binds and writes the N matching KNOWN_UNBOUND_BLOCKS entries passes both
+// directions: every entry names a site an opened fixture really carries, and no
+// entry names a site a runner still binds. Measured, not argued — dropping the
+// `bound` line for `collections/topiccell_broadcast_cursor_isolation.json|steps[2].expected`
+// and adding its matching entry took this guard from red (it named that exact
+// site) to GREEN, with nothing else in the file changed.
+//
+// The magnitude rung further down misses it too, and cannot do otherwise: the
+// sites are still DECLARED on disk, merely no longer bound, and both sides of
+// both equalities there read SPEC_DIR. That run printed 638 == 638 digests and
+// 747 == 747 sites while a bind had just been deleted.
+//
+// So what closes it is not a count of what IS excused — the equalities already
+// pin that exactly — but a CEILING on how much may be. That is POLICY, not
+// measurement: it does not move with the corpus and never needs re-pinning
+// except deliberately and upward, which is the opposite of the
+// re-pin-after-reading-a-log drift that killed `MIN_BLOCKS` (see the magnitude
+// comment below). js's ledger is EMPTY, and a ceiling of 0 over an empty ledger
+// is not a no-op: it is what stops the FIRST excuse from being added silently,
+// in the same commit as the detach it excuses.
+//
+// Env-overridable so a deliberate, reviewed excuse can be tried locally without
+// editing source — but an unreadable override fails CLOSED (#lzoverrideallrunners),
+// because a NaN ceiling compares false against every count and would disable the
+// only rung that is not satisfiable by a consistent pair.
+const MAX_LEDGERED_BLOCKS = Number(process.env.MAX_LEDGERED_BLOCKS ?? "0");
+if (!Number.isInteger(MAX_LEDGERED_BLOCKS) || MAX_LEDGERED_BLOCKS < 0) {
+  fail([
+    `ERROR: MAX_LEDGERED_BLOCKS is set to '${process.env.MAX_LEDGERED_BLOCKS}', which is not a`,
+    "       non-negative integer. A ceiling that cannot be read compares false against every",
+    "       count and would silently disable the one rung a consistent detach-plus-excuse pair",
+    "       cannot satisfy, so an unreadable override fails closed.",
+  ]);
+  process.exit(1);
+}
+if (blockExcuses.size > MAX_LEDGERED_BLOCKS) {
+  fail([
+    `ERROR: KNOWN_UNBOUND_BLOCKS carries ${blockExcuses.size} entr${blockExcuses.size === 1 ? "y" : "ies"}, over the ceiling of`,
+    `       ${MAX_LEDGERED_BLOCKS}. This ledger may only SHRINK.`,
+    "       The staleness checks below are set equality against the run, and set equality is",
+    "       satisfied by any CONSISTENT pair: detach N binds, write the N matching entries,",
+    "       and both directions pass while N blocks stop being checked. Only this ceiling",
+    "       refuses that, so it is not a number to re-pin after reading a red run.",
+    "       Bind the block instead — parse the fixture so the recorder sees it, or add its",
+    "       NAME to TRACKED in test/support/conformance-manifest.cjs. If an excuse is",
+    "       genuinely unavoidable, raise the ceiling in a commit that says why, on its own,",
+    "       and expect that to be the whole subject of review.",
+  ]);
+  process.exit(1);
+}
+
 // The NAME-OPEN rule. Not the recorder's TRACKED list, and deliberately a
 // PREFIX rather than an enumeration: a phase-qualified name the corpus grows
 // (`expect_final`, `expect_before`, `asserts`) is inventoried the day it appears
@@ -1126,7 +1181,9 @@ if (declaredBlocks.size !== EXPECTED_BLOCKS) {
 
 console.error(
   `assertion-block bind OK: ${declaredBlocks.size}/${declaredBlocks.size} assertion blocks carried by` +
-    ` opened fixtures were instrumented (${blockExcuses.size} declared unbindable; population` +
+    ` opened fixtures were instrumented (${blockExcuses.size} declared unbindable, ceiling ${MAX_LEDGERED_BLOCKS} —` +
+    ` a ledger that may only shrink, since the staleness checks are set equality and a consistent` +
+    ` detach-plus-excuse pair satisfies those in both directions; population` +
     ` ${EXPECTED_SITES} site(s) and ${EXPECTED_BLOCKS} distinct content digest(s), BOTH DERIVED from` +
     ` the ${derivedFixtures} fixture(s) the corpus carries minus KNOWN_UNCOVERED by the same walk the` +
     ` inventory uses, and BOTH asserted EQUAL, not floored -- the site dimension sees a site detach` +
