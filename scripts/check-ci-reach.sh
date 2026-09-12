@@ -241,6 +241,34 @@
 #   4. Renaming a CI step reds this guard. That is the accepted cost, not a
 #      defect: it is the churn the design trades for, and it is a required,
 #      reviewable one-line edit rather than a silent loss of a gate.
+#
+# MEASURED CLEAN HERE, so the next reader does not redo it
+#
+#   * ONE STEP PER MEMBER is all EXPECTED_GATE_STEPS can express. lazily-kt found
+#     a member whose gate genuinely spans TWO CI steps, where a one-step pin
+#     falsely reds. Measured here: all 11 gated members carry exactly ONE anchor,
+#     and each anchor is contained in exactly ONE `run:` step, so nothing
+#     legitimate reddens. Constructed deliberately (a `test:` recipe running both
+#     `npm test` and `npm run test:formal`, which CI spells in two steps) the
+#     guard reds naming the step and the anchor it does not run — the right
+#     diagnosis, but the pin cannot express the state. If that shape ever arrives
+#     here, split the recipe or extend the pin; do NOT loosen the check to pass.
+#
+#   * THE WILDCARD. `anchors` emits an ANY token for an argument it cannot
+#     resolve, and it matches on EITHER side — so a CI step anchor ending in a
+#     wildcard would match any single-token member anchor, and lazily-cpp could
+#     delete its own CI step and still report OK through exactly that. Swept
+#     here at byte level: ZERO of the 16 CI step anchors and ZERO of the 11
+#     member anchors contain the sentinel. The `$` tokens this workflow does
+#     spell (`$root`, `$files`, `$LAZILY_CONFORMANCE_RUN_ID`) all sit in
+#     commands whose program is trivial, or inside `$(...)`, so none reaches an
+#     anchor. Measured by CONSEQUENCE as well, which is the check that does not
+#     depend on reading the relation right: deleting each member's own CI step,
+#     one at a time, reds this guard for all 11 of 11 and names exactly the
+#     member that step carries. That is also the superset measurement — the
+#     shape lazily-rs found in 8 of 46 members has ZERO instances here, because
+#     `npm test` is not a subsequence of `npm run test:formal` (`run` intervenes
+#     and `test:formal` is one token).
 set -euo pipefail
 
 MAKE_BIN="${MAKE:-make}"
