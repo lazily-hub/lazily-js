@@ -696,7 +696,7 @@ for (const raw of KNOWN_UNBOUND_BLOCKS) {
   blockExcuses.set(`${fixture}|${where}`, reason);
 }
 
-// ---- The CEILING on the ledger (#lzledgerceiling) ----
+// ---- The RATCHET on the ledger (#lzledgerceiling, #lzledgerratchet) ----
 //
 // The both-direction staleness checks below are set EQUALITY against the run,
 // and set equality is satisfied by any CONSISTENT pair. A commit that detaches
@@ -712,41 +712,92 @@ for (const raw of KNOWN_UNBOUND_BLOCKS) {
 // both equalities there read SPEC_DIR. That run printed 638 == 638 digests and
 // 747 == 747 sites while a bind had just been deleted.
 //
-// So what closes it is not a count of what IS excused — the equalities already
-// pin that exactly — but a CEILING on how much may be. That is POLICY, not
-// measurement: it does not move with the corpus and never needs re-pinning
-// except deliberately and upward, which is the opposite of the
-// re-pin-after-reading-a-log drift that killed `MIN_BLOCKS` (see the magnitude
-// comment below). js's ledger is EMPTY, and a ceiling of 0 over an empty ledger
-// is not a no-op: it is what stops the FIRST excuse from being added silently,
-// in the same commit as the detach it excuses.
+// So what closes it is a pin on the ledger's SIZE — a number compared against a
+// COMMITTED CONSTANT, which does not move when the run does. That independence
+// is the whole value, and it is why this is not redundant with the set equality:
+// both sides of that equality move together under the attack, and this side
+// cannot.
+//
+// The pin is an EXACT EQUALITY, not the `<=` ceiling this rung shipped with
+// (#lzledgerratchet). A ceiling SELF-DISABLES. It refuses the detach-plus-excuse
+// attack only while its slack is zero; the first legitimate migration shrinks
+// the ledger, the constant stays put, slack becomes >= 1, and the same attack
+// passes again. Measured: with the ledger at 0 and a ceiling of 1 left behind by
+// a migration, detaching that same bind and writing its matching entry exits 0
+// under `>` and is refused under `!==`. Slack accumulates per migration, so a
+// ceiling converges on exactly the hand-typed floor whose drift this family
+// retired everywhere else — a number so far below reality that it never fires
+// and so is never revisited.
+//
+// An equality has no slack by construction and cannot silently drift, because a
+// STALE value FAILS. A number that fails when stale is a ratchet, not drift.
+// Both directions are things a person must see: growth means an excuse was
+// added, shrink means sites were migrated and the pin was not lowered in the
+// same commit. Raising it is legitimate — a corpus that gains a genuinely
+// unreachable fixture is the real case — but it has to be deliberate and visible
+// in the diff. js's ledger is EMPTY, and a pin of 0 over an empty ledger is not
+// a no-op: it is what stops the FIRST excuse from being added silently, in the
+// same commit as the detach it excuses.
 //
 // Env-overridable so a deliberate, reviewed excuse can be tried locally without
-// editing source — but an unreadable override fails CLOSED (#lzoverrideallrunners),
-// because a NaN ceiling compares false against every count and would disable the
-// only rung that is not satisfiable by a consistent pair.
-const MAX_LEDGERED_BLOCKS = Number(process.env.MAX_LEDGERED_BLOCKS ?? "0");
-if (!Number.isInteger(MAX_LEDGERED_BLOCKS) || MAX_LEDGERED_BLOCKS < 0) {
+// editing source — but an unreadable override fails CLOSED (#lzoverrideallrunners).
+// A NaN pin compares false against every count under `>` and would disable the
+// only rung that is not satisfiable by a consistent pair; under the equality the
+// same hazard is inverted but no safer, so the override is validated rather than
+// defaulted. `EXPECTED_`, not `MAX_`: the old prefix stated `<=` and would now be
+// a lie, and it is deliberately not kept as an alias, because two spellings for
+// one knob is how the next person reintroduces the old semantics.
+const LEDGER_PIN_RAW = process.env.EXPECTED_LEDGERED_BLOCKS ?? "0";
+const EXPECTED_LEDGERED_BLOCKS = LEDGER_PIN_RAW.trim() === "" ? Number.NaN : Number(LEDGER_PIN_RAW);
+if (!Number.isInteger(EXPECTED_LEDGERED_BLOCKS) || EXPECTED_LEDGERED_BLOCKS < 0) {
   fail([
-    `ERROR: MAX_LEDGERED_BLOCKS is set to '${process.env.MAX_LEDGERED_BLOCKS}', which is not a`,
-    "       non-negative integer. A ceiling that cannot be read compares false against every",
-    "       count and would silently disable the one rung a consistent detach-plus-excuse pair",
-    "       cannot satisfy, so an unreadable override fails closed.",
+    `ERROR: EXPECTED_LEDGERED_BLOCKS is set to '${LEDGER_PIN_RAW}', which is not a`,
+    "       non-negative integer. A pin that cannot be read is not compared to anything, and",
+    "       would silently disable the one rung a consistent detach-plus-excuse pair cannot",
+    "       satisfy, so an unreadable override fails closed instead of falling back to a default.",
   ]);
   process.exit(1);
 }
-if (blockExcuses.size > MAX_LEDGERED_BLOCKS) {
+if (blockExcuses.size !== EXPECTED_LEDGERED_BLOCKS) {
+  const grew = blockExcuses.size > EXPECTED_LEDGERED_BLOCKS;
+  const entr = (n) => `${n} entr${n === 1 ? "y" : "ies"}`;
+  const LIST_CAP = 12;
+  const sites = [...blockExcuses.keys()].sort();
   fail([
-    `ERROR: KNOWN_UNBOUND_BLOCKS carries ${blockExcuses.size} entr${blockExcuses.size === 1 ? "y" : "ies"}, over the ceiling of`,
-    `       ${MAX_LEDGERED_BLOCKS}. This ledger may only SHRINK.`,
-    "       The staleness checks below are set equality against the run, and set equality is",
-    "       satisfied by any CONSISTENT pair: detach N binds, write the N matching entries,",
-    "       and both directions pass while N blocks stop being checked. Only this ceiling",
-    "       refuses that, so it is not a number to re-pin after reading a red run.",
-    "       Bind the block instead — parse the fixture so the recorder sees it, or add its",
-    "       NAME to TRACKED in test/support/conformance-manifest.cjs. If an excuse is",
-    "       genuinely unavoidable, raise the ceiling in a commit that says why, on its own,",
-    "       and expect that to be the whole subject of review.",
+    `ERROR: KNOWN_UNBOUND_BLOCKS carries ${entr(blockExcuses.size)}, and the pin says` +
+      ` ${EXPECTED_LEDGERED_BLOCKS}.`,
+    ...(grew
+      ? [
+          `       The ledger GREW to ${blockExcuses.size} against a pin of ${EXPECTED_LEDGERED_BLOCKS}:` +
+            ` an excuse was added, and every`,
+          "       excuse is a block that stops being checked. The set equalities below cannot see",
+          "       this — they compare the ledger against the RUN, a detached bind's site is still",
+          "       DECLARED on disk, and both sides move together. Only this pin compares against a",
+          "       committed constant that does not move.",
+          "       Bind the block instead — parse the fixture so the recorder sees it, or add its",
+          "       NAME to TRACKED in test/support/conformance-manifest.cjs. If the excuse is",
+          "       genuinely unavoidable, RAISE THE PIN IN THE SAME COMMIT, say why, and expect that",
+          "       to be the whole subject of review.",
+        ]
+      : [
+          `       The ledger SHRANK to ${blockExcuses.size} and the pin is still` +
+            ` ${EXPECTED_LEDGERED_BLOCKS}: sites were migrated`,
+          "       and the pin was not lowered with them. LOWER THE PIN IN THIS COMMIT. This is not",
+          "       bookkeeping: a pin left above the ledger is SLACK, and slack is what lets the next",
+          "       detach-plus-excuse commit through silently. A ceiling would have passed here.",
+        ]),
+    ...(sites.length > 0
+      ? [
+          `       The ledger's ${entr(sites.length)}:`,
+          ...sites.slice(0, LIST_CAP).map((site) => `         ${site}`),
+          ...(sites.length > LIST_CAP
+            ? [
+                `         ... and ${sites.length - LIST_CAP} more — read the rest from` +
+                  " `git diff -- scripts/check-assertion-keys.mjs`.",
+              ]
+            : []),
+        ]
+      : ["       The ledger is EMPTY."]),
   ]);
   process.exit(1);
 }
@@ -1181,9 +1232,10 @@ if (declaredBlocks.size !== EXPECTED_BLOCKS) {
 
 console.error(
   `assertion-block bind OK: ${declaredBlocks.size}/${declaredBlocks.size} assertion blocks carried by` +
-    ` opened fixtures were instrumented (${blockExcuses.size} declared unbindable, ceiling ${MAX_LEDGERED_BLOCKS} —` +
-    ` a ledger that may only shrink, since the staleness checks are set equality and a consistent` +
-    ` detach-plus-excuse pair satisfies those in both directions; population` +
+    ` opened fixtures were instrumented (${blockExcuses.size} declared unbindable, pinned EXACTLY` +
+    ` EQUAL to ${EXPECTED_LEDGERED_BLOCKS} in BOTH directions, since the staleness checks are set` +
+    ` equality against the RUN and a consistent detach-plus-excuse pair satisfies those both ways,` +
+    ` while a ceiling would accumulate slack per migration and stop refusing it; population` +
     ` ${EXPECTED_SITES} site(s) and ${EXPECTED_BLOCKS} distinct content digest(s), BOTH DERIVED from` +
     ` the ${derivedFixtures} fixture(s) the corpus carries minus KNOWN_UNCOVERED by the same walk the` +
     ` inventory uses, and BOTH asserted EQUAL, not floored -- the site dimension sees a site detach` +
