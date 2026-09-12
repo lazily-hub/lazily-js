@@ -74,10 +74,46 @@ jobs:
 
           # A gate whose program is empty also exits 0. Require it to have really
           # loaded the shipped declarations.
-          files="$(./node_modules/.bin/tsc -p tsconfig.json --listFiles | grep -c "$PWD/src/" || true)"
+          #
+          # Three rules here, each of them measured rather than argued
+          # (#lzgrepcpipefail). This line used to read
+          #   files="$(... --listFiles | grep -c "$PWD/src/" || true)"
+          # and every one of the three was wrong about something:
+          #
+          #   * `pwd -P`, not `$PWD`. tsc prints REALPATH'd absolute paths; `$PWD`
+          #     keeps whatever symlink the shell was invoked through. Reached via
+          #     a symlinked checkout the two strings never match, so tsc loaded
+          #     all 47 declarations and the count was still 0 — the guard failed
+          #     closed while naming the wrong subject entirely. That is the whole
+          #     defect class: a measurement that can read 0 for a reason the
+          #     diagnostic does not describe.
+          #   * awk, not `grep -c`. `grep -c` prints 0 and EXITS 1 on zero
+          #     matches, so the count arrives as a status, and under `set -e`
+          #     (Actions' default shell is `bash -e {0}`) the assignment would die
+          #     at this line before the diagnostic below could print. `|| true`
+          #     silenced that, at the price of making "tsc produced nothing" and
+          #     "the program has no src/ declarations" the same observation. awk
+          #     exits 0 on zero matches, so the count stays a measurement.
+          #   * tsc's own exit status is CHECKED. Behind a pipe it was invisible
+          #     (this step sets no `pipefail`), so the only thing standing between
+          #     a dead tsc and a misdiagnosis was the `npm run typecheck` above
+          #     happening to fail first. Say it here instead of relying on that.
+          #
+          # `index()` and not a regex, so a `.`, `+` or `[` in the checkout path
+          # is a character and not an operator.
+          mkdir -p build
+          ./node_modules/.bin/tsc -p tsconfig.json --listFiles > build/tsc-listing.txt || {
+            echo "::error::tsc --listFiles exited nonzero — its file list cannot be trusted,"
+            echo "::error::so the count below would describe a program that never loaded"
+            exit 1; }
+          root="$(pwd -P)"
+          files="$(awk -v pre="$root/src/" 'index($0, pre) == 1 { n++ } END { print n + 0 }' build/tsc-listing.txt)"
+          listed="$(awk 'END { print NR + 0 }' build/tsc-listing.txt)"
           echo "typechecked $files shipped declaration files"
           [ "$files" -gt 0 ] || {
-            echo "::error::typecheck program contained no src/ declarations — it checked nothing"; exit 1; }
+            echo "::error::typecheck program contained no src/ declarations — it checked nothing"
+            echo "::error::tsc listed $listed file(s), none of them under $root/src/"
+            exit 1; }
 
       - name: Assert size budgets are committed and current
         run: npm run size:check
@@ -126,7 +162,21 @@ jobs:
             echo "::error::tests were skipped — a skipped conformance fixture is not a passing one"
             grep -E '^(ℹ|#) skipped' test-output.txt; exit 1; }
 
-          pass="$(grep -oE '^(ℹ|#) pass [0-9]+$' test-output.txt | grep -oE '[0-9]+$' | head -1)"
+          # awk, not `grep -oE ... | head -1`. This step sets `set -o pipefail`
+          # and Actions' default shell is `bash -e {0}`, so an inner grep that
+          # matched nothing poisoned the whole pipeline and `set -e` killed the
+          # step AT THIS LINE — measured: zero output, exit 1, and the
+          # `no passing tests reported` diagnostic below never printed. The guard
+          # was written for exactly the state in which it went silent
+          # (#lzgrepcpipefail). awk exits 0 on zero matches, so an absent summary
+          # reaches the emptiness test as an empty string instead of as a status.
+          #
+          # Field comparison rather than a regex on purpose: `ℹ` is multi-byte and
+          # the runner's awk is mawk, which is byte-oriented. `$1 == "ℹ"` is a
+          # byte-equality test and behaves identically under mawk and gawk, where
+          # `/^(ℹ|#) /` is making a promise about multi-byte regex support that
+          # mawk does not keep.
+          pass="$(awk '($1 == "ℹ" || $1 == "#") && $2 == "pass" && NF == 3 && $3 ~ /^[0-9]+$/ { print $3; exit }' test-output.txt)"
           [ -n "$pass" ] && [ "$pass" -gt 0 ] || {
             echo "::error::no passing tests reported — the suite ran nothing"; exit 1; }
           echo "passed $pass tests with 0 skipped"
@@ -139,11 +189,29 @@ jobs:
           # context is the exact hole this guard closes. Each model prints
           # "reactive-graph[<model>]: replayed N fixtures, ..." and N must be
           # nonzero.
+          # nonzero. awk and not `grep -oE ... | head -1`, and this site is the
+          # sharpest instance of the class in the repo (#lzgrepcpipefail): under
+          # this step's `set -o pipefail` plus the default `bash -e {0}`, a model
+          # whose replay line was ABSENT made the inner grep exit 1, poisoned the
+          # pipeline, and killed the step at the assignment. Measured against a
+          # real run's output with the AsyncContext line removed: the step printed
+          # `reactive-graph[Context]: 15 fixtures replayed` and then stopped dead,
+          # exit 1, with no diagnostic whatsoever. The one message an operator
+          # needed — `corpus was not replayed against AsyncContext` — was the one
+          # the shell destroyed, in the precise sync-clean/async-broken state this
+          # guard exists to name. awk exits 0 on zero matches, so absence arrives
+          # as an empty string and the diagnostic survives to print.
+          #
+          # `$1 == tag` is a string comparison, which also retires the bracket
+          # expression the old pattern smuggled in: `reactive-graph\[$model\]`
+          # only escaped those brackets by hand, one edit away from becoming a
+          # character class that matches none of the three models.
           for model in Context AsyncContext ThreadSafeContext; do
-            line="$(grep -oE "reactive-graph\[$model\]: replayed [0-9]+ fixtures" test-output.txt | head -1)"
-            [ -n "$line" ] || {
+            n="$(awk -v tag="reactive-graph[$model]:" \
+                   '$1 == tag && $2 == "replayed" && $3 ~ /^[0-9]+$/ { print $3; exit }' \
+                   test-output.txt)"
+            [ -n "$n" ] || {
               echo "::error::reactive-graph corpus was not replayed against $model"; exit 1; }
-            n="$(echo "$line" | grep -oE '[0-9]+')"
             [ "$n" -gt 0 ] || {
               echo "::error::reactive-graph[$model] replayed 0 fixtures — it tested nothing"; exit 1; }
             echo "reactive-graph[$model]: $n fixtures replayed"
