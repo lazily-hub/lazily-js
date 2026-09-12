@@ -16,7 +16,7 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import test from "node:test";
 
-import { assertKey, assertKeyWith, subBlock } from "./support/assert-key.js";
+import { assertKey, assertKeyWith, requireFlag, subBlock } from "./support/assert-key.js";
 
 import { Context } from "../src/reactive.js";
 import { AsyncContext } from "../src/reactive-async.js";
@@ -276,11 +276,15 @@ async function replay(FlavorCls, fixtureName) {
         }
       });
     }
+    // `requireFlag`, not `Boolean(want)` (#lzflagcoercion). `Boolean("false")` is
+    // TRUE, so a fixture spelling this flag as a string read as asserting "not
+    // invalidated" while the check demanded invalidation — and against a step
+    // that DOES invalidate, that inversion was green.
     if ("membership" in invalidates) {
       await assertKeyWith(invalidates, "membership", async (want) =>
         assert.equal(
           (await membership()) !== membershipBase,
-          Boolean(want),
+          requireFlag(want, `${where(i)}: invalidates.membership`),
           `${where(i)}: membership reader invalidation mismatch - ` +
             "a pure reorder must NOT invalidate set-identity readers",
         ),
@@ -290,7 +294,7 @@ async function replay(FlavorCls, fixtureName) {
       await assertKeyWith(invalidates, "order", async (want) =>
         assert.equal(
           (await order()) !== orderBase,
-          Boolean(want),
+          requireFlag(want, `${where(i)}: invalidates.order`),
           `${where(i)}: order reader invalidation mismatch`,
         ),
       );
@@ -308,7 +312,10 @@ async function replay(FlavorCls, fixtureName) {
           (wantStable) => {
             const after = ops.handle(flavor, key);
             const before = handlesBefore.get(key);
-            if (wantStable) {
+            // Type-required, not truthy (#lzflagcoercion): every value the corpus
+            // carries here is `true`, and `if ("false")` took the STABLE arm, so a
+            // string-spelled flag asserted the opposite of what it reads as.
+            if (requireFlag(wantStable, `${where(i)}: handle_stable.${key}`)) {
               assert.ok(
                 before !== undefined && after === before,
                 `${where(i)}: handle for ${key} must survive the move - ` +

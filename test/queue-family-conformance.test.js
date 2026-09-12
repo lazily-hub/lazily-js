@@ -26,7 +26,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
-import { assertKey, assertKeyWith, subBlock } from "./support/assert-key.js";
+import { assertKey, assertKeyWith, requireFlag, subBlock } from "./support/assert-key.js";
 
 import { Context } from "../src/reactive.js";
 import { AsyncContext } from "../src/reactive-async.js";
@@ -253,7 +253,10 @@ async function replayQueue(flavor, name) {
   const q = flavor.queue({
     elements: initial.elements ?? [],
     capacity: initial.capacity ?? null,
-    closed: Boolean(initial.closed),
+    // `initial.closed` DRIVES the replay rather than being compared against it, so
+    // nothing downstream separates `true` from `"false"` on its behalf
+    // (#lzflagcoercion): `Boolean(x)` accepted any JSON value and made a verdict.
+    closed: requireFlag(initial.closed, `${name}: initial.closed`, false),
   });
 
   const reads = {

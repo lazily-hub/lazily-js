@@ -55,6 +55,58 @@ function fetch(block, key, verb) {
 
 const isPlainObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
 
+// ---- Flags must be JSON booleans (#lzflagcoercion) ----
+//
+// lazily-go shipped `got != (want == true)` over an `any` holding whatever the
+// fixture spelled. `want == true` is false for EVERY non-boolean, so a fixture
+// spelling `"downstream_consumer_reran": "true"` against a run that observed
+// `false` was green while the fixture reads as asserting the consumer DID rerun.
+// Not a missed assertion — a silently INVERTED one that passes.
+//
+// JavaScript has more ways to land there than go does, and this binding had four
+// of them live. `Boolean(want)` maps `"false"`, `0`, `""`, `[]` and `{}` onto a
+// verdict; `if (want)` does the same implicitly; `want == true` is true for `1`
+// and `"1"`; and `want === true` is SILENTLY FALSE for a wrong type rather than
+// an error, which is go's failure mode exactly.
+//
+// The fix is to require the type, never to coerce it. `assertKey` already does
+// that by construction (`deepStrictEqual` separates `false` from `"false"`), so
+// this helper is for the two places `assertKey` cannot reach: a flag inside an
+// `assertKeyWith` check, and a flag that DRIVES the replay rather than being
+// compared against it (`initial.closed`, `step.predicate`, `frame.dropped`,
+// `entry.restart`). A driving flag never reaches an assertion at all, so nothing
+// downstream separates `true` from `"false"` on its behalf.
+const describeFlag = (value) => {
+  if (value === undefined) return "absent";
+  if (value === null) return "null";
+  if (Array.isArray(value)) return "an array";
+  if (typeof value === "string") return `the string ${JSON.stringify(value)}`;
+  if (typeof value === "object") return "an object";
+  return `the ${typeof value} ${JSON.stringify(value)}`;
+};
+
+/**
+ * Require `value` to be a JSON boolean before it decides anything, and fail by
+ * NAME when it is not (#lzflagcoercion).
+ *
+ * `whenAbsent` is the flag's documented default for a key the corpus omits — pass
+ * it only where absence really is a spelled-out state of the model (an inbound
+ * frame with no `dropped`, a scenario with no `restart`). Without it, an absent
+ * key is a named failure too, because a runner that silently defaults a flag it
+ * expected cannot tell a corpus that dropped the key from one that never had it.
+ */
+export function requireFlag(value, name, whenAbsent) {
+  if (typeof value === "boolean") return value;
+  if (value === undefined && typeof whenAbsent === "boolean") return whenAbsent;
+  throw new TypeError(
+    `${name}: a flag must be a JSON boolean, got ${describeFlag(value)}. ` +
+      "Coercing it instead — Boolean(x), if (x), x == true — makes a verdict out of a value " +
+      'that carries none: `"false"` is truthy, `1 == true`, and `x === true` is silently ' +
+      "FALSE rather than an error. A mistyped fixture flag then reads as asserting one thing " +
+      "while the run checks the opposite, and passes (#lzflagcoercion). Fix the corpus spelling.",
+  );
+}
+
 /** FNV-1a over exact bytes as sixteen lowercase hexadecimal digits. */
 export function fnv1a64Hex(bytes) {
   let digest = 0xcbf29ce484222325n;

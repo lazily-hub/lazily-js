@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { isDeepStrictEqual } from "node:util";
 
-import { assertBlock } from "./support/assert-key.js";
+import { assertBlock, requireFlag } from "./support/assert-key.js";
 import { scenarios } from "./support/scenario.js";
 import { RevisionBarrier, Timeout, TimeoutOperation, Timer, TimerError } from "../src/stdlib.js";
 
@@ -120,6 +120,18 @@ function replayTimeout(steps) {
   }
 }
 
+// The revision-barrier `predicate` flag, type-required at the fixture boundary
+// (#lzflagcoercion). It DRIVES the run — it is handed to the library and to the
+// independent model below, and never compared against anything — so a mistyped
+// value had nothing downstream to separate it from a boolean. The library reads
+// it truthily (`predicate && ...` in src/stdlib.js) and the model read it as
+// `=== true`, which is the shape go shipped: silently FALSE for a wrong type
+// rather than an error. The two disagreeing is what reddened a planted `"true"`
+// here, not a type requirement — and on a step whose outcome does not turn on
+// the predicate (a timeout, a disposal) they agree and the plant was GREEN.
+const stepPredicate = (step) =>
+  requireFlag(step.predicate, `revision-barrier ${step.op}: predicate`);
+
 function replayBarrier(steps) {
   let barrier = null;
   for (const step of steps) {
@@ -129,14 +141,14 @@ function replayBarrier(steps) {
       barrier = new RevisionBarrier(step.revision, step.required_revision, step.deadline);
       actual = barrier.receipt("");
     } else if (step.op === "observe") {
-      actual = barrier.observe(step.now, step.predicate, () => {
+      actual = barrier.observe(step.now, stepPredicate(step), () => {
         calls += 1;
         return step.cancellation;
       });
     } else if (step.op === "register_recheck") {
-      actual = barrier.registerRecheck(step.now, step.observed_revision, step.predicate);
+      actual = barrier.registerRecheck(step.now, step.observed_revision, stepPredicate(step));
     } else if (step.op === "advance") {
-      actual = barrier.advance(step.revision, step.predicate);
+      actual = barrier.advance(step.revision, stepPredicate(step));
     } else if (step.op === "dispose") {
       actual = barrier.dispose();
     } else if (step.op === "receipt") {
@@ -471,7 +483,7 @@ function modelBarrier(state, step, mutated) {
   if (op === "advance") {
     state.revision = larger(state.revision, step.revision);
     state.generation += 1;
-    if (state.revision >= state.required && step.predicate === true) state.status = "satisfied";
+    if (state.revision >= state.required && stepPredicate(step)) state.status = "satisfied";
     return barrierObservation(state);
   }
   const now = step.now;
@@ -488,7 +500,7 @@ function modelBarrier(state, step, mutated) {
     state.generation += 1;
     if (!mutated.applies("barrier_skip_post_registration_recheck")) {
       state.revision = larger(state.revision, step.observed_revision);
-      if (state.revision >= state.required && step.predicate === true) state.status = "satisfied";
+      if (state.revision >= state.required && stepPredicate(step)) state.status = "satisfied";
     }
     return barrierObservation(state);
   }
@@ -502,7 +514,7 @@ function modelBarrier(state, step, mutated) {
     result.cancellation_calls = 0;
     return result;
   }
-  if (state.revision >= state.required && step.predicate === true) {
+  if (state.revision >= state.required && stepPredicate(step)) {
     state.status = "satisfied";
     const result = barrierObservation(state);
     result.cancellation_calls = 0;

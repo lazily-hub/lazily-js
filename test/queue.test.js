@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 
-import { assertKey, assertKeyWith, subBlock } from "./support/assert-key.js";
+import { assertKey, assertKeyWith, requireFlag, subBlock } from "./support/assert-key.js";
 
 import { QueueCell, QueuePopError, QueuePushError, VecDequeStorage } from "../src/queue.js";
 import { Context } from "../src/reactive.js";
@@ -23,11 +23,14 @@ function loadFixture(name) {
 // observable state + the per-reader-kind invalidation matrix.
 // ---------------------------------------------------------------------------
 
-function buildInitial(ctx, initial) {
+function buildInitial(ctx, initial, where) {
   return new QueueCell(ctx, {
     elements: initial.elements ?? [],
     capacity: initial.capacity ?? null,
-    closed: Boolean(initial.closed),
+    // `initial.closed` DRIVES the replay rather than being compared against it, so
+    // nothing downstream separates `true` from `"false"` on its behalf
+    // (#lzflagcoercion): `Boolean(x)` accepted any JSON value and made a verdict.
+    closed: requireFlag(initial.closed, `${where}: initial.closed`, false),
   });
 }
 
@@ -54,7 +57,7 @@ function assertState(q, expected) {
 
 function runFixture(fixture) {
   const ctx = new Context();
-  const q = buildInitial(ctx, fixture.initial);
+  const q = buildInitial(ctx, fixture.initial, fixture.model ?? "queuecell fixture");
   const probes = {};
   for (const [kind, read] of Object.entries({
     head: (cx) => q.head(cx),

@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { assertKey, assertKeyWith } from "./support/assert-key.js";
+import { assertKey, assertKeyWith, requireFlag } from "./support/assert-key.js";
 import { scenarios } from "./support/scenario.js";
 
 import {
@@ -174,7 +174,15 @@ test("reliable-sync: outbox_store_protocol.json", () => {
       );
     }
     for (const epoch of entry.ack_through ?? []) outbox.ackThrough(epoch);
-    const observed = entry.restart ? new Outbox(store) : outbox;
+    // `restart` SELECTS what every key below is read from, and is compared against
+    // nothing itself (#lzflagcoercion). Truthiness let `"false"` reload from the
+    // store while the entry reads as testing the live handle, and let a falsy
+    // non-boolean observe the live outbox while the entry reads as testing crash
+    // reload — whose cursor and retained suffix match the live ones, so the
+    // scenario's whole claim went green over a replay that never restarted.
+    const observed = requireFlag(entry.restart, `${entry.name}: restart`, false)
+      ? new Outbox(store)
+      : outbox;
     // Every key the entry carries is asserted, and an unmodelled one fails the
     // run rather than falling through — `in`, not `!== undefined`, so a key whose
     // canonical value IS `undefined` cannot slip past unchecked.
@@ -314,7 +322,13 @@ test("reliable-sync: resync_gap_converge.json", () => {
   const state = new Map();
   let requests = 0;
   for (const frame of sc.inbound) {
-    if (frame.dropped) continue;
+    // `dropped` decides whether the frame reaches the receiver at all, and with it
+    // whether this entry's `expect_action` and `last_epoch_after` are asserted
+    // (#lzflagcoercion). `if ("false")` is TRUE, so a string-spelled flag reads as
+    // "this frame was delivered" while the replay drops it and skips both.
+    if (requireFlag(frame.dropped, "drop_suffix_then_resync_converges: inbound.dropped", false)) {
+      continue;
+    }
     const res = coord.ingest(msg(frame.frame));
     if (frame.expect_action === "Apply") {
       assert.equal(res.action, ResyncAction.Apply);
