@@ -82,6 +82,48 @@ if [ ! -f Makefile ]; then
 	exit 1
 fi
 
+# `make -n` has to be USABLE before any recipe is read through it (#lzgrepcpipefail).
+#
+# Every recipe this guard inspects arrives via `dry_run`, which is
+# `make -n "$@" 2>/dev/null | grep -v ... || true`. That `|| true` is correct for
+# the grep — `grep -v` exits 1 when it filters every line away, and an empty
+# recipe is a legitimate measurement — but it is INDISCRIMINATE: make's own
+# failure exits through the same pipeline, `2>/dev/null` swallows the message,
+# and the empty stdout that survives is then read as "this recipe runs no
+# checkable command". The verdict is a FALSE GREEN, measured against a scratch
+# copy of this Makefile with one prerequisite removed from `typecheck`:
+#
+#     make: *** No rule to make target 'no-such-prerequisite'.  Stop.   (exit 2)
+#
+#     no gate  typecheck                        recipe runs no checkable command
+#     check-ci-reach: OK — 10 target(s) reached by CI, 0 excused, 2 carrying no gate
+#     exit 0
+#
+# `typecheck` carries a real gate (`npm run typecheck`) and CI really runs it.
+# The guard stopped requiring it, said OK, and the only trace was a count moving
+# from 11 to 10 — nothing in that output mentions make at all. A guard that
+# reports OK while quietly dropping a target from its own obligations is the
+# exact failure this whole ladder exists to refuse, so it may not be exempt.
+#
+# This check is in the MAIN shell on purpose. It cannot live inside `dry_run`:
+# that function is called from `prefix="$(dry_run ... | wc -l)"`, a command
+# substitution, where an `exit 1` kills the subshell and the caller carries on
+# with a bad count and no idea anything failed.
+# No `trap` for this temp file: the matching section below installs its own EXIT
+# trap for $ci_raw/$ci_anchor, and a second `trap ... EXIT` REPLACES the first
+# rather than adding to it, so a trap here would be silently discarded and leak.
+# Remove it by hand on both paths instead.
+mk_err="$(mktemp)"
+if ! "$MAKE_BIN" -n "$ROOT_TARGET" >/dev/null 2>"$mk_err"; then
+	echo "check-ci-reach: \`$MAKE_BIN -n $ROOT_TARGET\` FAILED, so no recipe below could be" >&2
+	echo "  read. Every target would report as carrying no gate and this guard would" >&2
+	echo "  print OK while enforcing nothing. make said:" >&2
+	sed 's/^/    /' "$mk_err" >&2
+	rm -f "$mk_err"
+	exit 1
+fi
+rm -f "$mk_err"
+
 # ---------------------------------------------------------------- configuration
 
 workflows=()
@@ -484,6 +526,22 @@ excused_ok=0
 
 while IFS= read -r target; do
 	[ -n "$target" ] || continue
+
+	# Per-target half of the `make -n` gate above. The root gate catches a broken
+	# graph, which is the reachable case, but it is the ROOT it proves readable —
+	# so assert it for the target actually being measured, immediately before its
+	# empty anchor set would be read as "carries no gate". Also in the main shell,
+	# and deliberately NOT folded into `dry_run` or `own_commands`: both are
+	# called from command substitutions where an `exit` reaches only the subshell.
+	if ! "$MAKE_BIN" -n "$target" >/dev/null 2>&1; then
+		echo "check-ci-reach: \`$MAKE_BIN -n $target\` failed — its recipe cannot be read," >&2
+		echo "  so an empty anchor set here would be reported as 'no gate' instead of as" >&2
+		echo "  this failure. Fix the target; do not let it be excused by silence." >&2
+		unreached="$unreached$target"$'\n'
+		unreached_count=$((unreached_count + 1))
+		printf 'UNREADABLE  %s\n' "$target"
+		continue
+	fi
 
 	target_anchors="$(own_commands "$target" | anchors | sort -u || true)"
 
