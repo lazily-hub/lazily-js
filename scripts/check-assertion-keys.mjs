@@ -704,6 +704,54 @@ const ASSERTION_BLOCK_NAME = /^(assert|expect)/i;
 
 const isPlain = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
 
+// ONE walk, two callers (#lzblocksitepin). The inventory below and the
+// expectation derived further down both go through this function, so the two
+// sides spell a SITE the same way by construction and their counts are
+// comparable. They were separate copies of the same recursive descent, which is
+// the defect the derived expectation exists to remove: a derivation that walked
+// the corpus differently from the inventory it is compared against is worse than
+// the typed constant it replaced, because the disagreement then reads as a
+// corpus problem.
+//
+// What differs between the callers is ONLY the name rule, and that difference is
+// deliberate (see the NAME-OPEN note above): the inventory is name-open so a
+// spelling the corpus grows is reported UNBOUND rather than invisible, while the
+// derivation mirrors the recorder's TRACKED list so the expectation counts what
+// the recorder is capable of binding. A corpus block outside TRACKED therefore
+// shows up as inventory > derivation in the equalities below, which is the
+// correct verdict and the one the failure text describes.
+//
+// `where` is the JSON path, so a failure names the block a reader has to go and
+// look at. An ARRAY-valued block counts element by element, each under its own
+// `[i]` path — `steps[].expect` in signaling/anti_spoof_session.json is a list of
+// expected emissions, and an object-only walk goes past all eight.
+function walkAssertionBlocks(parsed, fixture, isBlockName, visit) {
+  const declare = (where, block) => {
+    if (!isPlain(block)) return;
+    const digest = blockDigest(block);
+    if (digest === null) return;
+    visit(`${fixture}|${where}`, digest);
+  };
+  const descend = (node, where) => {
+    if (Array.isArray(node)) {
+      node.forEach((item, index) => descend(item, `${where}[${index}]`));
+      return;
+    }
+    if (!isPlain(node)) return;
+    for (const [key, value] of Object.entries(node)) {
+      const path = where === "" ? key : `${where}.${key}`;
+      if (isBlockName(key)) {
+        if (isPlain(value)) declare(path, value);
+        else if (Array.isArray(value)) {
+          value.forEach((item, index) => declare(`${path}[${index}]`, item));
+        }
+      }
+      descend(value, path);
+    }
+  };
+  descend(parsed, "");
+}
+
 const declaredBlocks = new Map();
 // Every site the walk inventoried, so an excuse can be checked in BOTH
 // directions: site -> digest.
@@ -722,35 +770,17 @@ if (existsSync(FIXTURE_MANIFEST)) {
     } catch {
       continue;
     }
-    const declare = (where, block) => {
-      if (!isPlain(block)) return;
-      const digest = blockDigest(block);
-      if (digest === null) return;
-      const site = `${fixture}|${where}`;
-      if (!declaredBlocks.has(digest)) declaredBlocks.set(digest, new Set());
-      declaredBlocks.get(digest).add(site);
-      declaredSites.set(site, digest);
-    };
-    // Full recursive descent. `where` is the JSON path, so the failure below
-    // names the block a reader has to go and look at.
-    const descend = (node, where) => {
-      if (Array.isArray(node)) {
-        node.forEach((item, index) => descend(item, `${where}[${index}]`));
-        return;
-      }
-      if (!isPlain(node)) return;
-      for (const [key, value] of Object.entries(node)) {
-        const path = where === "" ? key : `${where}.${key}`;
-        if (ASSERTION_BLOCK_NAME.test(key)) {
-          if (isPlain(value)) declare(path, value);
-          else if (Array.isArray(value)) {
-            value.forEach((item, index) => declare(`${path}[${index}]`, item));
-          }
-        }
-        descend(value, path);
-      }
-    };
-    descend(parsed, "");
+    // Caller one of walkAssertionBlocks(), with the NAME-OPEN rule.
+    walkAssertionBlocks(
+      parsed,
+      fixture,
+      (key) => ASSERTION_BLOCK_NAME.test(key),
+      (site, digest) => {
+        if (!declaredBlocks.has(digest)) declaredBlocks.set(digest, new Set());
+        declaredBlocks.get(digest).add(site);
+        declaredSites.set(site, digest);
+      },
+    );
   }
 }
 
@@ -805,13 +835,20 @@ if (unboundBlocks.length > 0) {
   ]);
   process.exit(1);
 }
-// ---- Positive-evidence magnitude (#lzvacuousrun, #lzblockfloorpin) ----
+// ---- Positive-evidence magnitude (#lzvacuousrun, #lzblockfloorpin, #lzblocksitepin) ----
 //
 // Zero inventoried blocks means zero unbound blocks, which reports OK having
 // compared nothing. So the SIZE of what the walk inventoried is asserted too, and
 // not merely that nothing it inventoried was unbound.
 //
-// This number is DERIVED, and it is an EQUALITY. It used to be `MIN_BLOCKS`, a
+// TWO dimensions, both derived and both equalities: the number of SITES
+// ('<fixture>|<where>', one per block occurrence) and the number of distinct
+// CONTENT DIGESTS. Either alone is blind to a shrink the other catches — the site
+// count cannot see two blocks whose content collapsed onto one shape, and the
+// digest count does not move when a site whose content recurs elsewhere detaches
+// from the inventory (#lzblocksitepin, below).
+//
+// These numbers are DERIVED, and they are EQUALITIES. It used to be `MIN_BLOCKS`, a
 // typed constant compared with `>=`, whose own comment was the ledger of its
 // drift: 32 -> 596 -> 598 -> 635 -> 638, every step the same event — the corpus
 // moved, CI went red, someone copied the gate's own output back into the source.
@@ -947,7 +984,10 @@ const trackedNames = recorderTrackedNames();
 const excusedFixtures = knownUncoveredFixtures();
 const corpusRoot = join(SPEC_DIR, ".");
 const derivedDigests = new Set();
-let derivedSites = 0;
+// SITES, not a count (#lzblocksitepin): a site string is what the two dimensions
+// below are compared on, and holding them lets the failure name the blocks that
+// differ instead of only the magnitude of the difference.
+const derivedSites = new Set();
 let derivedFixtures = 0;
 for (const fixture of corpusFixtures(corpusRoot, corpusRoot)) {
   if (excusedFixtures.has(fixture)) continue;
@@ -967,36 +1007,93 @@ for (const fixture of corpusFixtures(corpusRoot, corpusRoot)) {
     ]);
     process.exit(1);
   }
-  const take = (block) => {
-    if (!isPlain(block)) return;
-    const digest = blockDigest(block);
-    if (digest === null) return;
-    derivedSites += 1;
-    derivedDigests.add(digest);
-  };
-  const derive = (node) => {
-    if (Array.isArray(node)) {
-      node.forEach(derive);
-      return;
-    }
-    if (!isPlain(node)) return;
-    for (const [key, value] of Object.entries(node)) {
-      if (trackedNames.has(key)) {
-        if (isPlain(value)) take(value);
-        else if (Array.isArray(value)) value.forEach(take);
-      }
-      derive(value);
-    }
-  };
-  derive(parsed);
+  // Caller two of walkAssertionBlocks(), with the RECORDER's TRACKED rule.
+  walkAssertionBlocks(
+    parsed,
+    fixture,
+    (key) => trackedNames.has(key),
+    (site, digest) => {
+      derivedSites.add(site);
+      derivedDigests.add(digest);
+    },
+  );
 }
 const EXPECTED_BLOCKS = derivedDigests.size;
-if (derivedFixtures === 0 || EXPECTED_BLOCKS === 0) {
+const EXPECTED_SITES = derivedSites.size;
+if (derivedFixtures === 0 || EXPECTED_BLOCKS === 0 || EXPECTED_SITES === 0) {
   fail([
     `ERROR: deriving the assertion-block expectation over ${corpusRoot} found`,
-    `       ${derivedFixtures} fixture(s) and ${EXPECTED_BLOCKS} block(s). An expectation of zero`,
-    "       is satisfied by an inventory of zero, which is this rung reporting OK over",
-    "       nothing at all. The corpus path is wrong, or the ledger excused all of it.",
+    `       ${derivedFixtures} fixture(s), ${EXPECTED_SITES} site(s) and ${EXPECTED_BLOCKS} distinct block(s).`,
+    "       An expectation of zero in EITHER dimension is satisfied by an inventory of",
+    "       zero, which is this rung reporting OK over nothing at all. The corpus path is",
+    "       wrong, or the ledger excused all of it.",
+  ]);
+  process.exit(1);
+}
+
+// ---- Dimension two: SITES (#lzblocksitepin) ----
+//
+// A distinct-digest count is one dimension short, and demonstrably short. js is
+// the binding most exposed to it, because the array-element clause counts 747
+// sites over only 638 digests: 109 sites, one in seven, carry content that also
+// appears at some other site, and every one of those is INDIVIDUALLY INVISIBLE to
+// the digest count — the inventory can lose it and the digest survives at its
+// twin, so `declaredBlocks.size` never moves.
+//
+// Measured, not argued. Dropping rateshape/debounce.json from the opened set —
+// seven `steps[].expected` blocks, and all FOUR of its distinct digests also
+// occur in rateshape/sample_time.json and rateshape/throttle_trailing.json —
+// leaves the digest equality below at 638 == 638 and GREEN, while this one goes
+// 740 against 747 and names all seven detached sites. That is the #lzvacuousrun
+// failure the magnitude rung exists to catch, sailing straight through the
+// dimension that was pinned.
+//
+// What this dimension does NOT catch, so the next reader does not re-derive it
+// the hard way: a block deleted from the CORPUS. Both sides of both equalities
+// read SPEC_DIR, so a corpus deletion moves the expectation and the inventory
+// together and stays green — deleting coordination/lock.json's
+// `steps[2].expected` (`{"is_locked":true,"fence":1,"invalidates":{...}}`, a
+// digest that recurs at `steps[1].expected`) takes BOTH sides 747 -> 746 with
+// digests fixed at 638, measured. No expectation derived from the corpus can see
+// the corpus itself move; that dimension belongs to lazily-spec's
+// corpus-counts.json, which pins per-fixture block sites on the corpus side.
+// What is pinned here is the AGREEMENT between the two sides, per site.
+//
+// Both dimensions come off the SAME walk over the SAME two on-disk inputs, so
+// this adds a dimension rather than a second source of truth. Sites are compared
+// as SETS and not merely as magnitudes: two sites that moved cancel in a count
+// and cannot cancel in a set.
+const missingSites = [...derivedSites].filter((site) => !declaredSites.has(site)).sort();
+const extraSites = [...declaredSites.keys()].filter((site) => !derivedSites.has(site)).sort();
+if (declaredSites.size !== EXPECTED_SITES || missingSites.length > 0 || extraSites.length > 0) {
+  fail([
+    `ERROR: the disk-side walk inventoried ${declaredSites.size} assertion-block SITES, but the`,
+    `       canonical corpus plus this binding's own ledger say ${EXPECTED_SITES}.`,
+    `       Expected: every assertion block carried by the ${derivedFixtures} fixture(s) under`,
+    `       ${corpusRoot} that are not among the ${excusedFixtures.size} in KNOWN_UNCOVERED`,
+    `       (${COVERAGE_GUARD}), counted by SITE — '<fixture>|<where>' — not deduplicated by`,
+    "       content. A site the corpus carries and the inventory does not is a block that",
+    "       detached; the distinct-digest equality below cannot see it whenever that block's",
+    "       content recurs at another site.",
+    ...(missingSites.length > 0
+      ? [
+          `       ${missingSites.length} site(s) the corpus carries and the inventory does NOT:`,
+          ...missingSites.slice(0, 20).map((site) => `         ${site}`),
+          ...(missingSites.length > 20
+            ? [`         ... and ${missingSites.length - 20} more`]
+            : []),
+        ]
+      : []),
+    ...(extraSites.length > 0
+      ? [
+          `       ${extraSites.length} site(s) the inventory carries and the corpus derivation does NOT`,
+          `       (a block spelling outside the recorder's TRACKED list in ${RECORDER_SOURCE},`,
+          `       or ${FIXTURE_MANIFEST} naming a fixture the ledger says is not opened):`,
+          ...extraSites.slice(0, 20).map((site) => `         ${site}`),
+          ...(extraSites.length > 20 ? [`         ... and ${extraSites.length - 20} more`] : []),
+        ]
+      : []),
+    "       There is nothing to re-pin: this number is derived, not typed.",
   ]);
   process.exit(1);
 }
@@ -1009,7 +1106,7 @@ if (declaredBlocks.size !== EXPECTED_BLOCKS) {
       ` ${Math.abs(declaredBlocks.size - EXPECTED_BLOCKS)} ${fewer ? "FEWER" : "MORE"}.`,
     `       Expected: every assertion block carried by the ${derivedFixtures} fixture(s) under`,
     `       ${corpusRoot} that are not among the ${excusedFixtures.size} in KNOWN_UNCOVERED`,
-    `       (${COVERAGE_GUARD}) — ${derivedSites} site(s), ${EXPECTED_BLOCKS} distinct digest(s).`,
+    `       (${COVERAGE_GUARD}) — ${EXPECTED_SITES} site(s), ${EXPECTED_BLOCKS} distinct digest(s).`,
     fewer
       ? "       FEWER: either the corpus moved under this checkout (re-pull lazily-spec, then"
       : "       MORE: either the corpus moved under this checkout (re-pull lazily-spec, then",
@@ -1030,9 +1127,10 @@ if (declaredBlocks.size !== EXPECTED_BLOCKS) {
 console.error(
   `assertion-block bind OK: ${declaredBlocks.size}/${declaredBlocks.size} assertion blocks carried by` +
     ` opened fixtures were instrumented (${blockExcuses.size} declared unbindable; population` +
-    ` ${EXPECTED_BLOCKS}, DERIVED from the ${derivedFixtures} fixture(s) the corpus carries minus` +
-    ` KNOWN_UNCOVERED and asserted EQUAL, not floored -- ${derivedSites} site(s) deduplicated by` +
-    ` content digest, the same key the recorder books a bound block under)`,
+    ` ${EXPECTED_SITES} site(s) and ${EXPECTED_BLOCKS} distinct content digest(s), BOTH DERIVED from` +
+    ` the ${derivedFixtures} fixture(s) the corpus carries minus KNOWN_UNCOVERED by the same walk the` +
+    ` inventory uses, and BOTH asserted EQUAL, not floored -- the site dimension sees a site detach` +
+    ` while its content survives at a twin site, which digest dedup hides)`,
 );
 
 console.error(
