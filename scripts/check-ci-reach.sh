@@ -212,8 +212,9 @@
 #   step name for it would assert nothing about the recipe. In this binding that
 #   is `fmt`, and only `fmt`: CI runs `make fmt`, and `make check` zero times.
 #
-# WHAT THE STEP MAP STILL DOES NOT CLOSE, all four measured in this repo at
-# exit 0 with a verdict byte-identical to healthy
+# WHAT THE STEP MAP ALONE DOES NOT CLOSE. Items 1-2 remain residuals; item 3 is
+# closed below by the workflow/job activation pin. All were measured in this repo
+# at exit 0 with a verdict byte-identical to healthy before their respective pin.
 #
 #   1. A recipe WEAKENED inside its own pinned step. Anchors match as
 #      subsequences and extra CI-side tokens are allowed by design, so dropping
@@ -234,9 +235,10 @@
 #      `continue-on-error: true` on the JOB, or the workflow's `on:` reduced to
 #      `workflow_dispatch`, all stay green. The step-level halves of that are
 #      refused above because the step map gave this guard a handle on the step;
-#      nothing here has a handle on the job or the trigger. scripts/ci-reach.conf
-#      claims a listed workflow "runs on every push/PR" in a COMMENT, and that
-#      claim is the unverified one.
+#      the step map had no handle on the job or trigger. EXPECTED_TRIGGERS,
+#      EXPECTED_TRIGGER_FILTERS, EXPECTED_GATE_JOBS, EXPECTED_JOB_ACTIVATION and
+#      EXPECTED_JOB_MATRIX below now make that activation exact, while independent
+#      floors require push/PR/default-branch/no-path/blocking behavior.
 #
 #   4. Renaming a CI step reds this guard. That is the accepted cost, not a
 #      defect: it is the churn the design trades for, and it is a required,
@@ -432,10 +434,11 @@ EXPECTED_NO_GATE_TARGETS=(
 # moves the recipe and the CI step's command together and the mapping does not
 # move; only renaming or removing a CI step touches this list.
 #
-# `member|step name`, one per line, sorted by member. The step name is matched as
-# an EXACT string against the scraped `- name:` value (YAML quotes stripped, ends
-# trimmed), never as a substring: a pin that matched loosely would be satisfied by
-# a step someone added next to the real one.
+# `member|workflow|job id|step name`, one per line, sorted by member. The step name
+# is matched as an EXACT string against the scraped `- name:` value (YAML quotes
+# stripped, ends trimmed), never as a substring. Workflow and job are part of the
+# identity because moving an unchanged step under different job activation is a
+# behavior change even though its name and command remain byte-identical.
 #
 # Every entry is checked in four directions, because a name-only pin that is
 # merely PRESENT asserts nothing:
@@ -452,16 +455,16 @@ EXPECTED_NO_GATE_TARGETS=(
 #   - set equality with the members actually reached by anchor, both directions,
 #     so neither a new member nor a removed one can slip past unpinned.
 EXPECTED_GATE_STEPS=(
-	"assertion-keys|Rungs 2-3 — assertion keys were READ and ASSERTED (#lzassertunknownkeys, #lzconsumednotasserted)"
-	"assertion-ordering-check|Assertion observation ordering (#lzassertordering)"
-	"build|Build (syntax check every entry point)"
-	"ci-reach|CI-reachability guard (#lzcheckcireachguard)"
-	"conformance-coverage|Rung 1 — canonical fixtures were OPENED (#portconformancecoverage)"
-	"flag-hygiene|Rung 5 — fixture flags are type-required, not coerced (#lzsiblingrunnermasking)"
-	"scenario-coverage|Rung 4 — every fixture SCENARIO was replayed (#lzscenariocoverage)"
-	"test|Test (assert fixtures actually ran)"
-	"test-interop-peer|Interop peer self-check (#lzinteroppeerci)"
-	"typecheck|Typecheck shipped declarations"
+	"assertion-keys|.github/workflows/ci.yml|test|Rungs 2-3 — assertion keys were READ and ASSERTED (#lzassertunknownkeys, #lzconsumednotasserted)"
+	"assertion-ordering-check|.github/workflows/ci.yml|test|Assertion observation ordering (#lzassertordering)"
+	"build|.github/workflows/ci.yml|test|Build (syntax check every entry point)"
+	"ci-reach|.github/workflows/ci.yml|test|CI-reachability guard (#lzcheckcireachguard)"
+	"conformance-coverage|.github/workflows/ci.yml|test|Rung 1 — canonical fixtures were OPENED (#portconformancecoverage)"
+	"flag-hygiene|.github/workflows/ci.yml|test|Rung 5 — fixture flags are type-required, not coerced (#lzsiblingrunnermasking)"
+	"scenario-coverage|.github/workflows/ci.yml|test|Rung 4 — every fixture SCENARIO was replayed (#lzscenariocoverage)"
+	"test|.github/workflows/ci.yml|test|Test (assert fixtures actually ran)"
+	"test-interop-peer|.github/workflows/ci.yml|test|Interop peer self-check (#lzinteroppeerci)"
+	"typecheck|.github/workflows/ci.yml|test|Typecheck shipped declarations"
 )
 
 # Members CI reaches by running `make <target>` rather than by spelling the
@@ -477,6 +480,50 @@ EXPECTED_GATE_STEPS=(
 # silent reclassification.
 EXPECTED_MAKE_INVOKED_MEMBERS=(
 	fmt
+)
+
+# The workflow/job/step that performs each make invocation. This does not pretend
+# to independently spell the target's recipe; it pins the activation container so
+# moving `make fmt` into a conditional or advisory job cannot remain invisible.
+EXPECTED_MAKE_INVOKED_STEPS=(
+	"fmt|.github/workflows/ci.yml|test|Format gate (make fmt)"
+)
+
+# ------------------------------------------------------------- activation pin
+# Exact workflow activation, not a comment in ci-reach.conf
+# (#verifyworkflowactually). Values are pinned rather than job-level conditions
+# being forbidden: other bindings legitimately use matrix-dependent advisory
+# legs, and an exact value handles that shape without a false assumption.
+EXPECTED_TRIGGERS=(
+	".github/workflows/ci.yml|pull_request,push,workflow_dispatch"
+)
+EXPECTED_TRIGGER_FILTERS=(
+	".github/workflows/ci.yml|pull_request|"
+	".github/workflows/ci.yml|push|branches=main"
+	".github/workflows/ci.yml|workflow_dispatch|"
+)
+EXPECTED_GATE_JOBS=(
+	".github/workflows/ci.yml|test"
+)
+EXPECTED_JOB_ACTIVATION=(
+	".github/workflows/ci.yml|test|continue-on-error=;if=;needs="
+)
+EXPECTED_JOB_MATRIX=(
+	".github/workflows/ci.yml|test|"
+)
+
+# Pins detect drift. These independent floors state the requirement even if a
+# workflow edit and its EXPECTED_* value are changed together.
+REQUIRED_TRIGGERS=(push pull_request)
+REQUIRED_TRIGGER_BRANCH="main"
+FORBIDDEN_ACTIVATION_LITERALS=(
+	"if=false"
+	"if=\${{ false }}"
+	"if=\${{false}}"
+	"if='false'"
+	"continue-on-error=true"
+	"continue-on-error=\${{ true }}"
+	"continue-on-error=\${{true}}"
 )
 
 if [ "$ROOT_TARGET" != "$EXPECTED_ROOT_TARGET" ]; then
@@ -844,6 +891,179 @@ ci_step_conditions() {
 	' "$@"
 }
 
+# A second projection gives every run step its workflow and job identity. The
+# existing command reader deliberately deals only in step names; comparing the
+# two readers below makes parser silence a failure rather than an "absent" value.
+# Rows are WORKFLOW<TAB>JOB<TAB>ORDINAL<TAB>STEP.
+ci_step_locations() {
+	awk '
+		BEGIN { DQ = sprintf("%c", 34); SQ = sprintf("%c", 39) }
+		function unquote(v,   f, l) {
+			if (length(v) < 2) return v
+			f = substr(v, 1, 1); l = substr(v, length(v), 1)
+			if (f == l && (f == DQ || f == SQ)) return substr(v, 2, length(v) - 2)
+			return v
+		}
+		function emit() { print FILENAME "\t" job "\t" stepno "\t" step }
+		FNR == 1 { injobs = 0; inblock = 0; job = ""; step = ""; stepno = 0 }
+		{
+			line = $0
+			indent = match(line, /[^ ]/) - 1
+			if (indent < 0) next
+			if (inblock) {
+				if (line ~ /^[[:space:]]*$/) next
+				if (indent > block_indent) next
+				inblock = 0
+			}
+			if (line ~ /^jobs:[[:space:]]*$/) { injobs = 1; job = ""; next }
+			if (injobs && indent == 0) { injobs = 0; job = "" }
+			if (!injobs) next
+			if (line ~ /^  [A-Za-z0-9_.-]+:[[:space:]]*$/) {
+				job = line; sub(/^  /, "", job); sub(/:[[:space:]]*$/, "", job)
+				step = ""; stepno = 0; next
+			}
+			if (job == "") next
+			if (line ~ /^      -[[:space:]]/) { stepno++; step = "" }
+			if (line ~ /^      -[[:space:]]+name:[[:space:]]*/) {
+				step = line
+				sub(/^      -[[:space:]]+name:[[:space:]]*/, "", step)
+				sub(/[[:space:]]+$/, "", step)
+				step = unquote(step)
+			}
+			if (line ~ /^      -[[:space:]]+run:[[:space:]]*[|>][-+]?[[:space:]]*$/ ||
+			    line ~ /^        run:[[:space:]]*[|>][-+]?[[:space:]]*$/) {
+				emit(); inblock = 1; block_indent = indent; next
+			}
+			if (line ~ /^      -[[:space:]]+run:[[:space:]]*[^|>[:space:]]/ ||
+			    line ~ /^        run:[[:space:]]*[^|>[:space:]]/) emit()
+		}
+	' "$@"
+}
+
+# Top-level trigger rows are WORKFLOW<TAB>TRIGGER<TAB>FILTER, with an empty
+# FILTER presence row for every trigger. Unsupported structures emit !SHAPE.
+wf_triggers() {
+	awk '
+		function flushsub() {
+			if (subkey != "") { printf "%s\t%s\t%s=%s\n", FILENAME, trigger, subkey, vals; subkey = ""; vals = "" }
+		}
+		function unquote(v) { gsub(/^[\047"]|[\047"]$/, "", v); return v }
+		function flowlist(v,   n, a, i, out) {
+			gsub(/^\[[[:space:]]*|[[:space:]]*\]$/, "", v)
+			n = split(v, a, /[[:space:]]*,[[:space:]]*/); out = ""
+			for (i = 1; i <= n; i++) if (a[i] != "") out = out (out == "" ? "" : ",") unquote(a[i])
+			return out
+		}
+		FNR == 1 { flushsub(); inon = 0; trigger = "" }
+		{
+			line = $0; sub(/[[:space:]]+$/, "", line)
+			if (line ~ /^[[:space:]]*#/ || line ~ /^[[:space:]]*$/) next
+			indent = match(line, /[^ ]/) - 1
+			if (line ~ /^on:[[:space:]]*$/) { flushsub(); inon = 1; trigger = ""; next }
+			if (line ~ /^on:/) { printf "%s\t!SHAPE\t%s\n", FILENAME, line; inon = 0; next }
+			if (indent == 0) { flushsub(); inon = 0; trigger = ""; next }
+			if (!inon) next
+			if (indent == 2) {
+				flushsub()
+				if (line !~ /^  [A-Za-z0-9_.-]+:[[:space:]]*$/) { printf "%s\t!SHAPE\t%s\n", FILENAME, line; next }
+				trigger = line; sub(/^  /, "", trigger); sub(/:[[:space:]]*$/, "", trigger)
+				printf "%s\t%s\t\n", FILENAME, trigger; next
+			}
+			if (trigger == "") { printf "%s\t!SHAPE\t%s\n", FILENAME, line; next }
+			if (indent == 4) {
+				flushsub()
+				if (line !~ /^    [A-Za-z0-9_.-]+:/) { printf "%s\t!SHAPE\t%s\n", FILENAME, line; next }
+				key = line; sub(/^    /, "", key); sub(/:.*$/, "", key)
+				value = line; sub(/^    [A-Za-z0-9_.-]+:[[:space:]]*/, "", value)
+				if (value == "") { subkey = key; vals = ""; next }
+				if (value ~ /^\[.*\]$/) { printf "%s\t%s\t%s=%s\n", FILENAME, trigger, key, flowlist(value); next }
+				printf "%s\t%s\t%s=%s\n", FILENAME, trigger, key, unquote(value); next
+			}
+			if (indent == 6 && line ~ /^      -[[:space:]]/) {
+				if (subkey == "") { printf "%s\t!SHAPE\t%s\n", FILENAME, line; next }
+				value = line; sub(/^      -[[:space:]]*/, "", value)
+				if (value ~ /:[[:space:]]/) { printf "%s\t!SHAPE\t%s\n", FILENAME, line; next }
+				vals = vals (vals == "" ? "" : ",") unquote(value); next
+			}
+			printf "%s\t!SHAPE\t%s\n", FILENAME, line
+		}
+		END { flushsub() }
+	' "$@"
+}
+
+# Job rows are WORKFLOW<TAB>JOB<TAB>KEY<TAB>VALUE. PRESENT is emitted even for
+# a job with no activation keys, preventing an unread job from looking absent.
+wf_job_activation() {
+	awk '
+		function bad(l) { printf "%s\t!SHAPE\t\t%s\n", FILENAME, l }
+		function unquote(v) { gsub(/^[\047"]|[\047"]$/, "", v); return v }
+		function flowlist(v,   n, a, i, out) {
+			gsub(/^\[[[:space:]]*|[[:space:]]*\]$/, "", v)
+			n = split(v, a, /[[:space:]]*,[[:space:]]*/); out = ""
+			for (i = 1; i <= n; i++) if (a[i] != "") out = out (out == "" ? "" : ",") unquote(a[i])
+			return out
+		}
+		function flushaxis() {
+			if (axis != "") { printf "%s\t%s\tmatrix\t%s=%s\n", FILENAME, job, axis, vals; axis = ""; vals = "" }
+		}
+		FNR == 1 { flushaxis(); injobs = 0; job = ""; mode = ""; submode = "" }
+		{
+			line = $0; sub(/[[:space:]]+$/, "", line)
+			if (line ~ /^[[:space:]]*#/ || line ~ /^[[:space:]]*$/) next
+			indent = match(line, /[^ ]/) - 1
+			if (line ~ /^jobs:[[:space:]]*$/) { flushaxis(); injobs = 1; job = ""; next }
+			if (indent == 0) { flushaxis(); injobs = 0; job = ""; next }
+			if (!injobs) next
+			if (indent == 2) {
+				flushaxis()
+				if (line !~ /^  [A-Za-z0-9_.-]+:[[:space:]]*$/) { bad(line); next }
+				job = line; sub(/^  /, "", job); sub(/:[[:space:]]*$/, "", job)
+				mode = ""; submode = ""; printf "%s\t%s\tPRESENT\t\n", FILENAME, job; next
+			}
+			if (job == "") { bad(line); next }
+			if (indent == 4) {
+				flushaxis(); submode = ""
+				if (line !~ /^    [A-Za-z0-9_.-]+:/) { bad(line); next }
+				key = line; sub(/^    /, "", key); sub(/:.*$/, "", key)
+				mode = (key == "strategy") ? "strategy" : "other"
+				if (key == "if" || key == "continue-on-error" || key == "needs") {
+					value = line; sub(/^    [A-Za-z0-9_.-]+:[[:space:]]*/, "", value)
+					if (value == "") { bad(line); next }
+					if (value ~ /^\[.*\]$/) value = flowlist(value)
+					printf "%s\t%s\t%s\t%s\n", FILENAME, job, key, value
+				}
+				next
+			}
+			if (mode != "strategy") next
+			if (indent == 6) {
+				flushaxis()
+				if (line !~ /^      [A-Za-z0-9_.-]+:/) { bad(line); next }
+				key = line; sub(/^      /, "", key); sub(/:.*$/, "", key)
+				submode = (key == "matrix") ? "matrix" : ""; next
+			}
+			if (submode != "matrix") next
+			if (indent == 8) {
+				flushaxis()
+				if (line !~ /^        [A-Za-z0-9_.-]+:/) { bad(line); next }
+				key = line; sub(/^        /, "", key); sub(/:.*$/, "", key)
+				if (key == "include" || key == "exclude") { bad(line); next }
+				value = line; sub(/^        [A-Za-z0-9_.-]+:[[:space:]]*/, "", value)
+				if (value == "") { axis = key; vals = ""; next }
+				if (value ~ /^\[.*\]$/) { printf "%s\t%s\tmatrix\t%s=%s\n", FILENAME, job, key, flowlist(value); next }
+				bad(line); next
+			}
+			if (indent == 10 && line ~ /^          -[[:space:]]/) {
+				if (axis == "") { bad(line); next }
+				value = line; sub(/^          -[[:space:]]*/, "", value)
+				if (value ~ /:[[:space:]]/) { bad(line); next }
+				vals = vals (vals == "" ? "" : ",") unquote(value); next
+			}
+			bad(line)
+		}
+		END { flushaxis() }
+	' "$@"
+}
+
 # ------------------------------------------------------------------- normalizing
 
 # Reduce command text to anchors, one per line, each a space-separated token list.
@@ -965,14 +1185,39 @@ ci_anchor="$(mktemp)"
 ci_stepanchor="$(mktemp)"
 ci_stepnames="$(mktemp)"
 ci_stepcond="$(mktemp)"
+ci_steploc="$(mktemp)"
+wf_trig="$(mktemp)"
+wf_act="$(mktemp)"
 # ONE trap. A second `trap ... EXIT` REPLACES the first rather than adding to it,
 # so every temp file this guard makes has to be named here.
-trap 'rm -f "$ci_raw" "$ci_anchor" "$ci_stepanchor" "$ci_stepnames" "$ci_stepcond"' EXIT
+trap 'rm -f "$ci_raw" "$ci_anchor" "$ci_stepanchor" "$ci_stepnames" "$ci_stepcond" "$ci_steploc" "$wf_trig" "$wf_act"' EXIT
 ci_commands "${workflows[@]}" >"$ci_raw"
 anchors <"$ci_raw" | sort -u >"$ci_anchor"
 ci_named_commands "${workflows[@]}" | anchors named | LC_ALL=C sort -u >"$ci_stepanchor"
 ci_step_names "${workflows[@]}" >"$ci_stepnames"
 ci_step_conditions "${workflows[@]}" | LC_ALL=C sort -u >"$ci_stepcond"
+ci_step_locations "${workflows[@]}" | LC_ALL=C sort >"$ci_steploc"
+wf_triggers "${workflows[@]}" | LC_ALL=C sort >"$wf_trig"
+wf_job_activation "${workflows[@]}" | LC_ALL=C sort >"$wf_act"
+
+if awk -F'\t' '$2 == "!SHAPE" { found = 1 } END { exit found ? 0 : 1 }' "$wf_trig" "$wf_act"; then
+	echo "check-ci-reach: unsupported YAML shape in a workflow activation position:" >&2
+	awk -F'\t' '$2 == "!SHAPE" { print "  - " $1 ": " ($4 == "" ? $3 : $4) }' "$wf_trig" "$wf_act" >&2
+	echo "  Teach wf_triggers/wf_job_activation this shape; parser silence would make an" >&2
+	echo "  absent activation pin pass vacuously, so this guard refuses to guess." >&2
+	exit 1
+fi
+
+# Both readers must identify the same run steps. Otherwise an activation parser
+# miss could turn a real job into the all-absent value expected below.
+command_step_names="$(LC_ALL=C sort "$ci_stepnames")"
+location_step_names="$(awk -F'\t' '{ print $4 }' "$ci_steploc" | LC_ALL=C sort)"
+if [ "$command_step_names" != "$location_step_names" ]; then
+	echo "check-ci-reach: workflow readers disagree about the run: steps they found" >&2
+	echo "  The command reader and the job-aware activation reader must see the same" >&2
+	echo "  multiset; fix unsupported indentation instead of treating it as absence." >&2
+	exit 1
+fi
 
 if [ ! -s "$ci_anchor" ]; then
 	echo "check-ci-reach: no run: steps found in ${workflows[*]} — a guard with an empty haystack passes everything" >&2
@@ -1044,11 +1289,46 @@ pinned_step_for() {
 	local t="$1" e
 	for e in "${EXPECTED_GATE_STEPS[@]}"; do
 		if [ "${e%%|*}" = "$t" ]; then
-			printf '%s' "${e#*|}"
+			local rest="${e#*|}"
+			rest="${rest#*|}"
+			printf '%s' "${rest#*|}"
 			return 0
 		fi
 	done
 	return 1
+}
+
+pinned_workflow_for() {
+	local t="$1" e rest
+	for e in "${EXPECTED_GATE_STEPS[@]}"; do
+		if [ "${e%%|*}" = "$t" ]; then
+			rest="${e#*|}"; printf '%s' "${rest%%|*}"; return 0
+		fi
+	done
+	return 1
+}
+
+pinned_job_for() {
+	local t="$1" e rest
+	for e in "${EXPECTED_GATE_STEPS[@]}"; do
+		if [ "${e%%|*}" = "$t" ]; then
+			rest="${e#*|}"; rest="${rest#*|}"; printf '%s' "${rest%%|*}"; return 0
+		fi
+	done
+	return 1
+}
+
+make_step_entry_for() {
+	local t="$1" e
+	for e in "${EXPECTED_MAKE_INVOKED_STEPS[@]}"; do
+		if [ "${e%%|*}" = "$t" ]; then printf '%s' "$e"; return 0; fi
+	done
+	return 1
+}
+
+step_location_count() {
+	awk -F'\t' -v wf="$1" -v job="$2" -v step="$3" \
+		'$1 == wf && $2 == job && $4 == step { n++ } END { print n + 0 }' "$ci_steploc"
 }
 
 # How many `run:` steps across the counted workflows carry this exact name.
@@ -1126,6 +1406,7 @@ step_map_misses=""
 step_map_miss_count=0
 discovered_anchor_reached=""
 discovered_make_invoked=""
+gate_jobs_found=""
 
 unreached=""
 unreached_count=0
@@ -1272,6 +1553,26 @@ $(printf '%s' "$oracle_missing" | sed '/^$/d; s/^/      /')
     about the recipe. Drop the entry; the member belongs in
     EXPECTED_MAKE_INVOKED_MEMBERS, which is where the refusal is recorded."
 		fi
+		if ! make_entry="$(make_step_entry_for "$target")"; then
+			step_map_misses="${step_map_misses}UNPINNED MAKE STEP  $target
+    is reached through \`$MAKE_BIN $target\`, but EXPECTED_MAKE_INVOKED_STEPS does not
+    name the workflow, job and step that activates it. Add an exact location."
+			step_map_miss_count=$((step_map_miss_count + 1))
+			printf 'STEP PIN  %s\n' "$target"
+			continue
+		fi
+		make_rest="${make_entry#*|}"; make_wf="${make_rest%%|*}"
+		make_rest="${make_rest#*|}"; make_job="${make_rest%%|*}"; make_step="${make_rest#*|}"
+		if [ "$(step_location_count "$make_wf" "$make_job" "$make_step")" -ne 1 ] ||
+		   ! anchor_reached_in_step "make $target" "$make_step"; then
+			step_map_misses="${step_map_misses}DEAD MAKE STEP PIN  $target
+    is pinned to '$make_wf' job '$make_job' step '$make_step', but exactly one such
+    run: step invoking \`$MAKE_BIN $target\` was not found. Restore it or update the pin."
+			step_map_miss_count=$((step_map_miss_count + 1))
+			printf 'STEP PIN  %s\n' "$target"
+			continue
+		fi
+		gate_jobs_found="$gate_jobs_found$make_wf|$make_job"$'\n'
 	else
 		# STEP-SCOPED REACH (#stepscopedreach). Every anchor has to be in the ONE
 		# step this member is pinned to, not in some `run:` body somewhere in the
@@ -1300,6 +1601,19 @@ $(printf '%s' "$oracle_missing" | sed '/^$/d; s/^/      /')
 			printf 'STEP PIN  %s\n' "$target"
 			continue
 		fi
+
+		pinned_workflow="$(pinned_workflow_for "$target")"
+		pinned_job="$(pinned_job_for "$target")"
+		if [ "$(step_location_count "$pinned_workflow" "$pinned_job" "$pinned_step")" -ne 1 ]; then
+			step_map_misses="${step_map_misses}MOVED STEP PIN  $target
+    is pinned to '$pinned_workflow' job '$pinned_job' step '$pinned_step', but that
+    exact workflow/job/step identity does not exist once. A gate step moved to a
+    differently activated job is a behavior change; restore it or update the pin."
+			step_map_miss_count=$((step_map_miss_count + 1))
+			printf 'STEP PIN  %s\n' "$target"
+			continue
+		fi
+		gate_jobs_found="$gate_jobs_found$pinned_workflow|$pinned_job"$'\n'
 		if [ "$occurrences" -gt 1 ]; then
 			step_map_misses="${step_map_misses}AMBIGUOUS STEP PIN  $target
     is pinned to the CI step '$pinned_step', and $occurrences \`run:\` steps in
@@ -1489,6 +1803,186 @@ if [ "$discovered_makeinv_set" != "$expected_makeinv_set" ]; then
 	done <<<"$(set_only_in_first "$discovered_makeinv_set" "$expected_makeinv_set")"
 fi
 
+# --------------------------------------------------------- activation verdicts
+
+activation_errors=""
+activation_error_count=0
+activation_fail() {
+	activation_errors="$activation_errors$1"$'\n'
+	activation_error_count=$((activation_error_count + 1))
+}
+
+workflow_triggers() {
+	awk -F'\t' -v wf="$1" '$1 == wf && $2 != "!SHAPE" && $3 == "" { print $2 }' "$wf_trig" |
+		LC_ALL=C sort -u | paste -sd',' -
+}
+workflow_filters() {
+	awk -F'\t' -v wf="$1" -v trigger="$2" \
+		'$1 == wf && $2 == trigger && $3 != "" { print $3 }' "$wf_trig" |
+		LC_ALL=C sort -u | paste -sd';' -
+}
+job_activation() {
+	awk -F'\t' -v wf="$1" -v job="$2" '
+		$1 == wf && $2 == job && $3 == "continue-on-error" { c = $4 }
+		$1 == wf && $2 == job && $3 == "if" { i = $4 }
+		$1 == wf && $2 == job && $3 == "needs" { n = $4 }
+		END { printf "continue-on-error=%s;if=%s;needs=%s", c, i, n }
+	' "$wf_act"
+}
+job_matrix() {
+	awk -F'\t' -v wf="$1" -v job="$2" '$1 == wf && $2 == job && $3 == "matrix" { print $4 }' "$wf_act" |
+		LC_ALL=C sort -u | paste -sd';' -
+}
+
+# Empty pins are the pre-fix implementation in another spelling.
+for pin_name in EXPECTED_TRIGGERS EXPECTED_TRIGGER_FILTERS EXPECTED_GATE_JOBS EXPECTED_JOB_ACTIVATION EXPECTED_JOB_MATRIX; do
+	eval 'pin_size=${#'"$pin_name"'[@]}'
+	if [ "$pin_size" -eq 0 ]; then
+		activation_fail "$pin_name is empty, so this guard pins nothing about workflow activation."
+	fi
+	eval 'pin_entries=("${'"$pin_name"'[@]}")'
+	pin_rows="$(printf '%s\n' "${pin_entries[@]}" | LC_ALL=C sort)"
+	pin_set="$(as_set "${pin_entries[@]}")"
+	if [ "$pin_rows" != "$pin_set" ]; then
+		activation_fail "$pin_name must be sorted, nonblank and duplicate-free; otherwise a row is dead or ambiguous."
+	fi
+done
+
+expected_workflow_set="$(printf '%s\n' "${EXPECTED_TRIGGERS[@]%%|*}" | LC_ALL=C sort -u)"
+counted_workflow_set="$(as_set "${workflows[@]}")"
+if [ "$expected_workflow_set" != "$counted_workflow_set" ]; then
+	activation_fail "EXPECTED_TRIGGERS workflow keys are '$expected_workflow_set'; $CONF counts '$counted_workflow_set'."
+fi
+
+# Exact trigger and filter values, with every pin key required exactly once.
+for wf in "${workflows[@]}"; do
+	want=""; found=0
+	for e in "${EXPECTED_TRIGGERS[@]}"; do
+		case "$e" in "$wf|"*) want="${e#*|}"; found=$((found + 1)) ;; esac
+	done
+	got="$(workflow_triggers "$wf")"
+	if [ "$found" -ne 1 ] || [ "$got" != "$want" ]; then
+		activation_fail "EXPECTED_TRIGGERS for '$wf' is '$want' ($found row(s)); workflow says '$got'."
+	fi
+	IFS=',' read -r -a actual_triggers <<<"$got"
+	for trigger in "${actual_triggers[@]}"; do
+		[ -n "$trigger" ] || continue
+		want_filter=""; filter_found=0
+		for e in "${EXPECTED_TRIGGER_FILTERS[@]}"; do
+			rest="${e#*|}"; e_wf="${e%%|*}"; e_trigger="${rest%%|*}"
+			if [ "$e_wf" = "$wf" ] && [ "$e_trigger" = "$trigger" ]; then
+				want_filter="${rest#*|}"; filter_found=$((filter_found + 1))
+			fi
+		done
+		got_filter="$(workflow_filters "$wf" "$trigger")"
+		if [ "$filter_found" -ne 1 ] || [ "$got_filter" != "$want_filter" ]; then
+			activation_fail "EXPECTED_TRIGGER_FILTERS for '$wf' trigger '$trigger' is '$want_filter' ($filter_found row(s)); workflow says '$got_filter'."
+		fi
+	done
+	for required in "${REQUIRED_TRIGGERS[@]}"; do
+		case ",$got," in *",$required,"*) ;; *) activation_fail "REQUIRED_TRIGGERS requires '$wf' to run on '$required'." ;; esac
+	done
+done
+
+# A filter pin for a trigger that no longer exists is stale, not harmless text.
+for e in "${EXPECTED_TRIGGER_FILTERS[@]}"; do
+	wf="${e%%|*}"; rest="${e#*|}"; trigger="${rest%%|*}"
+	case ",$(workflow_triggers "$wf")," in *",$trigger,"*) ;; *) activation_fail "EXPECTED_TRIGGER_FILTERS names absent trigger '$wf|$trigger'." ;; esac
+done
+
+# Floors: required triggers may not be path-filtered, and push must still cover
+# the default branch. These requirements are independent of EXPECTED_*.
+for wf in "${workflows[@]}"; do
+	for trigger in "${REQUIRED_TRIGGERS[@]}"; do
+		filters="$(workflow_filters "$wf" "$trigger")"
+		case ";$filters;" in *";paths="* | *";paths-ignore="*)
+			activation_fail "'$wf' trigger '$trigger' has a path filter; a gate-changing file can then bypass CI." ;;
+		esac
+	done
+	push_filters="$(workflow_filters "$wf" push)"
+	branches="$(printf '%s\n' "$push_filters" | tr ';' '\n' | sed -n 's/^branches=//p')"
+	branches_ignore="$(printf '%s\n' "$push_filters" | tr ';' '\n' | sed -n 's/^branches-ignore=//p')"
+	if [ -n "$branches" ]; then
+		branch_ok=0
+		IFS=',' read -r -a patterns <<<"$branches"
+		for pattern in "${patterns[@]}"; do
+			case "$pattern" in !*) activation_fail "'$wf' push branches contains negated pattern '$pattern', which this floor refuses to guess about." ;;
+			esac
+		# shellcheck disable=SC2254
+		case "$REQUIRED_TRIGGER_BRANCH" in $pattern) branch_ok=1 ;; esac
+		done
+		[ "$branch_ok" -eq 1 ] || activation_fail "'$wf' push branches '$branches' do not include required branch '$REQUIRED_TRIGGER_BRANCH'."
+	fi
+	if [ -n "$branches_ignore" ]; then
+		IFS=',' read -r -a patterns <<<"$branches_ignore"
+		for pattern in "${patterns[@]}"; do
+			# shellcheck disable=SC2254
+			case "$REQUIRED_TRIGGER_BRANCH" in $pattern) activation_fail "'$wf' push branches-ignore '$branches_ignore' excludes required branch '$REQUIRED_TRIGGER_BRANCH'." ;; esac
+		done
+	fi
+done
+
+# Gate jobs are derived from resolved step identities, then compared as a set.
+actual_gate_jobs="$(printf '%s' "$gate_jobs_found" | sed '/^$/d' | LC_ALL=C sort -u)"
+expected_gate_jobs="$(as_set "${EXPECTED_GATE_JOBS[@]}")"
+if [ "$actual_gate_jobs" != "$expected_gate_jobs" ]; then
+	activation_fail "EXPECTED_GATE_JOBS is '$expected_gate_jobs'; resolved gate steps are '$actual_gate_jobs'."
+fi
+
+expected_make_step_members="$(printf '%s\n' "${EXPECTED_MAKE_INVOKED_STEPS[@]%%|*}" | LC_ALL=C sort)"
+if [ "$expected_make_step_members" != "$expected_makeinv_set" ]; then
+	activation_fail "EXPECTED_MAKE_INVOKED_STEPS member keys are '$expected_make_step_members'; EXPECTED_MAKE_INVOKED_MEMBERS is '$expected_makeinv_set'."
+fi
+
+for pin_name in EXPECTED_JOB_ACTIVATION EXPECTED_JOB_MATRIX; do
+	eval 'pin_entries=("${'"$pin_name"'[@]}")'
+	pin_keys=""
+	for e in "${pin_entries[@]}"; do
+		first="${e%%|*}"; rest="${e#*|}"; second="${rest%%|*}"
+		pin_keys="$pin_keys$first|$second"$'\n'
+	done
+	pin_keys="$(printf '%s' "$pin_keys" | sed '/^$/d' | LC_ALL=C sort -u)"
+	if [ "$pin_keys" != "$expected_gate_jobs" ]; then
+		activation_fail "$pin_name job keys are '$pin_keys'; EXPECTED_GATE_JOBS is '$expected_gate_jobs'."
+	fi
+done
+
+# Cross-check the two YAML readers at workflow+job granularity before an absent
+# activation value is trusted.
+while IFS=$'\t' read -r wf job; do
+	[ -n "$wf" ] && [ -n "$job" ] || continue
+	if ! awk -F'\t' -v wf="$wf" -v job="$job" '$1 == wf && $2 == job && $3 == "PRESENT" { found=1 } END { exit found ? 0 : 1 }' "$wf_act"; then
+		activation_fail "workflow readers disagree: '$wf' job '$job' has run: steps but no activation presence row."
+	fi
+done < <(awk -F'\t' '{ print $1 "\t" $2 }' "$ci_steploc" | LC_ALL=C sort -u)
+
+dup_activation="$(awk -F'\t' '$3 == "if" || $3 == "continue-on-error" || $3 == "needs" { n[$1 "|" $2 "|" $3]++ } END { for (k in n) if (n[k] > 1) print k }' "$wf_act" | LC_ALL=C sort)"
+[ -z "$dup_activation" ] || activation_fail "duplicate job activation key(s): $dup_activation"
+
+for gate_job in "${EXPECTED_GATE_JOBS[@]}"; do
+	wf="${gate_job%%|*}"; job="${gate_job#*|}"
+	want=""; found=0
+	for e in "${EXPECTED_JOB_ACTIVATION[@]}"; do
+		case "$e" in "$gate_job|"*) want="${e#*|*|}"; found=$((found + 1)) ;; esac
+	done
+	got="$(job_activation "$wf" "$job")"
+	if [ "$found" -ne 1 ] || [ "$got" != "$want" ]; then
+		activation_fail "EXPECTED_JOB_ACTIVATION for '$gate_job' is '$want' ($found row(s)); workflow says '$got'."
+	fi
+	want_matrix=""; matrix_found=0
+	for e in "${EXPECTED_JOB_MATRIX[@]}"; do
+		case "$e" in "$gate_job|"*) want_matrix="${e#*|*|}"; matrix_found=$((matrix_found + 1)) ;; esac
+	done
+	got_matrix="$(job_matrix "$wf" "$job")"
+	if [ "$matrix_found" -ne 1 ] || [ "$got_matrix" != "$want_matrix" ]; then
+		activation_fail "EXPECTED_JOB_MATRIX for '$gate_job' is '$want_matrix' ($matrix_found row(s)); workflow says '$got_matrix'."
+	fi
+	for forbidden in "${FORBIDDEN_ACTIVATION_LITERALS[@]}"; do
+		case ";$got;" in *";$forbidden;"*) activation_fail "gate job '$gate_job' uses forbidden non-blocking activation '$forbidden'." ;; esac
+	done
+	case "$got" in *";needs="?*) activation_fail "gate job '$gate_job' has job-level needs; this binding requires its sole gate job to activate independently." ;; esac
+done
+
 # A guard that examined nothing must not report OK — the same vacuity rule the
 # conformance guards apply (#lzvacuousrun). An oracle miss counts as examined:
 # the target was measured and REFUSED, and letting it fall through to this line
@@ -1499,6 +1993,15 @@ if [ "$((reached + excused_ok + unreached_count + oracle_miss_count + step_map_m
 fi
 
 status=0
+if [ "$activation_error_count" -gt 0 ]; then
+	echo >&2
+	echo "check-ci-reach: workflow/job activation is not pinned and blocking (#verifyworkflowactually):" >&2
+	while IFS= read -r line; do
+		[ -n "$line" ] || continue
+		printf '  - %s\n' "$line" >&2
+	done <<<"$activation_errors"
+	status=1
+fi
 if [ "$stale_count" -gt 0 ]; then
 	echo >&2
 	while IFS= read -r t; do
@@ -1570,6 +2073,7 @@ fi
 if [ "$status" -eq 0 ]; then
 	echo "check-ci-reach: OK — $reached target(s) reached by CI, $excused_ok excused, $nogate_count carrying no gate"
 	echo "check-ci-reach: OK — closure pinned at ${#EXPECTED_CLOSURE_TARGETS[@]} target(s), ${#EXPECTED_NO_GATE_TARGETS[@]} of them legitimately carrying no gate; every gated command found in \`$MAKE_BIN -n $ROOT_TARGET\`, no two members sharing an anchor set"
-	echo "check-ci-reach: OK — ${#EXPECTED_GATE_STEPS[@]} gate(s) pinned to a CI step BY NAME, each named step spelled exactly once, unconditional, and running every anchor of its member; ${#EXPECTED_MAKE_INVOKED_MEMBERS[@]} member(s) reached by \`$MAKE_BIN <target>\` and refused a step pin"
+	echo "check-ci-reach: OK — ${#EXPECTED_GATE_STEPS[@]} gate(s) pinned to an exact workflow/job/step identity, each step unique, unconditional, and running every anchor; ${#EXPECTED_MAKE_INVOKED_MEMBERS[@]} make-invoked member(s) pinned to an activation container"
+	echo "check-ci-reach: OK — ${#EXPECTED_TRIGGERS[@]} workflow trigger set(s), ${#EXPECTED_TRIGGER_FILTERS[@]} trigger filter set(s), ${#EXPECTED_GATE_JOBS[@]} gate job(s), exact activation and matrix values, plus push/PR/main/no-path/blocking floors"
 fi
 exit "$status"
