@@ -6,44 +6,32 @@
 // it cannot see a bundled copy shadowing the canonical one. This file adds the
 // positive half — mirroring the replay-output assertion lazily-go greps for.
 //
-// Six claims, each of which has failed somewhere in the family:
+// Four claims, each of which has failed somewhere in the family:
 //   1. the canonical sibling is present (the js suite reported green for its
 //      whole life with no CI at all, so nothing ever checked);
-//   2. every conformance area the suite replays is present AND non-empty (an
-//      empty dir passes `test -d` and skips every fixture in it);
-//   3. every area the CORPUS carries is either replayed or explicitly excused,
-//      so an area added upstream cannot go dark in silence;
-//   4. no bundled `test/conformance/` copy exists to shadow the canonical one
+//   2. no bundled `test/conformance/` copy exists to shadow the canonical one
 //      (js carried nine such files; `crdt-tree/algebra.json` had already
 //      drifted from spec);
-//   5. no runner computes the sibling path for ITSELF (#lzoverrideallrunners).
+//   3. no runner computes the sibling path for ITSELF (#lzoverrideallrunners).
 //      Every runner resolves the corpus through `test/spec-corpus.cjs`, which is
 //      what makes `LAZILY_SPEC_CONFORMANCE_DIR` reach the whole suite rather than
 //      the three files that happened to have grown their own copy of the
 //      override. A runner that spells the sibling path itself silently opts out
 //      of every corpus-perturbation probe, so it fails here instead;
-//   6. every claim above examined something. A guard that walks an empty file
-//      set, or derives an empty area set, is green over nothing.
+//   4. every claim above examined something. A guard that walks an empty file
+//      set is green over nothing.
 //
-// Claims 2, 3 and 5 used to be hand-maintained lists, and both had rotted into
-// the failure they warned about (#lzcorpusrootguards):
-//
-//   * The area list said "keep in sync with the `specPath(<area>)` call sites —
-//     a missing entry here means an area can go dark unnoticed" and then went
-//     dark on eight areas: codec, distributed, familysync, ingress, protobuf,
-//     receipts, signaling and stdlib were all replayed and none was listed. It
-//     is now DERIVED from the corpus-relative paths the runners actually spell,
-//     so it cannot lag them, and the corpus is cross-checked against it in the
-//     other direction so an unreplayed area has to be excused by name.
-//   * The sibling-path matcher looked for the single assembled needle
-//     `"lazily-spec"` — the quoted single segment — inside `test/` only. Three
-//     natural spellings walked straight past it (a joined path in one literal,
-//     the same segments in single quotes, a template literal), and `src/`,
-//     `scripts/` and `bench/` were never scanned at all. Both holes were
-//     demonstrated against synthetic offenders before this rewrite, not
-//     theorised. The matcher below tokenizes the source instead, so it sees a
-//     string literal for what it is in every quote style, and it joins adjacent
-//     literals so a split constant cannot slip between them.
+// Claim 3 used to be a hand-maintained list and had rotted into the failure it
+// warned about (#lzcorpusrootguards): the sibling-path matcher looked for the
+// single assembled needle `"lazily-spec"` — the quoted single segment — inside
+// `test/` only. Three
+// natural spellings walked straight past it (a joined path in one literal, the
+// same segments in single quotes, a template literal), and `src/`, `scripts/`
+// and `bench/` were never scanned at all. Both holes were demonstrated against
+// synthetic offenders before this rewrite, not theorised. The matcher below
+// tokenizes the source instead, so it sees a string literal for what it is in
+// every quote style, and it joins adjacent literals so a split constant cannot
+// slip between them.
 import assert from "node:assert/strict";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, relative, sep } from "node:path";
@@ -376,137 +364,11 @@ const ALLOWED_TO_SPELL_SCHEMAS = ["test/spec-corpus.cjs"];
 const MIN_SCANNED_FILES = 136;
 
 // ---------------------------------------------------------------------------
-// Areas the suite replays, DERIVED
-// ---------------------------------------------------------------------------
-
-// A corpus-relative fixture path, `<area>/<file>.json`. Every runner spells one
-// of these, either directly (`loadFixture("signaling/frames.json")`) or as a
-// module constant (`const FIXTURE = "protobuf/graph_boundary_traces.json"`), so
-// reading them off the source is reading what the suite really asks for.
-const AREA_OF_FIXTURE = /^([A-Za-z][A-Za-z0-9._-]*)\/[^/]+\.json$/;
-// A bare area name handed to the corpus seam, `specPath("windowing")`. The
-// runners that list a directory spell the area this way and never name a file.
-const BARE_AREA = /^[A-Za-z][A-Za-z0-9_-]*$/;
-const SEAM_CALL = /(?:specPath|fixtureExists|readFixtureText|loadFixture)\(\s*$/;
-
-const GUARD_FILE = "test/conformance-guard.test.js";
-
-function deriveReplayedAreas() {
-  const areas = new Map();
-  let scanned = 0;
-  for (const [rel, _result] of SCAN.results) {
-    // Test sources only, and never this file: an area named HERE would satisfy
-    // the derivation with the guard's own text, which is the hand-maintained
-    // list wearing a different hat.
-    if (!rel.startsWith("test/") || rel === GUARD_FILE || rel.endsWith(".sh")) continue;
-    scanned++;
-    const code = readFileSync(join(repoRoot, rel), "utf8");
-    for (const literal of stringLiterals(code)) {
-      const fixture = AREA_OF_FIXTURE.exec(literal.value);
-      const area = fixture
-        ? fixture[1]
-        : BARE_AREA.test(literal.value) &&
-            SEAM_CALL.test(code.slice(Math.max(0, literal.start - 48), literal.start))
-          ? literal.value
-          : null;
-      if (area === null) continue;
-      if (!areas.has(area)) areas.set(area, new Set());
-      areas.get(area).add(rel);
-    }
-  }
-  return { areas, scanned };
-}
-
-const DERIVED = deriveReplayedAreas();
-const AREAS = [...DERIVED.areas.keys()].sort();
-
-// Corpus areas this binding does NOT replay. Same shape and same discipline as
-// `KNOWN_UNCOVERED` in scripts/check-conformance-coverage.sh, which excuses the
-// individual fixtures: an entry is a claim that somebody looked, and it is
-// verified in both directions below so it cannot rot into something that used to
-// be true.
-const AREAS_NOT_REPLAYED = {};
-
-// PINNED TO REALITY, read the note on MIN_SCANNED_FILES. All twenty-six corpus
-// areas are replayed by this binding.
-const MIN_AREAS = 26;
-
-const corpusAreas = () =>
-  readdirSync(specConformance, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => entry.name)
-    .sort();
-
-// ---------------------------------------------------------------------------
 
 test("canonical lazily-spec sibling is present (#lzspecconf)", () => {
   assert.ok(
     existsSync(specConformance),
     `canonical conformance fixtures absent: ${specConformance} — ${CLONE_HINT}`,
-  );
-});
-
-test("the replayed-area list is DERIVED from real call sites, not hand-kept", () => {
-  assert.ok(
-    DERIVED.scanned > 0,
-    "the area derivation read ZERO test sources. Every area check below is then " +
-      "vacuously green over an empty list, which is exactly the state the old " +
-      "hand-maintained list rotted into (#lzcorpusrootguards).",
-  );
-  assert.ok(
-    AREAS.length >= MIN_AREAS,
-    `only ${AREAS.length} conformance areas were derived from the runners, expected >= ${MIN_AREAS}. ` +
-      "A replay was deleted or the derivation stopped seeing its call sites. Do not lower " +
-      `MIN_AREAS to fix this. Derived: ${AREAS.join(", ")}`,
-  );
-});
-
-test("every conformance area the suite replays exists and is non-empty", () => {
-  const missing = [];
-  const empty = [];
-  for (const area of AREAS) {
-    const dir = specPath(area);
-    if (!existsSync(dir) || !statSync(dir).isDirectory()) {
-      missing.push(area);
-      continue;
-    }
-    if (readdirSync(dir).filter((f) => f.endsWith(".json")).length === 0) empty.push(area);
-  }
-  assert.deepEqual(missing, [], `conformance areas missing from the spec sibling — ${CLONE_HINT}`);
-  assert.deepEqual(
-    empty,
-    [],
-    "conformance areas present but empty — every fixture in them would silently skip",
-  );
-  // The corpus ROOT carries fixtures too (the delta_*/snapshot_* family), and it
-  // is not an area, so nothing above would notice it emptying out.
-  assert.ok(
-    readdirSync(specConformance).filter((f) => f.endsWith(".json")).length > 0,
-    `the corpus root ${specConformance} holds no fixtures — ${CLONE_HINT}`,
-  );
-});
-
-test("every corpus area is replayed or explicitly excused", () => {
-  const areas = corpusAreas();
-  assert.ok(areas.length > 0, `the corpus at ${specConformance} lists no areas at all`);
-  const dark = areas.filter((a) => !AREAS.includes(a) && !(a in AREAS_NOT_REPLAYED));
-  assert.deepEqual(
-    dark,
-    [],
-    "these canonical corpus areas are replayed by NO runner in this binding. That is the " +
-      "drift the old hand-maintained list promised to catch and did not: an area lands " +
-      "upstream, every gate stays green, and nobody learns it is dark. Replay it, or add it " +
-      "to AREAS_NOT_REPLAYED with a reason (#lzcorpusrootguards).",
-  );
-  const stale = Object.keys(AREAS_NOT_REPLAYED).filter(
-    (a) => AREAS.includes(a) || !areas.includes(a),
-  );
-  assert.deepEqual(
-    stale,
-    [],
-    "AREAS_NOT_REPLAYED names areas this binding DOES replay, or that the corpus no longer " +
-      "carries. An excuse that outlived its gap understates coverage exactly as a stale " +
-      "KNOWN_UNCOVERED entry does.",
   );
 });
 

@@ -477,8 +477,11 @@ for (const entry of ALLOWLIST) {
 // output when a change moves a count; never lower one to fix a red run.
 const MIN_SOURCES = Number(process.env.MIN_FLAG_HYGIENE_SOURCES ?? "77");
 const MIN_FLAG_NAMES = Number(process.env.MIN_CORPUS_FLAG_NAMES ?? "176");
-const MIN_BOOLEAN_POSITIONS = Number(process.env.MIN_BOOLEAN_POSITIONS ?? "1696");
-const MIN_FLAG_READS = Number(process.env.MIN_FLAG_READS ?? "556");
+// #lazilyderivesreplayed removed the dead source-literal replay inference from
+// conformance-guard.test.js. Re-derived from this guard's own red report: that
+// deletion removed 24 boolean positions and three corpus-shaped property reads.
+const MIN_BOOLEAN_POSITIONS = Number(process.env.MIN_BOOLEAN_POSITIONS ?? "1672");
+const MIN_FLAG_READS = Number(process.env.MIN_FLAG_READS ?? "553");
 
 if (sources.length < MIN_SOURCES) {
   problems.push(

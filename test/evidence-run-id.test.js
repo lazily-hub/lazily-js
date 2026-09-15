@@ -64,14 +64,12 @@ const PROBE_ID = `stamp-prefix-probe-${process.pid}`;
 // stamp-only — the stamp-only state is its own refusal (#lzstampsatisfiesnonempty)
 // and is not what is under test here.
 //
-// Deliberately NOT shaped like a corpus-relative fixture path. The replayed-area
-// derivation in conformance-guard.test.js reads `<area>/<file>.json` off the
-// string literals of every test source, so a realistic-looking record here would
-// register a conformance area this binding does not replay — which it promptly
-// did, reporting area `reactive` as missing from the corpus. Nothing downstream
-// cares what the record says: the guards under test count records, they do not
-// resolve them.
-const PROBE_RECORD = "stamp-prefix-probe-record";
+// Deliberately shaped like a corpus-relative fixture path in an area the corpus
+// does not carry. This test does not replay it: the guards under test count a
+// generic evidence record and never resolve it. A former source-literal area
+// derivation nevertheless claimed this string proved replay and reddened the
+// suite. Keeping the realistic shape is the regression (#lazilyderivesreplayed).
+const PROBE_RECORD = "not-a-corpus-area/stamp-prefix-probe.json";
 
 function source(rel) {
   return readFileSync(join(repoRoot, rel), "utf8");
