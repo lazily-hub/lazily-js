@@ -87,17 +87,6 @@ KNOWN_UNCOVERED=(
 )
 
 MANIFEST="${LAZILY_CONFORMANCE_MANIFEST:-build/conformance-fixtures-loaded.txt}"
-TEST_DIRS=("test")
-EXTS=(".js")
-
-collect_sources() {
-  for d in "${TEST_DIRS[@]}"; do
-    [ -d "$d" ] || continue
-    for e in "${EXTS[@]}"; do
-      find "$d" -type f -name "*$e" -print0
-    done
-  done
-}
 
 if [ ! -s "$MANIFEST" ]; then
   echo "FAIL: no conformance manifest at $MANIFEST." >&2
@@ -176,7 +165,6 @@ total=0
 covered=0
 while IFS= read -r fixture; do
   total=$((total + 1))
-  name="$(basename "$fixture")"
   # Here-string, NOT a pipe. With `set -o pipefail`, `printf ... | grep -q` reports
   # FAILURE when grep matches: grep -q exits immediately on the first hit, printf
   # takes SIGPIPE writing the rest, and pipefail surfaces printf's death as the
