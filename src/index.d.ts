@@ -731,6 +731,13 @@ export type BindingCapabilities = {
   readonly causal_receipts: boolean;
   readonly signaling: boolean;
   readonly webrtc: boolean;
+  readonly durable_tiers: {
+    readonly core: true;
+    readonly client: true;
+    readonly durable_host: false;
+    readonly distributed_host: false;
+    readonly accelerated_host: false;
+  };
 };
 
 export const BINDING_CAPABILITIES: BindingCapabilities;
@@ -1050,6 +1057,7 @@ export {
   checkedDeadline,
 } from "./stdlib.js";
 export * from "./latest-durable-projection.js";
+export * from "./durable-client.js";
 export type {
   CancellationState,
   LogicalClock,

@@ -1835,6 +1835,13 @@ export const BINDING_CAPABILITIES = Object.freeze({
   // WebRTC is reached through a browser platform adapter (no npm dependency).
   signaling: true,
   webrtc: true,
+  durable_tiers: Object.freeze({
+    core: true,
+    client: true,
+    durable_host: false,
+    distributed_host: false,
+    accelerated_host: false,
+  }),
 });
 
 export const OpKind = Object.freeze({
@@ -2688,3 +2695,4 @@ export {
   checkedDeadline,
 } from "./stdlib.js";
 export * from "./latest-durable-projection.js";
+export * from "./durable-client.js";

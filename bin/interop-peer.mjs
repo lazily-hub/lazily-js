@@ -7,6 +7,13 @@ import { createInterface } from "node:readline";
 import { CrdtPlaneRuntime } from "../src/distributed.js";
 import { CrdtSync, IpcMessage, IpcValue } from "../src/index.js";
 import { RevisionBarrier, Timeout, TimeoutOperation, Timer, TimerError } from "../src/stdlib.js";
+import {
+  DurableClient,
+  DurableProjectionCompleteness,
+  DurableProjectionHealth,
+  compareDurableProjectionFingerprints,
+  durableIngressEnvelope,
+} from "../src/durable-client.js";
 
 const PROTOCOL_VERSION = 1;
 const decoder = new TextDecoder();
@@ -15,6 +22,16 @@ const STDLIB_FEATURES = new Set([
   "stdlib_timeout_v1",
   "stdlib_revision_barrier_v1",
 ]);
+const DURABLE_FEATURE = "durable_client_v1";
+
+const durableTransport = Object.freeze({
+  publish() {
+    return { stream: "INTEROP", sequence: 1, duplicate: false };
+  },
+  subscribe(subject) {
+    return { subject, async next() {}, close() {} };
+  },
+});
 
 function wireU64(value) {
   if (typeof value === "string" && /^(0|[1-9][0-9]*)$/.test(value)) {
@@ -76,7 +93,7 @@ class InteropPeer {
       binding: "lazily-js",
       version: "0.33.0",
       protocol_version: PROTOCOL_VERSION,
-      features: ["distributed_crdt", ...STDLIB_FEATURES],
+      features: ["distributed_crdt", ...STDLIB_FEATURES, DURABLE_FEATURE],
       // `msgpack` moves out of `carve_outs` and into `codecs` with
       // #lzmsgpackseven: src/msgpack-codec.js packs the reference value tree as
       // named-field MessagePack maps — the wire the token names, not merely a
@@ -91,14 +108,17 @@ class InteropPeer {
   }
 
   #featureReset(request) {
-    if (!STDLIB_FEATURES.has(request.feature)) {
+    if (!STDLIB_FEATURES.has(request.feature) && request.feature !== DURABLE_FEATURE) {
       return {
         ok: false,
         error: `unsupported feature ${request.feature}`,
         unsupported: true,
       };
     }
-    this.#stdlib.set(request.feature, { last: null });
+    this.#stdlib.set(request.feature, {
+      last: null,
+      durable: request.feature === DURABLE_FEATURE ? new DurableClient(durableTransport) : null,
+    });
     return { ok: true, feature: request.feature };
   }
 
@@ -118,6 +138,9 @@ class InteropPeer {
         break;
       case "stdlib_revision_barrier_v1":
         observation = this.#barrierStep(state, request.step);
+        break;
+      case DURABLE_FEATURE:
+        observation = this.#durableStep(state, request.step);
         break;
       default:
         throw new Error(`unsupported feature ${request.feature}`);
@@ -235,6 +258,81 @@ class InteropPeer {
     return step.op === "observe"
       ? { ...observation, cancellation_calls: cancellationCalls }
       : observation;
+  }
+
+  #durableStep(state, step) {
+    const client = state.durable;
+    if (!(client instanceof DurableClient)) throw new Error("durable client is not initialized");
+    switch (step.operation) {
+      case "validate_envelope": {
+        try {
+          durableIngressEnvelope(step.envelope);
+          return {
+            accepted: true,
+            reason: "accepted",
+            payload_decoded: true,
+            owner_authority: false,
+          };
+        } catch (error) {
+          return {
+            accepted: false,
+            reason: error.message,
+            payload_decoded: false,
+            owner_authority: false,
+          };
+        }
+      }
+      case "order_projection": {
+        const delivery_classification = step.observed_source_positions.map((position) => {
+          const admission = client.observeProjection({
+            protocol_version: 1,
+            owner_id: "interop-owner",
+            generation: 1,
+            source_position: position,
+            projection_version: position,
+            schema_version: 1,
+            codec_version: 1,
+            completeness: DurableProjectionCompleteness.CompleteHistory,
+            entries: [position],
+            source_fingerprint: `source-${position}`,
+            projection_fingerprint: `projection-${position}`,
+            health: DurableProjectionHealth.Healthy,
+            may_authorize_transition: false,
+          });
+          return admission.kind === "buffered"
+            ? "buffered"
+            : admission.kind === "dropped"
+              ? "duplicate"
+              : "applied";
+        });
+        return {
+          applied_source_positions: client.appliedSourcePositions("interop-owner"),
+          delivery_classification,
+          broker_order_authoritative: false,
+          may_authorize_transition: false,
+        };
+      }
+      case "classify_dedup":
+        return {
+          classification: step.deliveries.map((item) => client.observeIngress(item)),
+          owner_authority: false,
+        };
+      case "observe_receipt":
+        client.observeHostReceipt(step.receipt);
+        return {
+          receipt: client.hostReceipt(step.receipt.receipt_id),
+          terminal_owner_receipt: true,
+          transport_ack_equivalent: false,
+          owner_authority: false,
+        };
+      case "compare_projection_fingerprints":
+        return {
+          ...compareDurableProjectionFingerprints(step.left, step.right),
+          may_authorize_transition: false,
+        };
+      default:
+        throw new Error(`unknown durable client operation ${step.operation}`);
+    }
   }
 
   #localSet(request) {
@@ -363,6 +461,77 @@ function selfCheck() {
     if (JSON.stringify(observed) !== JSON.stringify(last)) {
       throw new Error(`${feature} observe self-check failed`);
     }
+  }
+  const durableSteps = [
+    {
+      operation: "validate_envelope",
+      envelope: {
+        protocol_version: 1,
+        message_id: "sample-owner/message-1",
+        schema_version: 7,
+        codec_version: 11,
+        payload: [0, 255],
+      },
+    },
+    { operation: "order_projection", observed_source_positions: [2, 1, 2] },
+    {
+      operation: "classify_dedup",
+      deliveries: [
+        {
+          protocol_version: 1,
+          message_id: "sample-owner/message-1",
+          schema_version: 7,
+          codec_version: 11,
+          payload: [65],
+        },
+        {
+          protocol_version: 1,
+          message_id: "sample-owner/message-1",
+          schema_version: 7,
+          codec_version: 11,
+          payload: [65],
+        },
+      ],
+    },
+    {
+      operation: "observe_receipt",
+      receipt: {
+        protocol_version: 1,
+        receipt_id: "sample-owner/receipt-1",
+        message_id: "sample-owner/message-1",
+        outcome: "committed",
+        owner_position: 1,
+      },
+    },
+    {
+      operation: "compare_projection_fingerprints",
+      left: {
+        projection_id: "orders",
+        source_position: 1,
+        fingerprint: "aa",
+        completeness: "complete_history",
+        may_authorize_transition: false,
+      },
+      right: {
+        projection_id: "orders",
+        source_position: 1,
+        fingerprint: "aa",
+        completeness: "latest_state_only",
+        may_authorize_transition: false,
+      },
+    },
+  ];
+  if (!peer.handle({ cmd: "feature_reset", feature: DURABLE_FEATURE }).ok)
+    throw new Error("durable client reset self-check failed");
+  for (const step of durableSteps) {
+    if (!peer.handle({ cmd: "feature_step", feature: DURABLE_FEATURE, step }).ok)
+      throw new Error("durable client step self-check failed");
+  }
+  if (
+    peer.handle({ cmd: "feature_observe", feature: DURABLE_FEATURE }).observation.equivalent !==
+    false
+  ) {
+    throw new Error("durable client observation self-check failed");
   }
 }
 

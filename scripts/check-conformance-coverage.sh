@@ -271,7 +271,7 @@ fi
 # coverage OK: <n>/..." line, set this to that <n>, then prove it is exact by
 # temporarily setting it to <n>+1 and watching this guard fail. A floor you
 # never watched fail is a floor you have not verified.
-MIN_FIXTURES="${MIN_FIXTURES:-147}"
+MIN_FIXTURES="${MIN_FIXTURES:-148}"
 if [ "$total" -eq 0 ]; then
   echo "ERROR: the corpus at $SPEC_DIR listed ZERO fixtures." >&2
   echo "       Every check above is vacuously green over an empty population." >&2

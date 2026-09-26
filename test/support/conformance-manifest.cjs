@@ -202,7 +202,14 @@ if (out || walkOut) {
   // `expect*`) and reports any block it inventories that this recorder did not
   // bind. A name added upstream therefore fails the build with a message naming
   // the block, instead of silently sitting outside every rung.
-  const TRACKED = new Set(["assertions", "expect", "expected", "expect_initial", "expect_after"]);
+  const TRACKED = new Set([
+    "assertions",
+    "expect",
+    "expected",
+    "expected_round_trip",
+    "expect_initial",
+    "expect_after",
+  ]);
 
   // Prose keys inside a tracked block. Their values are English sentences about
   // the step, not values to compare, so they are exempt from read, assertion and

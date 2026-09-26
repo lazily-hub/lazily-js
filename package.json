@@ -130,6 +130,10 @@
       "types": "./src/latest-durable-projection.d.ts",
       "default": "./src/latest-durable-projection.js"
     },
+    "./durable-client": {
+      "types": "./src/durable-client.d.ts",
+      "default": "./src/durable-client.js"
+    },
     "./temporal": {
       "types": "./src/temporal.d.ts",
       "default": "./src/temporal.js"
