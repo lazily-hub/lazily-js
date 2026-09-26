@@ -59,6 +59,7 @@ notes and platform carve-outs lives in
 | Message passing | ✅ | ✅ | ✅ | ✅ | ✅ | ~ | ✅ | ✅ | ✅ | — |
 | Reliable sync | ~ | ~ | ~ | ~ | ~ | ~ | ~ | ~ | ~ | — |
 | Durable owner | ✅ | — | — | — | — | — | — | — | — | — |
+| Durable capability tiers | ~ | ~ | ~ | ~ | ~ | ~ | ~ | ~ | ~ | ~ |
 | Distributed plane | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
 | Causal receipts | ~ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
 | Security boundary | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
@@ -75,7 +76,7 @@ notes and platform carve-outs lives in
 
 **Roll-up rule:** a family cell is `✅` only when *every required* row in that family is `✅`; `~` when the family is mixed (some shipped or partial); `—` when no required row is shipped or partial; `⊘` only when every required row in the family is not applicable. Rows the spec marks **MAY** (`optional`) are excluded from the roll-up — declining an optional feature is not a gap.
 
-A family cell summarises 77 feature rows. For row-level marks, per-cell notes, and platform carve-outs see [the canonical coverage matrix in `lazily-spec`](https://github.com/lazily-hub/lazily-spec/blob/main/docs/coverage.md).
+A family cell summarises 82 feature rows. For row-level marks, per-cell notes, and platform carve-outs see [the canonical coverage matrix in `lazily-spec`](https://github.com/lazily-hub/lazily-spec/blob/main/docs/coverage.md).
 <!-- coverage-table:end -->
 
 Two JS ✅ marks are backed by runtime-specific mechanisms while keeping the core isomorphic:
@@ -810,7 +811,7 @@ npm run test:size        # gate: fails CI if any entry exceeds its budget
 | sem-tree: SemTree | 503 B ✓ | 512 B |
 | stable-id: contentHash | 152 B ✓ | 152 B |
 | collections: SourceMap + SourceTree + reconcileCollections | 1.64 KB ✓ | 1.65 KB |
-| index: PROTOCOL_ID + Snapshot (tree-shaken kitchen sink) | 2.42 KB ✓ | 2.43 KB |
+| index: PROTOCOL_ID + Snapshot (tree-shaken kitchen sink) | 2.45 KB ✓ | 2.46 KB |
 
 <!-- size-limits:end -->
 
