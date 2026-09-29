@@ -402,7 +402,7 @@ if (problems > 0) {
 // this to that <n>, then prove it exact by setting it to <n>+1 and watching
 // this guard fail. A floor you never watched fail is a floor you have not
 // verified.
-const MIN_SCENARIOS = Number(process.env.MIN_SCENARIOS ?? "157");
+const MIN_SCENARIOS = Number(process.env.MIN_SCENARIOS ?? "162");
 if (total === 0) {
   fail([
     "ERROR: ZERO scenarios were found across the opened fixtures.",

@@ -677,6 +677,14 @@ signaling protocol (`signaling/frames.json`,
 (`distributed/crdt_sync_frames.json`, `distributed/anti_entropy_converge.json`).
 It also validates generated wire values against the canonical JSON Schemas.
 
+The public `@lazily-hub/lazily-js/sim-consumer-testkit` entry point compares an
+in-memory simulation adapter with selected Postgres, NATS, or external-process
+boundaries. Its in-memory adapter exposes only stable world identity, step count,
+and immutable action trace entries; real adapters expose probe, reset, apply,
+observation, and exact materialized-history callbacks. Construction fails closed
+on incomplete or mismatched evidence, and `run()` reports the first divergent
+step while replaying `simulation/consumer_testkit.json`.
+
 The transport-agnostic ingress corpus (`#designimplementtransport`,
 `ingress/ingress_*.json` — all seven named schedules) is replayed against **every
 flavor this binding ships**: `IngressCell`, `ThreadSafeIngressCell`, and
