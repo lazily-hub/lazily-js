@@ -15,6 +15,9 @@ import {
   DeltaOpNodeRemove,
   DeltaOpEdgeAdd,
   DeltaOpEdgeRemove,
+  DeltaOpQueuePush,
+  DeltaOpQueuePop,
+  DeltaOpQueueClose,
   NodeStatePayload,
   IpcValueInline,
 } from "./index.js";
@@ -27,6 +30,37 @@ function payloadOfState(state) {
 }
 function payloadOfValue(value) {
   return value instanceof IpcValueInline ? [...value.bytes] : null;
+}
+
+/**
+ * `#lzdeltaqueueops`: QueuePush/QueuePop/QueueClose are op-log ops on a QueueCell,
+ * not node-value writes. The graph-state projection cannot apply queue semantics, so
+ * it refuses them explicitly rather than silently dropping them or mis-applying a
+ * QueuePush as a CellSet. Any other unrecognised op is refused the same way.
+ */
+function refuseUnprojectable(op) {
+  if (
+    op instanceof DeltaOpQueuePush ||
+    op instanceof DeltaOpQueuePop ||
+    op instanceof DeltaOpQueueClose
+  ) {
+    const tag = Object.keys(op.toWire())[0];
+    throw new TypeError(
+      `GraphView: ${tag} (node ${op.node}) requires a queue projection adapter; ` +
+        "the graph-state projection cannot apply it",
+    );
+  }
+  if (!(
+    op instanceof DeltaOpNodeAdd ||
+    op instanceof DeltaOpCellSet ||
+    op instanceof DeltaOpSlotValue ||
+    op instanceof DeltaOpInvalidate ||
+    op instanceof DeltaOpNodeRemove ||
+    op instanceof DeltaOpEdgeAdd ||
+    op instanceof DeltaOpEdgeRemove
+  )) {
+    throw new TypeError(`GraphView: unsupported DeltaOp ${op?.constructor?.name}`);
+  }
 }
 
 export class GraphView {
@@ -74,6 +108,9 @@ export class GraphView {
    * advances to `max(epoch, delta.epoch)`. A no-op delta (empty ops) only advances the epoch.
    */
   applyDelta(delta) {
+    // Refuse BEFORE mutating anything, so a refused delta leaves the replica
+    // exactly as it was (no half-applied prefix).
+    for (const op of delta.ops) refuseUnprojectable(op);
     for (const op of delta.ops) {
       if (op instanceof DeltaOpNodeAdd) {
         this.#nodes.set(op.node, {

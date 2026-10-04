@@ -17,6 +17,10 @@ export declare class GraphView {
   get isInitialized(): boolean;
   get nodeCount(): number;
   applySnapshot(snapshot: unknown): void;
+  /**
+   * Throws (before mutating) on QueuePush/QueuePop/QueueClose: the graph-state
+   * projection cannot apply queue op-log semantics (`#lzdeltaqueueops`).
+   */
   applyDelta(delta: unknown): void;
   node(id: number): GraphViewNode | null;
   nodesOfType(typeTag: string): GraphViewNode[];

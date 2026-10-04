@@ -145,7 +145,10 @@ export type DeltaOpValue =
   | DeltaOpNodeAdd
   | DeltaOpNodeRemove
   | DeltaOpEdgeAdd
-  | DeltaOpEdgeRemove;
+  | DeltaOpEdgeRemove
+  | DeltaOpQueuePush
+  | DeltaOpQueuePop
+  | DeltaOpQueueClose;
 
 export class DeltaOpCellSet {
   constructor(node: NodeId, payload: IpcValueValue | ShmBlobRef | WireBytes);
@@ -203,6 +206,31 @@ export class DeltaOpEdgeRemove {
   targetReadable(permissions: PeerPermissions, peer: PeerId): boolean;
 }
 
+/** QueueCell op-log append (`#queue-oplog`); body shape matches `CellSet`. */
+export class DeltaOpQueuePush {
+  constructor(node: NodeId, payload: IpcValueValue | ShmBlobRef | WireBytes);
+  readonly node: NodeId;
+  readonly payload: IpcValueValue;
+  toWire(): unknown;
+  targetReadable(permissions: PeerPermissions, peer: PeerId): boolean;
+}
+
+/** QueueCell op-log pop (`#queue-oplog`); body shape matches `Invalidate`. */
+export class DeltaOpQueuePop {
+  constructor(node: NodeId);
+  readonly node: NodeId;
+  toWire(): unknown;
+  targetReadable(permissions: PeerPermissions, peer: PeerId): boolean;
+}
+
+/** QueueCell op-log close (`#queue-oplog`); body shape matches `Invalidate`. */
+export class DeltaOpQueueClose {
+  constructor(node: NodeId);
+  readonly node: NodeId;
+  toWire(): unknown;
+  targetReadable(permissions: PeerPermissions, peer: PeerId): boolean;
+}
+
 export const DeltaOp: {
   cellSet(node: NodeId, payload: IpcValueValue | ShmBlobRef | WireBytes): DeltaOpCellSet;
   slotValue(node: NodeId, payload: IpcValueValue | ShmBlobRef | WireBytes): DeltaOpSlotValue;
@@ -216,6 +244,9 @@ export const DeltaOp: {
   nodeRemove(node: NodeId): DeltaOpNodeRemove;
   edgeAdd(dependent: NodeId, dependency: NodeId): DeltaOpEdgeAdd;
   edgeRemove(dependent: NodeId, dependency: NodeId): DeltaOpEdgeRemove;
+  queuePush(node: NodeId, payload: IpcValueValue | ShmBlobRef | WireBytes): DeltaOpQueuePush;
+  queuePop(node: NodeId): DeltaOpQueuePop;
+  queueClose(node: NodeId): DeltaOpQueueClose;
   fromWire(value: unknown): DeltaOpValue;
 };
 

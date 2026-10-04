@@ -87,7 +87,7 @@ test("lazily-js Snapshot wire validates against schemas/snapshot.json", () => {
   assert.ok(fn(wire), errorsText(fn, wire));
 });
 
-test("lazily-js Delta wire (all 7 ops + NodeAdd key) validates against schemas/delta.json", () => {
+test("lazily-js Delta wire (all 10 ops + NodeAdd key) validates against schemas/delta.json", () => {
   const message = IpcMessage.delta(
     new Delta({
       baseEpoch: 40,
@@ -100,6 +100,9 @@ test("lazily-js Delta wire (all 7 ops + NodeAdd key) validates against schemas/d
         DeltaOp.nodeRemove(5),
         DeltaOp.edgeAdd(2, 1),
         DeltaOp.edgeRemove(3, 1),
+        DeltaOp.queuePush(6, Uint8Array.of(97)),
+        DeltaOp.queuePop(6),
+        DeltaOp.queueClose(6),
       ],
     }),
   );

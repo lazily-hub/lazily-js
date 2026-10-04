@@ -819,7 +819,7 @@ npm run test:size        # gate: fails CI if any entry exceeds its budget
 | sem-tree: SemTree | 503 B ✓ | 512 B |
 | stable-id: contentHash | 152 B ✓ | 152 B |
 | collections: SourceMap + SourceTree + reconcileCollections | 1.64 KB ✓ | 1.65 KB |
-| index: PROTOCOL_ID + Snapshot (tree-shaken kitchen sink) | 2.45 KB ✓ | 2.46 KB |
+| index: PROTOCOL_ID + Snapshot (tree-shaken kitchen sink) | 2.52 KB ✓ | 2.52 KB |
 
 <!-- size-limits:end -->
 

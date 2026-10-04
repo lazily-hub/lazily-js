@@ -510,6 +510,61 @@ export class DeltaOpEdgeRemove extends DeltaOpBase {
   }
 }
 
+// QueueCell op-log delta form (`#queue-oplog`, `#lzdeltaqueueops`). A queue
+// is an op log, not a value: `QueuePush` appends one payload, `QueuePop` and
+// `QueueClose` carry only the target node. They are ordinary DeltaOp variants,
+// so permission filtering is the same node-scoped read check as `CellSet` /
+// `Invalidate`, and `QueuePush`'s payload is an `IpcValue` spilled/resolved
+// exactly like `CellSet`'s. A graph-state projection cannot apply them.
+export class DeltaOpQueuePush extends DeltaOpBase {
+  constructor(node, payload) {
+    super();
+    this.node = assertInteger(node, "node");
+    this.payload = IpcValue.of(payload);
+    Object.freeze(this);
+  }
+
+  toWire() {
+    return { QueuePush: { node: this.node, payload: this.payload.toWire() } };
+  }
+
+  targetReadable(permissions, peer) {
+    return permissions.canRead(peer, this.node);
+  }
+}
+
+export class DeltaOpQueuePop extends DeltaOpBase {
+  constructor(node) {
+    super();
+    this.node = assertInteger(node, "node");
+    Object.freeze(this);
+  }
+
+  toWire() {
+    return { QueuePop: { node: this.node } };
+  }
+
+  targetReadable(permissions, peer) {
+    return permissions.canRead(peer, this.node);
+  }
+}
+
+export class DeltaOpQueueClose extends DeltaOpBase {
+  constructor(node) {
+    super();
+    this.node = assertInteger(node, "node");
+    Object.freeze(this);
+  }
+
+  toWire() {
+    return { QueueClose: { node: this.node } };
+  }
+
+  targetReadable(permissions, peer) {
+    return permissions.canRead(peer, this.node);
+  }
+}
+
 export const DeltaOp = Object.freeze({
   cellSet(node, payload) {
     return new DeltaOpCellSet(node, payload);
@@ -531,6 +586,15 @@ export const DeltaOp = Object.freeze({
   },
   edgeRemove(dependent, dependency) {
     return new DeltaOpEdgeRemove(dependent, dependency);
+  },
+  queuePush(node, payload) {
+    return new DeltaOpQueuePush(node, payload);
+  },
+  queuePop(node) {
+    return new DeltaOpQueuePop(node);
+  },
+  queueClose(node) {
+    return new DeltaOpQueueClose(node);
   },
   fromWire(value) {
     const [tag, body] = assertTagged(value, "DeltaOp");
@@ -555,6 +619,12 @@ export const DeltaOp = Object.freeze({
         return new DeltaOpEdgeAdd(object.dependent, object.dependency);
       case "EdgeRemove":
         return new DeltaOpEdgeRemove(object.dependent, object.dependency);
+      case "QueuePush":
+        return new DeltaOpQueuePush(object.node, IpcValue.fromWire(object.payload));
+      case "QueuePop":
+        return new DeltaOpQueuePop(object.node);
+      case "QueueClose":
+        return new DeltaOpQueueClose(object.node);
       default:
         throw new TypeError(`unknown DeltaOp variant: ${tag}`);
     }

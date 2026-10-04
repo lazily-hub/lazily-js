@@ -35,6 +35,7 @@ import {
   DeltaOpCellSet,
   DeltaOpNodeAdd,
   DeltaOpSlotValue,
+  DeltaOpQueuePush,
   IpcMessage,
   IpcValueInline,
   IpcValueSharedBlob,
@@ -358,7 +359,7 @@ export function resolveValue(value, backend) {
 }
 
 // Spill large payloads across an IpcMessage's value/state sites — Snapshot node
-// states, Delta CellSet/SlotValue payloads + NodeAdd states, and CrdtSync op
+// states, Delta CellSet/SlotValue/QueuePush payloads + NodeAdd states, and CrdtSync op
 // states — returning { message, spilledBytes }. Oversized payloads are replaced
 // by SharedBlob descriptors so the message stays small on the wire. Sites
 // already carrying a descriptor are left untouched. The input is not mutated.
@@ -397,6 +398,11 @@ export function spillMessage(message, backend, threshold = DEFAULT_SPILL_THRESHO
         const { value, spilled } = spillValue(op.payload, backend, threshold);
         total += spilled;
         return spilled === 0 ? op : new DeltaOpSlotValue(op.node, value);
+      }
+      if (op instanceof DeltaOpQueuePush) {
+        const { value, spilled } = spillValue(op.payload, backend, threshold);
+        total += spilled;
+        return spilled === 0 ? op : new DeltaOpQueuePush(op.node, value);
       }
       if (op instanceof DeltaOpNodeAdd) {
         const { state, spilled } = spillState(op.state, backend, threshold);

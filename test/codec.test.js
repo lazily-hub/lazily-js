@@ -39,6 +39,9 @@ import {
   DeltaOpInvalidate,
   DeltaOpNodeAdd,
   DeltaOpNodeRemove,
+  DeltaOpQueueClose,
+  DeltaOpQueuePop,
+  DeltaOpQueuePush,
   DeltaOpSlotValue,
   IpcMessage,
   IpcValueInline,
@@ -76,6 +79,9 @@ const DELTA_OP_KINDS = [
   [DeltaOpNodeRemove, "NodeRemove"],
   [DeltaOpEdgeAdd, "EdgeAdd"],
   [DeltaOpEdgeRemove, "EdgeRemove"],
+  [DeltaOpQueuePush, "QueuePush"],
+  [DeltaOpQueuePop, "QueuePop"],
+  [DeltaOpQueueClose, "QueueClose"],
 ];
 
 function deltaOpVariant(op) {
