@@ -91,7 +91,7 @@ class InteropPeer {
     return {
       ok: true,
       binding: "lazily-js",
-      version: "0.34.0",
+      version: "0.35.0",
       protocol_version: PROTOCOL_VERSION,
       features: ["distributed_crdt", ...STDLIB_FEATURES, DURABLE_FEATURE],
       // `msgpack` moves out of `carve_outs` and into `codecs` with

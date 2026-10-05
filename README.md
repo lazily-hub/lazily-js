@@ -802,7 +802,7 @@ shipped bytes.
 
 <!-- size-limits:start -->
 
-Generated for package `@lazily-hub/lazily-js` version `0.34.0`. Every entry is **minified + brotlied, tree-shaken to the named import** (`size-limit` + esbuild, the same pipeline Webpack/Rollup/Vite apply via `"sideEffects": false`).
+Generated for package `@lazily-hub/lazily-js` version `0.35.0`. Every entry is **minified + brotlied, tree-shaken to the named import** (`size-limit` + esbuild, the same pipeline Webpack/Rollup/Vite apply via `"sideEffects": false`).
 
 Refresh command:
 
