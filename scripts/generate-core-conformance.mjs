@@ -3,23 +3,16 @@
 
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import {
-  cpSync,
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { createRequire } from "node:module";
 
+import { killRoute, pointerEscape } from "./core-negative-control.mjs";
+
 const BINDING_ID = "javascript";
 const ROOT = resolve(import.meta.dirname, "..");
 const require = createRequire(import.meta.url);
-const PROSE_KEYS = new Set(["comment", "description", "note", "notes", "why"]);
 const RUNNER = [
   process.execPath,
   "--require",
@@ -75,55 +68,6 @@ function fixtureDigest(profile, corpus) {
     digest.update(readFileSync(path));
   }
   return digest.digest("hex");
-}
-
-function matches(node, segments) {
-  if (segments.length === 0) {
-    return node !== null && typeof node === "object" && !Array.isArray(node) ? [node] : [];
-  }
-  const [head, ...tail] = segments;
-  if (head === "*") {
-    const values = Array.isArray(node)
-      ? node
-      : node !== null && typeof node === "object"
-        ? Object.values(node)
-        : [];
-    return values.flatMap((value) => matches(value, tail));
-  }
-  if (node !== null && typeof node === "object" && head in node) {
-    return matches(node[head], tail);
-  }
-  return [];
-}
-
-function mutant(value) {
-  if (typeof value === "boolean") return !value;
-  if (typeof value === "number") return value + 1;
-  if (typeof value === "string") return `${value}__core_mutant__`;
-  if (Array.isArray(value)) return [...value, "__core_mutant__"];
-  if (value !== null && typeof value === "object") return { ...value, __core_mutant__: true };
-  return "__core_mutant__";
-}
-
-function mutateRoute(document, pointer) {
-  const segments = pointer
-    .split("/")
-    .slice(1)
-    .map((part) => part.replaceAll("~1", "/").replaceAll("~0", "~"));
-  let changed = 0;
-  for (const block of matches(document, segments)) {
-    for (const key of Object.keys(block).sort()) {
-      if (PROSE_KEYS.has(key) && typeof block[key] === "string") continue;
-      block[key] = mutant(block[key]);
-      changed += 1;
-      break;
-    }
-  }
-  return changed;
-}
-
-function pointerEscape(value) {
-  return value.replaceAll("~", "~0").replaceAll("/", "~1");
 }
 
 function main() {
@@ -206,27 +150,19 @@ function main() {
       const assertionBlocks = [];
       if (executed.length > 0) {
         for (const route of routes.get(rel)) {
-          const mutationRoot = join(scratch, "mutant");
-          rmSync(mutationRoot, { recursive: true, force: true });
-          cpSync(corpus, mutationRoot, { recursive: true });
-          const fixturePath = join(mutationRoot, rel);
-          const document = JSON.parse(readFileSync(fixturePath, "utf8"));
-          const mutations = mutateRoute(document, route);
-          if (mutations === 0) fail(`${rel}#${route} has no machine assertion to perturb`);
-          writeFileSync(fixturePath, `${JSON.stringify(document, null, 2)}\n`);
-          const probe = runRunner(mutationRoot, scratch);
-          if (probe.error || probe.status === null) {
-            fail(`negative control did not complete for ${rel}#${route}`);
-          }
-          if (probe.status === 0) fail(`negative control survived for ${rel}#${route}`);
+          const kill = killRoute({
+            corpus,
+            rel,
+            route,
+            mutationRoot: join(scratch, "mutant"),
+            runner: (root) => runRunner(root, scratch),
+            fail,
+          });
           const claimId = `${rel}#${route}`;
           claims[claimId] = {
             status: "mutation-killed",
             models: executed,
-            mutated_blocks: mutations,
-            mutation:
-              "changed the first non-prose assertion in every concrete block matched by this route",
-            observed_exit_code: probe.status,
+            ...kill,
             runner: RUNNER,
           };
           assertionBlocks.push({

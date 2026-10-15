@@ -41,8 +41,10 @@
 // specific unsupported op or assertion named. Skips are returned as data so the
 // caller can assert the ledger exactly; nothing here calls `t.skip()`, because a
 // node:test skip would both hide the reason and trip the `skipped 0` gate in CI.
+import { AssertionError } from "node:assert";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import { inspect } from "node:util";
 
 import { assertKeyWith, excuseKey, subBlock } from "../support/assert-key.js";
 import { recordScenario } from "../support/scenario.js";
@@ -52,6 +54,9 @@ import { CLONE_HINT, specPath } from "../spec-corpus.cjs";
 
 /** Resolved through the ONE corpus seam, so `LAZILY_SPEC_CONFORMANCE_DIR` reaches this runner too. */
 export const SPEC_DIR = specPath("reactive-graph");
+
+/** A divergence line must stay one line, so its `got`/`want` never wrap. */
+const ONE_LINE = { breakLength: Infinity, depth: 4 };
 
 export { CLONE_HINT };
 
@@ -197,7 +202,21 @@ async function replaySteps(model, steps, label, assertFn, divergences, tail) {
       divergences.observed.add(tag);
       return;
     }
-    fn();
+    try {
+      fn();
+    } catch (err) {
+      // The library's observed value disagreed with the fixture. Announced on its
+      // own line so the Core report generator can tell a library divergence from
+      // the runner failing on its own bookkeeping (an unknown node id, a renamed
+      // scenario, an unconsumed key), which only proves the runner read the leaf.
+      if (err instanceof AssertionError) {
+        process.stdout.write(
+          `\nDIVERGENCE ${where}:${id === null ? key : `${key}.${id}`} — ` +
+            `got ${inspect(err.actual, ONE_LINE)}, want ${inspect(err.expected, ONE_LINE)}\n`,
+        );
+      }
+      throw err;
+    }
     checks += 1;
   };
 
