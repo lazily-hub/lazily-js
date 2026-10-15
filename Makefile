@@ -1,4 +1,4 @@
-.PHONY: check fmt fmt-fix build typecheck test test-interop-peer conformance-coverage assertion-keys \
+.PHONY: check fmt fmt-fix build typecheck core-api test test-interop-peer conformance-coverage assertion-keys \
 scenario-coverage assertion-ordering-check flag-hygiene ci-reach bench bench-scale benchmark benchmark-update \
 benchmark-check
 
@@ -45,7 +45,7 @@ export LAZILY_CONFORMANCE_RUN_ID
 # gate CI stopped running. Split like this, the guard prints one line per gate.
 # The order here is the order the gates must run in: the conformance rungs audit
 # evidence files that `test` writes, so they are useless before it.
-check: fmt build typecheck test test-interop-peer conformance-coverage assertion-keys \
+check: fmt build typecheck core-api test test-interop-peer conformance-coverage assertion-keys \
 scenario-coverage assertion-ordering-check flag-hygiene ci-reach
 
 # The formatting GATE (#lazilyformattinggate). This binding had no formatting
@@ -75,6 +75,12 @@ build:
 
 typecheck:
 	npm run typecheck
+
+# Freeze the focused Core runtime/type surface, validate structured deprecation
+# metadata, compile a native TypeScript consumer, and prove the gate catches
+# deliberately mutated runtime, declaration, and deprecation snapshots.
+core-api:
+	npm run test:core-api
 
 test:
 	npm test

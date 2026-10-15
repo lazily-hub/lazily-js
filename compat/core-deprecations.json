@@ -1,0 +1,91 @@
+{
+  "schema_version": 1,
+  "profile_id": "core-v1",
+  "core_api_generation": 1,
+  "compatibility_policy": {
+    "minimum_generations": 2,
+    "minimum_days": 90
+  },
+  "deprecations": [
+    {
+      "symbol": "Context.cell",
+      "introduced_generation": 0,
+      "deprecated_since_generation": 1,
+      "replacement": "Context.source",
+      "compatibility_window": { "minimum_generations": 2, "minimum_days": 90 },
+      "earliest_removal_generation": 3
+    },
+    {
+      "symbol": "Context.getCell",
+      "introduced_generation": 0,
+      "deprecated_since_generation": 1,
+      "replacement": "Context.get",
+      "compatibility_window": { "minimum_generations": 2, "minimum_days": 90 },
+      "earliest_removal_generation": 3
+    },
+    {
+      "symbol": "Context.getSignal",
+      "introduced_generation": 0,
+      "deprecated_since_generation": 1,
+      "replacement": "Context.get",
+      "compatibility_window": { "minimum_generations": 2, "minimum_days": 90 },
+      "earliest_removal_generation": 3
+    },
+    {
+      "symbol": "Context.setCell",
+      "introduced_generation": 0,
+      "deprecated_since_generation": 1,
+      "replacement": "Context.set",
+      "compatibility_window": { "minimum_generations": 2, "minimum_days": 90 },
+      "earliest_removal_generation": 3
+    },
+    {
+      "symbol": "Context.signal",
+      "introduced_generation": 0,
+      "deprecated_since_generation": 1,
+      "replacement": "Context.computed(...).eager()",
+      "compatibility_window": { "minimum_generations": 2, "minimum_days": 90 },
+      "earliest_removal_generation": 3
+    },
+    {
+      "symbol": "Context.slot",
+      "introduced_generation": 0,
+      "deprecated_since_generation": 1,
+      "replacement": "Context.computed",
+      "compatibility_window": { "minimum_generations": 2, "minimum_days": 90 },
+      "earliest_removal_generation": 3
+    },
+    {
+      "symbol": "SignalHandle",
+      "introduced_generation": 0,
+      "deprecated_since_generation": 1,
+      "replacement": "Computed.eager()",
+      "compatibility_window": { "minimum_generations": 2, "minimum_days": 90 },
+      "earliest_removal_generation": 3
+    },
+    {
+      "symbol": "TeardownScope.cell",
+      "introduced_generation": 0,
+      "deprecated_since_generation": 1,
+      "replacement": "TeardownScope.source",
+      "compatibility_window": { "minimum_generations": 2, "minimum_days": 90 },
+      "earliest_removal_generation": 3
+    },
+    {
+      "symbol": "TeardownScope.signal",
+      "introduced_generation": 0,
+      "deprecated_since_generation": 1,
+      "replacement": "TeardownScope.computed(...).eager()",
+      "compatibility_window": { "minimum_generations": 2, "minimum_days": 90 },
+      "earliest_removal_generation": 3
+    },
+    {
+      "symbol": "TeardownScope.slot",
+      "introduced_generation": 0,
+      "deprecated_since_generation": 1,
+      "replacement": "TeardownScope.computed",
+      "compatibility_window": { "minimum_generations": 2, "minimum_days": 90 },
+      "earliest_removal_generation": 3
+    }
+  ]
+}

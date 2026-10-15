@@ -115,6 +115,9 @@ jobs:
             echo "::error::tsc listed $listed file(s), none of them under $root/src/"
             exit 1; }
 
+      - name: Core API compatibility and negative mutation gate
+        run: make core-api
+
       - name: Assert size budgets are committed and current
         run: npm run size:check
 

@@ -393,7 +393,7 @@ EXPECTED_ROOT_TARGET="check"
 # a count is not enough, and this pin is meaningful only because the oracle below
 # proves make agrees with it.
 #
-# Twelve entries: 11 carrying a gate CI reaches, 0 excused, 1 (the root) carrying
+# Thirteen entries: 12 carrying a gate CI reaches, 0 excused, 1 (the root) carrying
 # no gate of its own -- which is the accounting the OK line prints.
 EXPECTED_CLOSURE_TARGETS=(
 	assertion-keys
@@ -404,6 +404,7 @@ EXPECTED_CLOSURE_TARGETS=(
 	check
 	ci-reach
 	conformance-coverage
+	core-api
 	flag-hygiene
 	fmt
 	scenario-coverage
@@ -480,6 +481,7 @@ EXPECTED_GATE_STEPS=(
 # anchor-reached, and needs a step pin -- a required, reviewable edit, not a
 # silent reclassification.
 EXPECTED_MAKE_INVOKED_MEMBERS=(
+	core-api
 	fmt
 )
 
@@ -487,6 +489,7 @@ EXPECTED_MAKE_INVOKED_MEMBERS=(
 # to independently spell the target's recipe; it pins the activation container so
 # moving `make fmt` into a conditional or advisory job cannot remain invisible.
 EXPECTED_MAKE_INVOKED_STEPS=(
+	"core-api|.github/workflows/ci.yml|test|Core API compatibility and negative mutation gate"
 	"fmt|.github/workflows/ci.yml|test|Format gate (make fmt)"
 )
 

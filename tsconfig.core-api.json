@@ -1,0 +1,14 @@
+{
+  "compilerOptions": {
+    "noEmit": true,
+    "strict": true,
+    "target": "es2022",
+    "lib": ["es2022"],
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "skipLibCheck": false,
+    "allowJs": false,
+    "types": ["node"]
+  },
+  "include": ["test/core-api-compat.ts"]
+}

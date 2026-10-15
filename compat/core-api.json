@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "profile_id": "core-v1",
+  "core_api_generation": 1,
+  "package_entrypoint": "@lazily-hub/lazily-js/core",
+  "runtime_exports": [
+    "Computed",
+    "Context",
+    "Effect",
+    "Source",
+    "TeardownScope"
+  ],
+  "type_exports": [
+    "Computed",
+    "Context",
+    "Effect",
+    "Source",
+    "TeardownScope"
+  ],
+  "declarations": {
+    "ChangedFn": [
+      "export type ChangedFn<T> = (old: T, next: T) => boolean;"
+    ],
+    "Compute": [
+      "export interface Compute extends ComputeOps { untracked(): ComputeOps; }"
+    ],
+    "ComputeFn": [
+      "export type ComputeFn<T> = (cx: Compute) => T;"
+    ],
+    "ComputeOps": [
+      "export interface ComputeOps { get<T>(handle: Source<T> | Computed<T>): T; }"
+    ],
+    "Computed": [
+      "export class Computed<T = unknown> { constructor(id: number, ctx?: unknown); readonly id: number; get(cx?: ComputeOps): T; eager(): this; lazy(): this; isEager(): boolean; dispose(): void; }"
+    ],
+    "Context": [
+      "export interface Context { source<T>(value: T, policy?: MergePolicy<T>): Source<T>; computed<T>(compute: ComputeFn<T>): Computed<T>; computedRippleWhen<T>(compute: ComputeFn<T>, changed: ChangedFn<T>): Computed<T>; makeEager(id: number): void; makeLazy(id: number): void; isEager(handle: Computed<unknown> | number): boolean; cell<T>(value: T): Source<T>; slot<T>(compute: ComputeFn<T>): Computed<T>; signal<T>(compute: ComputeFn<T>): SignalHandle<T>; effect(run: EffectRun): Effect; get<T>(handle: Source<T> | Computed<T>): T; set<T>(handle: Source<T>, value: T): void; clearComputeds(handles: readonly Computed<unknown>[]): void; getCell<T>(handle: Source<T>): T; getSignal<T>(handle: SignalHandle<T>): T; setCell<T>(handle: Source<T>, value: T): void; batch(run: () => void): void; disposeEffect(handle: Effect): void; isEffectActive(handle: Effect): boolean; disposeSignal(handle: SignalHandle<unknown>): void; isSignalActive(handle: SignalHandle<unknown>): boolean; disposeSlot<T>(handle: Computed<T>): void; disposeCell<T>(handle: Source<T>): void; disposeNode(handle: NodeHandle): void; dependentCount(handle: NodeHandle): number; dependencyCount(handle: NodeHandle): number; isNodeDisposed(handle: NodeHandle): boolean; scope(): TeardownScope; withScope<R>(body: (scope: TeardownScope) => R): R; isSet<T>(handle: Computed<T>): boolean; instrumentationSnapshot(): InstrumentationSnapshot | null; resetInstrumentation(): void; }",
+      "export declare function Context(opts?: { instrument?: boolean; }): Context;"
+    ],
+    "Effect": [
+      "export class Effect { constructor(id: number, ctx?: unknown); readonly id: number; dispose(): void; }"
+    ],
+    "EffectRun": [
+      "export type EffectRun = (cx: Compute) => (() => void) | null | undefined;"
+    ],
+    "InstrumentationSnapshot": [
+      "export interface InstrumentationSnapshot { nodeAllocations: number; slotRecomputes: number; dependencyEdgesAdded: number; dependencyEdgesRemoved: number; effectQueuePushes: number; maxEffectQueueDepth: number; }"
+    ],
+    "MergePolicy": [
+      "export interface MergePolicy<T> { merge(old: T, op: T): T; name?: string; commutative?: boolean; idempotent?: boolean; conflates?: boolean; }"
+    ],
+    "NodeHandle": [
+      "export type NodeHandle = Source<never> | Computed<never> | Effect | SignalHandle<never>;"
+    ],
+    "SignalHandle": [
+      "export class SignalHandle<T = unknown> { constructor(slot: Computed<T>, effect: Effect); readonly slot: Computed<T>; readonly effect: Effect; }"
+    ],
+    "Source": [
+      "export class Source<T = unknown> { constructor(id: number, ctx?: unknown); readonly id: number; get(cx?: ComputeOps): T; set(value: T): void; merge(op: T): void; dispose(): void; }"
+    ],
+    "TeardownScope": [
+      "export class TeardownScope { private constructor(ctx: Context); readonly size: number; readonly ended: boolean; adopt<H extends NodeHandle>(handle: H): H; source<T>(value: T, policy?: MergePolicy<T>): Source<T>; computed<T>(compute: ComputeFn<T>): Computed<T>; computedRippleWhen<T>(compute: ComputeFn<T>, changed: ChangedFn<T>): Computed<T>; cell<T>(value: T): Source<T>; slot<T>(compute: ComputeFn<T>): Computed<T>; signal<T>(compute: ComputeFn<T>): SignalHandle<T>; effect(run: EffectRun): Effect; disarm(): void; end(): void; [Symbol.dispose](): void; }"
+    ]
+  }
+}

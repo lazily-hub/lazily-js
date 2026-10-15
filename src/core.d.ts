@@ -1,2 +1,2 @@
 /** Focused Lazily Core entry point; identities are shared with `./reactive`. */
-export * from "./reactive.js";
+export { Computed, Context, Effect, Source, TeardownScope } from "./reactive.js";
