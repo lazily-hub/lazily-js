@@ -1,0 +1,15 @@
+{
+  "$schema": "../../lazily-spec/schemas/core-conformance-declaration.schema.json",
+  "schema_version": 1,
+  "profile_id": "core-v1",
+  "binding_id": "javascript",
+  "report_command": ["node", "scripts/generate-core-conformance.mjs"],
+  "runtime_skips": [
+    {
+      "fixture": "reactive-graph/feedback_drain_bound_reports_exhaustion.json",
+      "scenario": "*",
+      "reason": "unsupported assertion: drain_exhausted"
+    }
+  ],
+  "fixtureless_claims": []
+}

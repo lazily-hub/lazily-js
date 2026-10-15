@@ -55,7 +55,7 @@ notes and platform carve-outs lives in
 | Egress | ✅ | ~ | ~ | ~ | ~ | ~ | ~ | ~ | ~ | ~ |
 | Ingress | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
 | Wire codec | ✅ | ✅ | ✅ | ✅ | ~ | ✅ | ✅ | ✅ | ✅ | — |
-| Transport & FFI | ✅ | ✅ | ✅ | ~ | ~ | ✅ | ✅ | ~ | ✅ | — |
+| Transport & FFI | ✅ | ~ | ✅ | ~ | ~ | ✅ | ✅ | ~ | ✅ | — |
 | Message passing | ✅ | ✅ | ✅ | ✅ | ✅ | ~ | ✅ | ✅ | ✅ | — |
 | Reliable sync | ~ | ~ | ~ | ~ | ~ | ~ | ~ | ~ | ~ | — |
 | Durable owner | ✅ | — | — | — | — | — | — | — | — | — |
@@ -79,10 +79,24 @@ notes and platform carve-outs lives in
 A family cell summarises 83 feature rows. For row-level marks, per-cell notes, and platform carve-outs see [the canonical coverage matrix in `lazily-spec`](https://github.com/lazily-hub/lazily-spec/blob/main/docs/coverage.md).
 <!-- coverage-table:end -->
 
-Two JS ✅ marks are backed by runtime-specific mechanisms while keeping the core isomorphic:
+### Core conformance evidence
+
+[`scripts/core-conformance.json`](scripts/core-conformance.json) declares the
+shell-free Core report command. It replays the canonical Core fixture closure
+against the single-threaded, thread-safe, and async contexts, then writes fresh
+mutation-kill evidence below `LAZILY_CORE_REPORTS_ROOT/javascript` and the
+observed report to `LAZILY_CORE_REPORT_PATH`.
+
+Fifteen of the sixteen Core fixtures currently pass in all three execution
+flavors. `feedback_drain_bound_reports_exhaustion.json` remains skipped because
+the runtime does not yet expose the required bounded-drain exhaustion result.
+The JavaScript package does not claim native C-ABI consumer proof: it ships a
+Koffi adapter, but not the native shared library that the adapter consumes.
+
+Two JS runtime-specific surfaces keep the core isomorphic:
 
 - **Thread-safe** (`ThreadSafeReactiveMap`, `Thread-safe context`) — cross-realm mutual exclusion via a `SharedArrayBuffer` + `Atomics` reentrant mutex shared across Web Workers / `worker_threads`; degrades to a single-realm guard where shared memory is unavailable (e.g. a browser without cross-origin isolation), which is sound because no shared memory means no cross-realm concurrency.
-- **C-ABI FFI** — the normative codec + in-process `FfiChannel` are pure-JS and run unchanged in the browser; the Node build additionally binds the real `lazily` shared library (`lazily_ffi_channel_*`) via koffi. Both speak the identical byte contract, so browser and native are drop-in interchangeable.
+- **C-ABI FFI (partial)** — the normative codec + in-process `FfiChannel` are pure-JS and run unchanged in the browser; the Node build can bind an externally supplied `lazily` shared library (`lazily_ffi_channel_*`) via koffi, but this package does not ship that native artifact.
 
 CRDT convergence and the wire protocol are pinned by the shared conformance fixtures
 and JSON Schemas in `lazily-spec` and the Lean models in `lazily-formal`.

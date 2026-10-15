@@ -48,6 +48,7 @@
 // Nothing here calls `t.skip()`: a node:test skip both hides the reason and
 // trips the `skipped 0` gate in CI. Skips are data, asserted against a ledger.
 import assert from "node:assert/strict";
+import { appendFileSync } from "node:fs";
 import test from "node:test";
 
 import {
@@ -140,6 +141,16 @@ const EXPECTED_REPLAYS = {
   ThreadSafeContext: expectedReplaysFor("ThreadSafeContext"),
 };
 
+const CORE_REPORT_PATH = process.env.LAZILY_CORE_REACTIVE_REPORT_PATH;
+
+function recordCoreRun(model, replayed, skips, totalOps, totalChecks) {
+  if (!CORE_REPORT_PATH) return;
+  appendFileSync(
+    CORE_REPORT_PATH,
+    `${JSON.stringify({ model, replayed: [...replayed].sort(), skipped: skips, ops: totalOps, checks: totalChecks })}\n`,
+  );
+}
+
 test("reactive-graph corpus is the canonical sibling's, unmodified", () => {
   assert.ok(specPresent(), `${SPEC_DIR} not found — ${CLONE_HINT}`);
   assert.deepEqual(
@@ -214,6 +225,8 @@ for (const model of MODELS) {
       `${model.name}: divergence ledger drifted — a ledger entry whose divergence ` +
         "no longer reproduces must be removed, not left masking the assertion",
     );
+
+    recordCoreRun(model.name, replayed, skips, totalOps, totalChecks);
 
     console.log(
       `reactive-graph[${model.name}]: replayed ${replayed.length} fixtures, ` +
