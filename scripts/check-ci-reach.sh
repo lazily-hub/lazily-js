@@ -393,7 +393,7 @@ EXPECTED_ROOT_TARGET="check"
 # a count is not enough, and this pin is meaningful only because the oracle below
 # proves make agrees with it.
 #
-# Fourteen entries: 13 carrying a gate CI reaches, 0 excused, 1 (the root) carrying
+# Fifteen entries: 14 carrying a gate CI reaches, 0 excused, 1 (the root) carrying
 # no gate of its own -- which is the accounting the OK line prints.
 EXPECTED_CLOSURE_TARGETS=(
 	assertion-keys
@@ -406,6 +406,7 @@ EXPECTED_CLOSURE_TARGETS=(
 	conformance-coverage
 	core-api
 	core-artifact-consumer-check
+	core-facade-check
 	flag-hygiene
 	fmt
 	scenario-coverage
@@ -464,6 +465,7 @@ EXPECTED_GATE_STEPS=(
 	"ci-reach|.github/workflows/ci.yml|test|CI-reachability guard (#lzcheckcireachguard)"
 	"conformance-coverage|.github/workflows/ci.yml|test|Rung 1 — canonical fixtures were OPENED (#portconformancecoverage)"
 	"core-artifact-consumer-check|.github/workflows/ci.yml|test|Clean packaged Core consumer (minimum/current)"
+	"core-facade-check|.github/workflows/ci.yml|test|Core facade contract"
 	"flag-hygiene|.github/workflows/ci.yml|test|Rung 5 — fixture flags are type-required, not coerced (#lzsiblingrunnermasking)"
 	"scenario-coverage|.github/workflows/ci.yml|test|Rung 4 — every fixture SCENARIO was replayed (#lzscenariocoverage)"
 	"test|.github/workflows/ci.yml|test|Test (assert fixtures actually ran)"
@@ -1607,6 +1609,23 @@ $(printf '%s' "$oracle_missing" | sed '/^$/d; s/^/      /')
 			step_map_misses="${step_map_misses}DEAD MAKE STEP PIN  $target
     is pinned to '$make_wf' job '$make_job' step '$make_step', but exactly one such
     run: step invoking \`$MAKE_BIN $target\` was not found. Restore it or update the pin."
+			step_map_miss_count=$((step_map_miss_count + 1))
+			printf 'STEP PIN  %s\n' "$target"
+			continue
+		fi
+		# The make-invoked step is the gate's ONLY activation container, so it is
+		# held to the same unconditional rule as a step-pinned gate
+		# (#lzcoreciactivationfixes). MEASURED before this: a step-level
+		# \`if: false\` or \`continue-on-error: true\` on the Core API step that
+		# runs \`make core-api\` left this guard OK at exit 0.
+		make_conditions="$(step_conditions_of "$make_step")"
+		if [ -n "$make_conditions" ]; then
+			step_map_misses="${step_map_misses}CONDITIONAL MAKE STEP  $target
+    is reached through the CI step '$make_step', which carries: $make_conditions.
+    A step with an \`if:\` may not run, and one with \`continue-on-error: true\`
+    cannot fail its job, so neither reaches the gate unconditionally. Remove the
+    condition, or move \`$MAKE_BIN $target\` to a step that runs on every push and PR.
+"
 			step_map_miss_count=$((step_map_miss_count + 1))
 			printf 'STEP PIN  %s\n' "$target"
 			continue

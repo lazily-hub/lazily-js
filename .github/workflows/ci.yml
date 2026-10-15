@@ -353,6 +353,13 @@ jobs:
             exit 1; }
           exit 0
 
+      # Node 24 is both the minimum and current supported Core toolchain.
+      - name: Clean packaged Core consumer (minimum/current)
+        run: ./scripts/core-artifact-consumer-check.sh
+
+      - name: Core facade contract
+        run: node --test test/core-facade.test.js
+
       # The gate that keeps every step above honest (#lzcheckcireachguard). It
       # compares `make check`'s prerequisite closure against the run: bodies in
       # this file and fails on any target CI does not reach. Comments inside run:
@@ -366,7 +373,3 @@ jobs:
             echo "::error::the CI-reachability guard exited 0 without reaching its verdict"
             exit 1
           }
-
-      # Node 24 is both the minimum and current supported Core toolchain.
-      - name: Clean packaged Core consumer (minimum/current)
-        run: make core-artifact-consumer-check
