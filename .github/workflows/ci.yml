@@ -366,3 +366,7 @@ jobs:
             echo "::error::the CI-reachability guard exited 0 without reaching its verdict"
             exit 1
           }
+
+      # Node 24 is both the minimum and current supported Core toolchain.
+      - name: Clean packaged Core consumer (minimum/current)
+        run: make core-artifact-consumer-check

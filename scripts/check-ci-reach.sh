@@ -393,7 +393,7 @@ EXPECTED_ROOT_TARGET="check"
 # a count is not enough, and this pin is meaningful only because the oracle below
 # proves make agrees with it.
 #
-# Thirteen entries: 12 carrying a gate CI reaches, 0 excused, 1 (the root) carrying
+# Fourteen entries: 13 carrying a gate CI reaches, 0 excused, 1 (the root) carrying
 # no gate of its own -- which is the accounting the OK line prints.
 EXPECTED_CLOSURE_TARGETS=(
 	assertion-keys
@@ -405,6 +405,7 @@ EXPECTED_CLOSURE_TARGETS=(
 	ci-reach
 	conformance-coverage
 	core-api
+	core-artifact-consumer-check
 	flag-hygiene
 	fmt
 	scenario-coverage
@@ -462,6 +463,7 @@ EXPECTED_GATE_STEPS=(
 	"build|.github/workflows/ci.yml|test|Build (syntax check every entry point)"
 	"ci-reach|.github/workflows/ci.yml|test|CI-reachability guard (#lzcheckcireachguard)"
 	"conformance-coverage|.github/workflows/ci.yml|test|Rung 1 — canonical fixtures were OPENED (#portconformancecoverage)"
+	"core-artifact-consumer-check|.github/workflows/ci.yml|test|Clean packaged Core consumer (minimum/current)"
 	"flag-hygiene|.github/workflows/ci.yml|test|Rung 5 — fixture flags are type-required, not coerced (#lzsiblingrunnermasking)"
 	"scenario-coverage|.github/workflows/ci.yml|test|Rung 4 — every fixture SCENARIO was replayed (#lzscenariocoverage)"
 	"test|.github/workflows/ci.yml|test|Test (assert fixtures actually ran)"

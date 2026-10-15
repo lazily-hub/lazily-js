@@ -1,6 +1,9 @@
-.PHONY: check fmt fmt-fix build typecheck core-api test test-interop-peer conformance-coverage assertion-keys \
+.PHONY: check fmt fmt-fix build typecheck core-api test test-interop-peer core-artifact-consumer-check conformance-coverage assertion-keys \
 scenario-coverage assertion-ordering-check flag-hygiene ci-reach bench bench-scale benchmark benchmark-update \
 benchmark-check
+
+core-artifact-consumer-check:
+	./scripts/core-artifact-consumer-check.sh
 
 # ---- One run id per invocation (#lzstalemanifest) ----
 #
@@ -46,7 +49,7 @@ export LAZILY_CONFORMANCE_RUN_ID
 # The order here is the order the gates must run in: the conformance rungs audit
 # evidence files that `test` writes, so they are useless before it.
 check: fmt build typecheck core-api test test-interop-peer conformance-coverage assertion-keys \
-scenario-coverage assertion-ordering-check flag-hygiene ci-reach
+scenario-coverage assertion-ordering-check flag-hygiene core-artifact-consumer-check ci-reach
 
 # The formatting GATE (#lazilyformattinggate). This binding had no formatting
 # floor: `build` is the lint equivalent (node --check per entry point) and
