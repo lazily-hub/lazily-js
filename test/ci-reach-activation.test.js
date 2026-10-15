@@ -38,12 +38,17 @@ function scratchTree() {
   return root;
 }
 
+// No wall-clock timeout: a killed guard reports status null, which every case
+// would misread as a red verdict. Under heavy load the guard legitimately ran
+// past 30s (#lzjscireachtimeout); a genuine hang is bounded by the job timeout.
 function runGuard(root) {
-  return spawnSync("bash", ["scripts/check-ci-reach.sh"], {
+  const result = spawnSync("bash", ["scripts/check-ci-reach.sh"], {
     cwd: root,
     encoding: "utf8",
-    timeout: 30_000,
   });
+  assert.equal(result.error, undefined, `guard did not run: ${result.error}`);
+  assert.notEqual(result.status, null, `guard was killed by ${result.signal}`);
+  return result;
 }
 
 function replaceOnce(root, relative, before, after) {
