@@ -25,5 +25,9 @@ ctx.set(source, 4);
 assert.equal(runs, 2, "a disposed scope must detach its effect");
 
 assert.equal(typeof Context, "function");
-assert.notStrictEqual(new Context(), ctx, "typed Context instances must retain distinct identities");
+assert.notStrictEqual(
+  new Context(),
+  ctx,
+  "typed Context instances must retain distinct identities",
+);
 console.log("lazily-js Core artifact consumer: ok");
