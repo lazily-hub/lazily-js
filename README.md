@@ -772,14 +772,8 @@ Per-binding feature parity is tracked in the `coverage.json`-generated matrix in
 
 ## Development
 
-```bash
-make check   # npm run build && npm test
-```
-
-- `npm run build` runs `node --check` over every shipped module.
-- `npm run test:formal` builds `lazily-formal` when the sibling checkout and
-  `lake` are present.
-- `npm test` runs the formal check and the Node test suite.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for build, formal-model, and test
+commands.
 
 ## Benchmarks
 
