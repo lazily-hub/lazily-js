@@ -120,3 +120,17 @@ test("ThreadSafeContext passes through opt-in instrumentation", () => {
   ctx.resetInstrumentation();
   assert.equal(ctx.instrumentationSnapshot().slotRecomputes, 0);
 });
+
+test("ThreadSafeContext ignores stale disposal after a Source id is recycled", () => {
+  const ctx = new ThreadSafeContext();
+  const stale = ctx.source("old");
+  ctx.disposeCell(stale);
+
+  const current = ctx.source("current");
+  assert.equal(current.id, stale.id, "the Source id is recycled");
+
+  ctx.disposeCell(stale);
+  assert.equal(ctx.get(current), "current", "the successor remains readable");
+  ctx.set(current, "updated");
+  assert.equal(ctx.get(current), "updated", "the successor remains writable");
+});
