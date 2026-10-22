@@ -165,3 +165,43 @@ test("dispose: double-dispose and wrong-kind dispose are no-ops", () => {
   assert.doesNotThrow(() => ctx.disposeCell(a));
   assert.doesNotThrow(() => ctx.disposeCell(a), "second disposeCell is a no-op");
 });
+
+test("stale Source disposal cannot tear down its recycled successor", () => {
+  const ctx = new Context();
+  const stale = ctx.source("old");
+  ctx.disposeCell(stale);
+
+  const current = ctx.source("current");
+  assert.equal(current.id, stale.id, "the Source id is recycled");
+
+  ctx.disposeCell(stale);
+  assert.equal(ctx.get(current), "current", "the successor remains readable");
+  ctx.set(current, "updated");
+  assert.equal(ctx.get(current), "updated", "the successor remains writable");
+});
+
+test("stale Effect disposal never runs the recycled effect cleanup", () => {
+  const ctx = new Context();
+  const source = ctx.source(0);
+  const cleanups = [];
+  const stale = ctx.effect(() => () => cleanups.push("stale"));
+  ctx.disposeEffect(stale);
+
+  const current = ctx.effect((cx) => {
+    cx.get(source);
+    return () => cleanups.push("current");
+  });
+  assert.equal(current.id, stale.id, "the Effect id is recycled");
+
+  ctx.disposeEffect(stale);
+  assert.equal(ctx.isEffectActive(current), true, "the successor effect remains active");
+  assert.equal(
+    ctx.isEffectActive(stale),
+    false,
+    "the stale effect is not aliased to its successor",
+  );
+  assert.deepEqual(cleanups, ["stale"], "no unrelated cleanup ran");
+
+  ctx.set(source, 1);
+  assert.deepEqual(cleanups, ["stale", "current"], "the live effect still reruns normally");
+});

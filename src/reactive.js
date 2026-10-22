@@ -146,10 +146,13 @@ export class DisposedNodeError extends Error {
 // `ctx.get(handle)` / `ctx.set(handle, v)` surface (#lzcellkernel).
 
 class Cell {
-  /** @internal */ constructor(id, ctx) {
+  /** @internal */ constructor(id, ctx, generation) {
     this.id = id;
     if (ctx !== undefined) {
       Object.defineProperty(this, "_ctx", { value: ctx });
+    }
+    if (generation !== undefined) {
+      Object.defineProperty(this, "_g", { value: generation });
     }
   }
   /** Tear this node down (kind-agnostic; dispatches on the handle's class). */
@@ -165,8 +168,8 @@ class Cell {
  * the writable kind (v1 `SourceCell`).
  */
 export class Source extends Cell {
-  /** @internal */ constructor(id, ctx, policy) {
-    super(id, ctx);
+  /** @internal */ constructor(id, ctx, policy, generation) {
+    super(id, ctx, generation);
     if (policy !== undefined && policy !== null) {
       this.policy = policy;
     }
@@ -208,8 +211,8 @@ export class Source extends Cell {
  * is not written from outside (v1 `FormulaCell`).
  */
 export class Computed extends Cell {
-  /** @internal */ constructor(id, ctx) {
-    super(id, ctx);
+  /** @internal */ constructor(id, ctx, generation) {
+    super(id, ctx, generation);
     Object.freeze(this);
   }
   /**
@@ -250,10 +253,13 @@ export class Computed extends Cell {
 
 /** A value-less side-effecting sink. Outside the `Cell` hierarchy (v1 `EffectHandle`). */
 export class Effect {
-  /** @internal */ constructor(id, ctx) {
+  /** @internal */ constructor(id, ctx, generation) {
     this.id = id;
     if (ctx !== undefined) {
       Object.defineProperty(this, "_ctx", { value: ctx });
+    }
+    if (generation !== undefined) {
+      Object.defineProperty(this, "_g", { value: generation });
     }
     Object.freeze(this);
   }
@@ -548,12 +554,14 @@ function createContext(opts = {}) {
   // aliases (`cell` -> `source`, `slot` -> `computed`) during the staged rename.
 
   function source(value, policy) {
-    return new Source(cellAny(value), api, policy);
+    const id = cellAny(value);
+    return new Source(id, api, policy, nodes[id]);
   }
 
   /** @deprecated use {@link source}. */
   function cell(value) {
-    return new Source(cellAny(value), api);
+    const id = cellAny(value);
+    return new Source(id, api, undefined, nodes[id]);
   }
 
   function cellAny(value) {
@@ -572,7 +580,8 @@ function createContext(opts = {}) {
    * `computed(f).eager()` makes it eager.
    */
   function computed(compute) {
-    return new Computed(slotAny(compute), api);
+    const id = slotAny(compute);
+    return new Computed(id, api, nodes[id]);
   }
 
   /** @deprecated use {@link computed} (guarded, the only derived construction). */
@@ -609,7 +618,8 @@ function createContext(opts = {}) {
     // The internal engine guards on equality (true = equal = suppress); `changed`
     // is its negation (true = propagate). Installed as a per-slot equals override.
     const equals = (old, next) => !changed(old, next);
-    return new Computed(slotWithEqualsAny(compute, equals), api);
+    const id = slotWithEqualsAny(compute, equals);
+    return new Computed(id, api, nodes[id]);
   }
 
   // Create a guarded slot whose equality-suppression uses `equals(old, new)`
@@ -655,11 +665,15 @@ function createContext(opts = {}) {
       readTrackedId(slot, c._slotId);
       return null;
     });
-    return new SignalHandle(new Computed(slot, api), new Effect(effect, api));
+    return new SignalHandle(
+      new Computed(slot, api, nodes[slot]),
+      new Effect(effect, api, nodes[effect]),
+    );
   }
 
   function effect(run) {
-    return new Effect(effectAny(run), api);
+    const id = effectAny(run);
+    return new Effect(id, api, nodes[id]);
   }
 
   function effectAny(run) {
@@ -905,10 +919,13 @@ function createContext(opts = {}) {
   // -- Dispose -----------------------------------------------------------
 
   function disposeEffect(handle) {
-    disposeEffectAny(handle.id);
+    disposeEffectAny(handle.id, handle._g);
   }
 
-  function disposeEffectAny(id) {
+  function disposeEffectAny(id, generation) {
+    if (kinds[id] !== KIND_EFFECT || (generation !== undefined && generation !== nodes[id])) {
+      return;
+    }
     // #lzspecedgeindex: dropping a scheduled effect is a Set delete, not a scan.
     // This used to be `pendingEffects.indexOf(id, pendingHead)` + `splice`, which
     // is O(pending) per dispose. That is free when the queue is drained — the
@@ -919,9 +936,6 @@ function createContext(opts = {}) {
     // authority on whether a queued id should run, so the entry can simply be
     // left in place and skipped at drain time (see `flushEffects`).
     scheduledEffects.delete(id);
-    if (kinds[id] !== KIND_EFFECT) {
-      return;
-    }
     const node = nodes[id];
     // #lzjsarenanodes: clear the arena slots so the recycled id reads as
     // KIND_NONE/flags=0, then drop the object reference so the run/cleanup
@@ -945,7 +959,10 @@ function createContext(opts = {}) {
   }
 
   function isEffectActive(handle) {
-    return kinds[handle.id] === KIND_EFFECT;
+    return (
+      kinds[handle.id] === KIND_EFFECT &&
+      (handle._g === undefined || handle._g === nodes[handle.id])
+    );
   }
 
   function disposeSignal(handle) {
@@ -1010,7 +1027,7 @@ function createContext(opts = {}) {
   // already-disposed handle or the wrong kind (no-op).
   function disposeSlot(handle) {
     const id = handle.id;
-    if (kinds[id] !== KIND_SLOT) {
+    if (kinds[id] !== KIND_SLOT || (handle._g !== undefined && handle._g !== nodes[id])) {
       return;
     }
     // #lzcellkernel: an eager computed owns a puller effect — tear it down first,
@@ -1063,7 +1080,7 @@ function createContext(opts = {}) {
   // slot's next recompute (same contract as disposing any still-referenced node).
   function disposeCell(handle) {
     const id = handle.id;
-    if (kinds[id] !== KIND_CELL) {
+    if (kinds[id] !== KIND_CELL || (handle._g !== undefined && handle._g !== nodes[id])) {
       return;
     }
     const node = nodes[id];
@@ -1159,12 +1176,11 @@ function createContext(opts = {}) {
   /**
    * Tear down whatever kind of node `handle` names.
    *
-   * Dispatch is on the HANDLE'S CLASS, not on `kinds[id]`. That is load-bearing
-   * under id recycling: a stale `CellHandle` whose id has since been reissued to
-   * a slot must be a no-op, and dispatching on the arena would instead tear down
-   * the innocent new occupant. Each `dispose*` already re-checks the kind, so
-   * routing through them makes the stale-handle case a no-op by construction
-   * (`dispose_stale_handle` in the corpus).
+   * Dispatch is on the HANDLE'S CLASS, not on `kinds[id]`, and each `dispose*`
+   * validates both kind and allocation generation before mutating the arena.
+   * Both checks are load-bearing under id recycling: kind rejects cross-kind
+   * reuse, while generation rejects same-kind ABA reuse. A stale handle must
+   * never tear down the innocent new occupant (`dispose_stale_handle`).
    */
   function disposeNode(handle) {
     if (handle instanceof Source) {

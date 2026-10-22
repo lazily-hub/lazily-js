@@ -60,7 +60,10 @@ function runRunner(corpus, scratch, observation = null) {
 
 function fixtureDigest(profile, corpus) {
   const digest = createHash("sha256");
-  for (const fixture of profile.required_fixtures) {
+  // The profile algorithm is path-ordered, independent of presentation order.
+  for (const fixture of [...profile.required_fixtures].sort((a, b) =>
+    a.path.localeCompare(b.path),
+  )) {
     const path = join(corpus, fixture.path);
     if (!existsSync(path)) fail(`required fixture is absent: ${path}`);
     digest.update(fixture.path);

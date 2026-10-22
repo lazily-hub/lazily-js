@@ -72,15 +72,21 @@ function defaultEqual(a, b) {
 // -- Handles -----------------------------------------------------------------
 
 export class AsyncSource {
-  /** @internal */ constructor(id) {
+  /** @internal */ constructor(id, generation) {
     this.id = id;
+    if (generation !== undefined) {
+      Object.defineProperty(this, "_g", { value: generation });
+    }
     Object.freeze(this);
   }
 }
 
 export class AsyncComputed {
-  /** @internal */ constructor(id) {
+  /** @internal */ constructor(id, generation) {
     this.id = id;
+    if (generation !== undefined) {
+      Object.defineProperty(this, "_g", { value: generation });
+    }
     Object.freeze(this);
   }
 }
@@ -92,8 +98,11 @@ export const AsyncCellHandle = AsyncSource;
 export const AsyncSlotHandle = AsyncComputed;
 
 export class AsyncEffectHandle {
-  /** @internal */ constructor(id) {
+  /** @internal */ constructor(id, generation) {
     this.id = id;
+    if (generation !== undefined) {
+      Object.defineProperty(this, "_g", { value: generation });
+    }
     Object.freeze(this);
   }
 }
@@ -220,8 +229,9 @@ export class AsyncContext {
   // #lzcellkernel v2 constructor: `source` is the canonical source-cell name.
   source(value) {
     const id = this.#allocId();
-    this.#nodes[id] = new AsyncCellNode(value);
-    return new AsyncSource(id);
+    const node = new AsyncCellNode(value);
+    this.#nodes[id] = node;
+    return new AsyncSource(id, node);
   }
 
   /** @deprecated use {@link AsyncContext#source}. */
@@ -231,35 +241,40 @@ export class AsyncContext {
 
   computedAsync(compute) {
     const id = this.#allocId();
-    this.#nodes[id] = new AsyncSlotNode(compute, false);
-    return new AsyncComputed(id);
+    const node = new AsyncSlotNode(compute, false);
+    this.#nodes[id] = node;
+    return new AsyncComputed(id, node);
   }
 
   memoAsync(compute) {
     const id = this.#allocId();
-    this.#nodes[id] = new AsyncSlotNode(compute, true);
-    return new AsyncComputed(id);
+    const node = new AsyncSlotNode(compute, true);
+    this.#nodes[id] = node;
+    return new AsyncComputed(id, node);
   }
 
   effectAsync(run) {
     const id = this.#allocId();
-    this.#nodes[id] = new AsyncEffectNode(run);
+    const node = new AsyncEffectNode(run);
+    this.#nodes[id] = node;
     this.#scheduleEffect(id);
-    return new AsyncEffectHandle(id);
+    return new AsyncEffectHandle(id, node);
   }
 
   /** @deprecated Staged compatibility pending eager AsyncComputed support. */
   signalAsync(compute) {
     const slotId = this.#allocId();
-    this.#nodes[slotId] = new AsyncSlotNode(compute, true);
-    const slot = new AsyncComputed(slotId);
+    const slotNode = new AsyncSlotNode(compute, true);
+    this.#nodes[slotId] = slotNode;
+    const slot = new AsyncComputed(slotId, slotNode);
     const effectId = this.#allocId();
-    this.#nodes[effectId] = new AsyncEffectNode(async (cctx) => {
+    const effectNode = new AsyncEffectNode(async (cctx) => {
       await cctx.getAsync(slot);
       return null;
     });
+    this.#nodes[effectId] = effectNode;
     this.#scheduleEffect(effectId);
-    return new AsyncSignalHandle(slot, new AsyncEffectHandle(effectId));
+    return new AsyncSignalHandle(slot, new AsyncEffectHandle(effectId, effectNode));
   }
 
   // -- Cells (synchronous input layer) -----------------------------------
@@ -387,7 +402,7 @@ export class AsyncContext {
   async disposeAsyncEffect(handle) {
     const id = handle.id;
     const node = this.#nodes[id];
-    if (!(node instanceof AsyncEffectNode)) {
+    if (!(node instanceof AsyncEffectNode) || (handle._g !== undefined && handle._g !== node)) {
       return;
     }
     // Remove pending reruns and abort any in-flight body first, then await the
@@ -400,9 +415,14 @@ export class AsyncContext {
     while (node.kicking) {
       await Promise.resolve();
       // Re-fetch: dispose may race the loop's own completion.
-      if (!(this.#nodes[id] instanceof AsyncEffectNode)) {
+      if (this.#nodes[id] !== node) {
         return;
       }
+    }
+    // Another disposer can finish while this call is suspended above and the
+    // id can be recycled immediately. Never clean up that successor.
+    if (this.#nodes[id] !== node) {
+      return;
     }
     for (const dep of [...node.dependencies]) {
       this.#removeDependentEdge(dep, id);
@@ -417,7 +437,10 @@ export class AsyncContext {
   }
 
   isEffectActive(handle) {
-    return this.#nodes[handle.id] instanceof AsyncEffectNode;
+    return (
+      this.#nodes[handle.id] instanceof AsyncEffectNode &&
+      (handle._g === undefined || handle._g === this.#nodes[handle.id])
+    );
   }
 
   /**
@@ -442,7 +465,7 @@ export class AsyncContext {
   disposeSlot(handle) {
     const id = handle.id;
     const node = this.#nodes[id];
-    if (!(node instanceof AsyncSlotNode)) {
+    if (!(node instanceof AsyncSlotNode) || (handle._g !== undefined && handle._g !== node)) {
       return;
     }
     this.#invalidateDisposedDependents(node.dependents);
@@ -478,7 +501,7 @@ export class AsyncContext {
   disposeCell(handle) {
     const id = handle.id;
     const node = this.#nodes[id];
-    if (!(node instanceof AsyncCellNode)) {
+    if (!(node instanceof AsyncCellNode) || (handle._g !== undefined && handle._g !== node)) {
       return;
     }
     this.#invalidateDisposedDependents(node.dependents);
@@ -491,9 +514,10 @@ export class AsyncContext {
 
   /**
    * Tear down whatever kind of node `handle` names. Dispatch is on the HANDLE'S
-   * CLASS, not on the node currently at that id: ids are recycled here, and a
-   * stale handle whose id has been reissued must be a no-op rather than tear
-   * down the innocent new occupant (`dispose_stale_handle`).
+   * CLASS, not on the node currently at that id. Each target also validates its
+   * opaque allocation generation, so both cross-kind and same-kind recycled
+   * stale handles are no-ops rather than teardown authority for the innocent
+   * new occupant (`dispose_stale_handle`).
    *
    * Returns a promise because effect teardown awaits the effect's run loop and
    * its cleanup; slot and cell teardown are synchronous underneath.

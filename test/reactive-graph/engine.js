@@ -85,6 +85,7 @@ export const FIXTURES = [
   "merge_per_settled_cone_not_per_write.json",
   "read_after_dispose_is_an_error.json",
   "recycled_id_inherits_nothing.json",
+  "stale_effect_handle_cannot_remove_recycled_source.json",
   "scope_teardown_equals_fold_of_disposals.json",
   "scoping_bounds_teardown_not_visibility.json",
   "signal_materializes_once_per_batch.json",
@@ -246,6 +247,7 @@ async function replaySteps(model, steps, label, assertFn, divergences, tail) {
       const runsBefore = instance.runLog.length;
       let opValue;
       let opError = null;
+      let recycledIdConfirmed = false;
 
       switch (op.type) {
         case "cell":
@@ -334,14 +336,30 @@ async function replaySteps(model, steps, label, assertFn, divergences, tail) {
           instance.disarmScope(op.scope);
           break;
         case "dispose_stale_handle":
-          // The kind is read from the recorded handle, never from the graph --
-          // the whole point of this op is that the id has been reissued to a
-          // node of another kind, and the teardown must be a no-op.
+          // Prove this is a real ABA/recycling case before accepting the stale
+          // dispose. Without the raw-id equality, an allocator that never
+          // recycled could pass every survival assertion vacuously.
           assertFn.equal(
             instance.kindOf(op.handle_of),
             op.handle_kind,
             `${where}: handle_kind does not match the recorded handle`,
           );
+          assertFn.equal(
+            instance.kindOf(op.successor),
+            op.successor_kind,
+            `${where}: successor_kind does not match the current handle`,
+          );
+          assertFn.equal(
+            instance.rawId(op.handle_of),
+            instance.rawId(op.successor),
+            `${where}: stale handle and successor did not reuse the same raw id`,
+          );
+          assertFn.notEqual(
+            instance.generationOf(op.handle_of),
+            instance.generationOf(op.successor),
+            `${where}: recycled allocations retained the same generation`,
+          );
+          recycledIdConfirmed = true;
           await instance.dispose(op.handle_of);
           break;
         default:
@@ -369,6 +387,8 @@ async function replaySteps(model, steps, label, assertFn, divergences, tail) {
         computes_of: (id) => instance.computesOf(id),
         read: (id) => readOr(id),
         readable: (id) => alive(id),
+        writable: (id) => instance.isWritable(id),
+        cleanups_of: (id) => instance.cleanupsOf(id),
         dependents_of: (id) => instance.dependentsOf(id),
         dependencies_of: (id) => instance.dependenciesOf(id),
         scope_owned_count: (name) => instance.scopeOwned(name),
@@ -453,6 +473,12 @@ async function replaySteps(model, steps, label, assertFn, divergences, tail) {
                   want.filter((id) => instance.kindOf(id) === "effect"),
                   `${where}: cleanup_order`,
                 ),
+              );
+              break;
+
+            case "recycled_id_confirmed":
+              check(where, "recycled_id_confirmed", null, () =>
+                assertFn.equal(recycledIdConfirmed, want, `${where}: recycled_id_confirmed`),
               );
               break;
 

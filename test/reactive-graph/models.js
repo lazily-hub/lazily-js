@@ -45,8 +45,10 @@
 // the case where that matters: the fixture hands back a handle whose id has been
 // reissued and requires the teardown to be a no-op. Answering `kindOf` from the
 // arena would make the runner assert the *successor's* kind and then tear it
-// down -- so the kind comes from the class of the handle the model recorded,
-// which is also how `Context.disposeNode` dispatches.
+// down -- so the kind comes from the class of the handle the model recorded.
+// The runner separately proves that stale and successor handles share the same
+// raw id while carrying different allocation generations, covering same-kind
+// ABA reuse as well as cross-kind reuse.
 import {
   Source,
   DisposedNodeError,
@@ -105,6 +107,7 @@ const ALL_OPS = [
 /** `expect` keys every model can now evaluate -- the whole corpus. */
 const ALL_ASSERTIONS = [
   "cleanup_order",
+  "cleanups_of",
   "computes_of",
   "dependencies_of",
   "dependents_of",
@@ -114,8 +117,10 @@ const ALL_ASSERTIONS = [
   "observed_count",
   "read",
   "readable",
+  "recycled_id_confirmed",
   "scope_owned_count",
   "value",
+  "writable",
 ];
 
 /**
@@ -135,7 +140,7 @@ function sumOffset(values, offset) {
 function kindOfHandle(handle) {
   if (handle instanceof Source || handle instanceof AsyncSource) return "cell";
   if (handle instanceof Effect || handle instanceof AsyncEffectHandle) return "effect";
-  if (handle instanceof Computed || handle instanceof AsyncComputed) return "slot";
+  if (handle instanceof Computed || handle instanceof AsyncComputed) return "computed";
   if (handle instanceof SignalHandle || handle instanceof AsyncSignalHandle) return "signal";
   throw new Error("unrecognised handle class");
 }
@@ -320,6 +325,10 @@ function makeSyncLikeModel(name, makeContext) {
           ctx.disposeNode(handles.get(id));
         },
         kindOf: (id) => kindOfHandle(handles.get(id)),
+        rawId: (id) => handles.get(id).id,
+        generationOf: (id) => handles.get(id)._g,
+        isWritable: (id) => handles.get(id) instanceof Source,
+        cleanupsOf: (id) => cleanupLog.filter((cleaned) => cleaned === id).length,
         isEffectActive: (id) => ctx.isEffectActive(handles.get(id)),
         dependentsOf: (id) => ctx.dependentCount(handles.get(id)),
         dependenciesOf: (id) => ctx.dependencyCount(handles.get(id)),
@@ -464,6 +473,10 @@ export const asyncModel = {
         await ctx.disposeNode(handles.get(id));
       },
       kindOf: (id) => kindOfHandle(handles.get(id)),
+      rawId: (id) => handles.get(id).id,
+      generationOf: (id) => handles.get(id)._g,
+      isWritable: (id) => handles.get(id) instanceof AsyncSource,
+      cleanupsOf: (id) => cleanupLog.filter((cleaned) => cleaned === id).length,
       isEffectActive: (id) => ctx.isEffectActive(handles.get(id)),
       dependentsOf: (id) => ctx.dependentCount(handles.get(id)),
       dependenciesOf: (id) => ctx.dependencyCount(handles.get(id)),

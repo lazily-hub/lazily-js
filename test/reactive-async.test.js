@@ -174,6 +174,49 @@ test("dispose runs the final cleanup and stops reruns (dispose_absorbing / dispo
   assert.deepEqual(order, ["body:0", "cleanup:0"]);
 });
 
+test("stale async Source disposal cannot tear down its recycled successor", () => {
+  const ctx = new AsyncContext();
+  const stale = ctx.source("old");
+  ctx.disposeCell(stale);
+
+  const current = ctx.source("current");
+  assert.equal(current.id, stale.id, "the Source id is recycled");
+
+  ctx.disposeCell(stale);
+  assert.equal(ctx.get(current), "current", "the successor remains readable");
+  ctx.set(current, "updated");
+  assert.equal(ctx.get(current), "updated", "the successor remains writable");
+});
+
+test("stale async Effect disposal never runs the recycled effect cleanup", async () => {
+  const ctx = new AsyncContext();
+  const source = ctx.source(0);
+  const cleanups = [];
+  const stale = ctx.effectAsync(async () => () => cleanups.push("stale"));
+  await ctx.settle();
+  await ctx.disposeAsyncEffect(stale);
+
+  const current = ctx.effectAsync(async (cx) => {
+    cx.get(source);
+    return () => cleanups.push("current");
+  });
+  await ctx.settle();
+  assert.equal(current.id, stale.id, "the Effect id is recycled");
+
+  await ctx.disposeAsyncEffect(stale);
+  assert.equal(ctx.isEffectActive(current), true, "the successor effect remains active");
+  assert.equal(
+    ctx.isEffectActive(stale),
+    false,
+    "the stale effect is not aliased to its successor",
+  );
+  assert.deepEqual(cleanups, ["stale"], "no unrelated cleanup ran");
+
+  ctx.set(source, 1);
+  await ctx.settle();
+  assert.deepEqual(cleanups, ["stale", "current"], "the live effect still reruns normally");
+});
+
 // -- Eager async signals -----------------------------------------------------
 
 test("signal_async eagerly materializes after settle", async () => {
