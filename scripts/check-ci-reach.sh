@@ -849,7 +849,8 @@ ci_step_names() {
 # Execution-affecting keys on each `run:` step, one record per step per key:
 #
 #   NAME<SEP>if                 the step is CONDITIONAL
-#   NAME<SEP>continue-on-error  the step cannot fail its job
+#   NAME<SEP>continue-on-error  the step cannot fail its job (any value but
+#                               `false`: an expression discards failure too)
 #
 # Matched at the step's own key indent (the dash column plus two), so a line
 # inside a `run:` body that happens to begin with `if:` is not one of these.
@@ -893,7 +894,16 @@ ci_step_conditions() {
 			if (line ~ /^[[:space:]]*run:/) has_run = 1
 			else if (line ~ /^[[:space:]]*name:[[:space:]]*/) curname = name_of(line)
 			else if (line ~ /^[[:space:]]*if:/) has_if = 1
-			else if (line ~ /^[[:space:]]*continue-on-error:[[:space:]]*true[[:space:]]*$/) has_coe = 1
+			else if (line ~ /^[[:space:]]*continue-on-error:/) {
+				# Any value but `false` discards the failure. Matching the literal
+				# `true` only let `continue-on-error: ${{ true }}` (or a matrix
+				# expression) on a pinned Core step leave this guard green
+				# (#lzcorecireachaudit).
+				v = line
+				sub(/^[[:space:]]*continue-on-error:[[:space:]]*/, "", v)
+				sub(/[[:space:]]+(#.*)?$/, "", v)
+				if (unquote(v) != "false") has_coe = 1
+			}
 		}
 		END { flush() }
 	' "$@"

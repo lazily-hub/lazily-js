@@ -279,3 +279,25 @@ test("blocking floor survives matching job activation pin edit", () => {
   });
   assertRed(result, /forbidden non-blocking activation/);
 });
+
+// Step-level activation on a pinned Core step (#lzcorecireachaudit). The rung
+// matched the literal `continue-on-error: true` only, so an expression that
+// evaluates true left the guard green; `false` (the default) must stay green.
+const coreStep = "      - name: Core facade contract\n";
+for (const value of ["true", "${{ true }}", "${{ matrix.node != '' }}", "'true'"]) {
+  test(`pinned Core step continue-on-error: ${value} is refused`, () => {
+    const result = mutateAndRun((root) =>
+      replaceOnce(root, workflow, coreStep, `${coreStep}        continue-on-error: ${value}\n`),
+    );
+    assertRed(result, /continue-on-error/);
+  });
+}
+
+for (const value of ["false", "'false'", '"false"']) {
+  test(`pinned Core step continue-on-error: ${value} stays green`, () => {
+    const result = mutateAndRun((root) =>
+      replaceOnce(root, workflow, coreStep, `${coreStep}        continue-on-error: ${value}\n`),
+    );
+    assert.equal(result.status, 0, `default value was refused:\n${result.stdout}${result.stderr}`);
+  });
+}
