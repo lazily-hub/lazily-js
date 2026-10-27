@@ -1,9 +1,19 @@
-.PHONY: check fmt fmt-fix build typecheck core-api test test-interop-peer core-facade-check core-artifact-consumer-check conformance-coverage assertion-keys \
+.PHONY: check fmt fmt-fix build typecheck core-api test test-interop-peer core-facade-check core-artifact-consumer-check core-evidence-check conformance-coverage assertion-keys \
 scenario-coverage assertion-ordering-check flag-hygiene ci-reach bench bench-scale benchmark benchmark-update \
 benchmark-check
 
 core-artifact-consumer-check:
 	./scripts/core-artifact-consumer-check.sh
+
+# Per-binding Core evidence gate (#lzbindingevidenceci). Runs lazily-spec's
+# verifier for this binding alone: it regenerates the Core report through
+# scripts/core-conformance.json's report_command, then checks it against the
+# canonical profile, so stale evidence handles, unreported skips and a missing
+# report are red on push instead of only at cohort qualification.
+# --require-all turns an absent ../lazily-spec layout or declaration into a
+# failure, never a skip.
+core-evidence-check:
+	node ../lazily-spec/scripts/check-core-evidence.mjs --bindings-root .. --binding javascript --reports build/core-evidence --generate-reports --require-all
 
 core-facade-check:
 	node --test test/core-facade.test.js
@@ -52,7 +62,7 @@ export LAZILY_CONFORMANCE_RUN_ID
 # The order here is the order the gates must run in: the conformance rungs audit
 # evidence files that `test` writes, so they are useless before it.
 check: fmt build typecheck core-api test test-interop-peer conformance-coverage assertion-keys \
-scenario-coverage assertion-ordering-check flag-hygiene core-facade-check core-artifact-consumer-check ci-reach
+scenario-coverage assertion-ordering-check flag-hygiene core-facade-check core-artifact-consumer-check core-evidence-check ci-reach
 
 # The formatting GATE (#lazilyformattinggate). This binding had no formatting
 # floor: `build` is the lint equivalent (node --check per entry point) and

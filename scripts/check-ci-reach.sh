@@ -406,6 +406,7 @@ EXPECTED_CLOSURE_TARGETS=(
 	conformance-coverage
 	core-api
 	core-artifact-consumer-check
+	core-evidence-check
 	core-facade-check
 	flag-hygiene
 	fmt
@@ -465,6 +466,7 @@ EXPECTED_GATE_STEPS=(
 	"ci-reach|.github/workflows/ci.yml|test|CI-reachability guard (#lzcheckcireachguard)"
 	"conformance-coverage|.github/workflows/ci.yml|test|Rung 1 — canonical fixtures were OPENED (#portconformancecoverage)"
 	"core-artifact-consumer-check|.github/workflows/ci.yml|test|Clean packaged Core consumer (minimum/current)"
+	"core-evidence-check|.github/workflows/ci.yml|test|Core evidence gate (#lzbindingevidenceci)"
 	"core-facade-check|.github/workflows/ci.yml|test|Core facade contract"
 	"flag-hygiene|.github/workflows/ci.yml|test|Rung 5 — fixture flags are type-required, not coerced (#lzsiblingrunnermasking)"
 	"scenario-coverage|.github/workflows/ci.yml|test|Rung 4 — every fixture SCENARIO was replayed (#lzscenariocoverage)"
