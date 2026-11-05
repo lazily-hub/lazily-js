@@ -4,3 +4,6 @@ coverage/
 dist/
 node_modules/
 build/
+
+# agent-doc runtime state (state.db, logs, locks) is per-checkout, never tracked
+.agent-doc/
