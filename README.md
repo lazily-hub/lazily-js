@@ -130,6 +130,12 @@ and JSON Schemas in `lazily-spec` and the Lean models in `lazily-formal`.
 | `@lazily-hub/lazily-js/async-ingress` | Async ingress shell: `AsyncIngressCell` over `AsyncContext` — admission stays synchronous; only reader materialization is async-coloured (`#designimplementtransport`) |
 | `@lazily-hub/lazily-js/latest-durable-projection-core` | Graph-independent `LatestDurableProjectionCore<K,V>` state machine for conflated, retryable, generation-fenced egress |
 | `@lazily-hub/lazily-js/latest-durable-projection` | Sync, thread-safe, and async reactive shells over the latest-durable core |
+| `@lazily-hub/lazily-js/egress-core` | Graph-agnostic egress delivery authority `EgressCore`: monotone sequence assignment, bounded unacknowledged window, cumulative ACK watermark, bounded retry/backoff/exhaustion, and the producer-generation fence (`#lzegress`) |
+| `@lazily-hub/lazily-js/egress` | Single-threaded egress shell: `EgressCell` over `Context` — `pending` / `inflight` / `ackedThrough` / `retry` Computeds and one attached transport Effect per incarnation (`#lzegress`) |
+| `@lazily-hub/lazily-js/thread-safe-egress` | `Send + Sync` egress shell: `ThreadSafeEgressCell` — the core guarded by its own mutex, invalidation run with that lock released in ONE frontier walk (`#lzegress`) |
+| `@lazily-hub/lazily-js/async-egress` | Async egress shell: `AsyncEgressCell` over `AsyncContext` — delivery transitions stay synchronous; only the transport attachment is async-coloured (`#lzegress`) |
+| `@lazily-hub/lazily-js/effect-cas-core` | Generic keyed effect compare-and-swap `EffectCasCore`: stable identity, opaque expected authority, keyed single-flight, latest-wins supersession, logical-clock retry, reconnect, exact terminal receipts, resumable ordered plans, and a lossless `durableState()` / `hydrate()` image (`#lzeffectcas`) |
+| `@lazily-hub/lazily-js/effect-cas` | Sync, thread-safe, and async reactive shells over the effect-CAS core (`EffectCas` / `ThreadSafeEffectCas` / `AsyncEffectCas`) |
 
 ## Latest durable projection
 

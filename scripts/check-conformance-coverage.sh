@@ -79,11 +79,6 @@ KNOWN_UNCOVERED=(
   "durable-owner/inbox_outbox_deduplication.json"
   "durable-owner/ordered_replay.json"
   "durable-owner/projection_fingerprint.json"
-  # Reactive egress is currently Rust-only; JavaScript has no egress replay runner.
-  "egress/egress_generation_fence.json"
-  "egress/egress_inflight_window.json"
-  "egress/egress_ordered_ack.json"
-  "egress/egress_retry_budget.json"
   "arena_blob.json"
   "reliable-sync/coalesce_bounds_outbox.json"
   "reliable-sync/liveness_lease_eviction.json"
@@ -260,7 +255,10 @@ fi
 # lossless-tree/apply_update_advances_counter.json and
 # lossless-tree/out_of_order_delivery_buffers.json, #lzspecoutoforderfixtures.
 # 143 -> 147: the three conformance/replay/ fixtures this binding now replays
-# (#lzreplayjs) plus one upstream fixture the floor had already drifted behind.) The older convention visible in this file's history -- "the
+# (#lzreplayjs) plus one upstream fixture the floor had already drifted behind.
+# 150 -> 155: the four conformance/egress/ fixtures this binding now replays
+# (#lzegress) plus egress/effect_cas.json (#lzeffectcas); the run that
+# re-pinned it OPENED exactly 155, and 156 fails.) The older convention visible in this file's history -- "the
 # observed run went from 135 to 136, so raise the floor by one and keep the
 # margin it had" -- is the bug it replaces. It only ever widens the gap, and
 # the gap had reached 9. A floor 9 below reality tolerates 9 fixtures silently
@@ -271,7 +269,7 @@ fi
 # coverage OK: <n>/..." line, set this to that <n>, then prove it is exact by
 # temporarily setting it to <n>+1 and watching this guard fail. A floor you
 # never watched fail is a floor you have not verified.
-MIN_FIXTURES="${MIN_FIXTURES:-150}"
+MIN_FIXTURES="${MIN_FIXTURES:-155}"
 if [ "$total" -eq 0 ]; then
   echo "ERROR: the corpus at $SPEC_DIR listed ZERO fixtures." >&2
   echo "       Every check above is vacuously green over an empty population." >&2
