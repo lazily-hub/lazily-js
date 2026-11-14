@@ -175,3 +175,53 @@ test("egress: backoff doubles to the ceiling and reconnect rejects a stale gener
   );
   assert.equal(core.pending()[0].generation, 2);
 });
+
+test("egress: an ACK past the end of the sequence space is refused and changes nothing", () => {
+  for (const flavor of FLAVORS.slice(0, 2)) {
+    const { ctx, egress } = build(flavor, 1);
+    egress.enqueue(10);
+    egress.claim(1);
+    egress.pending();
+    egress.inflight();
+    egress.ackedThrough();
+    const handles = [egress.pendingHandle(), egress.inflightHandle(), egress.ackedThroughHandle()];
+    assert.deepEqual(egress.ack(1, 1), { kind: "beyond_sent", nextSequence: 1 }, flavor.name);
+    assert.ok(
+      handles.every((handle) => ctx.isSet(handle)),
+      `${flavor.name}: a refused ACK invalidates nothing`,
+    );
+    assert.equal(egress.ackedThrough(), null, `${flavor.name}: the watermark did not move`);
+    assert.equal(egress.inflight().length, 1, `${flavor.name}: nothing was pruned`);
+    // The generation fence is checked first: a stale beyond-the-end ACK is stale.
+    assert.equal(egress.ack(0, 99).kind, "stale_generation");
+    assert.deepEqual(egress.ack(1, 0), { kind: "advanced", through: 0 });
+  }
+});
+
+test("egress: reconnect invalidates pending when it only rewrites retained envelopes", async () => {
+  for (const flavor of FLAVORS) {
+    const { ctx, egress } = build(flavor, 1);
+    egress.enqueue(10);
+    await egress.pending();
+    await egress.inflight();
+    const valid = (handle) =>
+      typeof ctx.isResolved === "function" ? ctx.isResolved(handle) : ctx.isSet(handle);
+    assert.deepEqual(egress.reconnect(2), { kind: "advanced", generation: 2, replayed: 0 });
+    assert.ok(!valid(egress.pendingHandle()), `${flavor.name}: pending must be invalidated`);
+    assert.ok(valid(egress.inflightHandle()), `${flavor.name}: inflight did not change`);
+    assert.deepEqual(
+      (await egress.pending()).map((e) => e.generation),
+      [2],
+      `${flavor.name}: the reader observes the rewritten generation`,
+    );
+    // With nothing retained, the pending projection did not change.
+    const idle = build(flavor, 1);
+    await idle.egress.pending();
+    const idleValid = (handle) =>
+      typeof idle.ctx.isResolved === "function"
+        ? idle.ctx.isResolved(handle)
+        : idle.ctx.isSet(handle);
+    assert.equal(idle.egress.reconnect(2).replayed, 0);
+    assert.ok(idleValid(idle.egress.pendingHandle()), `${flavor.name}: empty pending stays valid`);
+  }
+});

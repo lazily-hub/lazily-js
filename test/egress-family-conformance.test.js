@@ -163,6 +163,8 @@ function wireAck(ack) {
     case EgressAckKind.Advanced:
     case EgressAckKind.Unchanged:
       return { ack: ack.kind, through: ack.through };
+    case EgressAckKind.BeyondSent:
+      return { ack: ack.kind, next_sequence: ack.nextSequence };
     case EgressAckKind.StaleGeneration:
       return { ack: ack.kind, current: ack.current };
     default:
@@ -407,8 +409,9 @@ test("egress corpus is present and every declared fixture carries steps", () => 
 });
 
 for (const ModelCls of MODELS) {
-  test(`egress: ${ModelCls.flavor} flavor replays the whole corpus`, async () => {
+  test(`egress: ${ModelCls.flavor} flavor replays the whole corpus`, async (t) => {
     const steps = await replayCorpus(ModelCls);
+    t.diagnostic(`${ModelCls.flavor}: executed ${steps} egress steps`);
     assert.ok(steps > 0, `${ModelCls.flavor}: replayed zero steps`);
     assert.equal(
       steps,

@@ -42,6 +42,8 @@ export const EgressClaimKind = Object.freeze({
 export const EgressAckKind = Object.freeze({
   Advanced: "advanced",
   Unchanged: "unchanged",
+  /** `through` names a sequence never assigned (`through >= nextSequence`). */
+  BeyondSent: "beyond_sent",
   StaleGeneration: "stale_generation",
 });
 
@@ -209,6 +211,15 @@ export class EgressCore {
   ack(generation, through) {
     if (generation !== this._generation) return { change: NO_CHANGE, ack: this._stale() };
     requireCount(through, "through");
+    // Refuse an acknowledgement past the end of the sequence space BEFORE the
+    // watermark check: a sequence never assigned cannot have been delivered, and
+    // admitting it would prune records enqueued later without ever sending them.
+    if (through >= this._nextSequence) {
+      return {
+        change: NO_CHANGE,
+        ack: Object.freeze({ kind: EgressAckKind.BeyondSent, nextSequence: this._nextSequence }),
+      };
+    }
     if (this._ackedThrough !== null && through <= this._ackedThrough) {
       return {
         change: NO_CHANGE,
@@ -313,8 +324,11 @@ export class EgressCore {
     for (const record of this._pending) record.generation = generation;
     const retryChanged = this._retry !== null;
     this._retry = null;
+    // Every retained pending envelope was rewritten to the new generation, so
+    // the pending projection changed even when nothing was replayed into it.
+    const pendingChanged = replayed > 0 || this._pending.length > 0;
     return {
-      change: change(replayed > 0, replayed > 0, false, retryChanged),
+      change: change(pendingChanged, replayed > 0, false, retryChanged),
       reconnect: Object.freeze({ kind: EgressReconnectKind.Advanced, generation, replayed }),
     };
   }

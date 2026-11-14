@@ -302,7 +302,7 @@ test("effect-CAS corpus is present and every scenario carries steps", () => {
 });
 
 for (const family of families) {
-  test(`${family.name} replays the EffectCasCore conformance corpus`, async () => {
+  test(`${family.name} replays the EffectCasCore conformance corpus`, async (t) => {
     let scenarios = 0;
     let steps = 0;
     for (const scenario of fixture.scenarios) {
@@ -339,6 +339,7 @@ for (const family of families) {
       );
       scenarios += 1;
     }
+    t.diagnostic(`${family.name}: executed ${scenarios} scenarios / ${steps} steps`);
     assert.deepEqual(
       { scenarios, steps },
       loadedCounts(),

@@ -16,6 +16,7 @@ export declare const EgressClaimKind: Readonly<{
 export declare const EgressAckKind: Readonly<{
   Advanced: "advanced";
   Unchanged: "unchanged";
+  BeyondSent: "beyond_sent";
   StaleGeneration: "stale_generation";
 }>;
 
@@ -86,6 +87,7 @@ export type EgressClaim<T = unknown> =
 export type EgressAck =
   | { readonly kind: "advanced"; readonly through: number }
   | { readonly kind: "unchanged"; readonly through: number | null }
+  | { readonly kind: "beyond_sent"; readonly nextSequence: number }
   | EgressStale;
 
 export type EgressFailure =
