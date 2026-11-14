@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-const SPEC_TAG = "v0.43.0";
-const SPEC_COMMIT = "4b34879b26566a0616b97cf661ac4f1a23762af6";
+const SPEC_TAG = "v0.46.0";
+const SPEC_COMMIT = "ca676a1a7173525066e90bca48b2ead230a9cd88";
 
 function workflow(path) {
   return readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
