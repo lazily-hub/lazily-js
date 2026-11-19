@@ -87,11 +87,12 @@ test("GraphView re-emitted delta is idempotent", () => {
   assert.equal(replica.epoch, 2);
 });
 
-test("GraphView folds the canonical native agent-doc fixtures", { skip: !fixturesPresent }, () => {
+test("GraphView folds the canonical workflow fixtures", { skip: !fixturesPresent }, () => {
   // Pin the js GraphView to the SAME lazily-spec native fixtures the kt replica uses
   // (`conformance/agent-doc/{snapshot,delta}_agent_doc_state.json`) — cross-language drift catch.
   const snapshot = Snapshot.fromWire(loadFixture("snapshot_agent_doc_state.json").wire.Snapshot);
-  const delta = Delta.fromWire(loadFixture("delta_agent_doc_state.json").wire.Delta);
+  const deltaFixture = loadFixture("delta_agent_doc_state.json");
+  const delta = Delta.fromWire(deltaFixture.wire.Delta);
 
   const replica = new GraphView();
   replica.applySnapshot(snapshot);
@@ -101,10 +102,10 @@ test("GraphView folds the canonical native agent-doc fixtures", { skip: !fixture
   replica.applyDelta(delta);
   assert.equal(replica.nodeCount, 4);
   assert.equal(replica.epoch, 6);
-  assert.equal(replica.node(102).typeTag, "agent_doc.closeout.cycle");
+  assert.equal(replica.node(102).typeTag, snapshot.nodes.find((node) => node.node === 102).typeTag);
   assert.equal(phaseOf(replica, 102), "committed");
-  assert.equal(replica.node(103).typeTag, "agent_doc.queue.head");
+  assert.equal(replica.node(103).typeTag, snapshot.nodes.find((node) => node.node === 103).typeTag);
   assert.equal(phaseOf(replica, 103), "completed");
-  assert.equal(replica.node(104).typeTag, "agent_doc.transport.patch");
+  assert.equal(replica.node(104).typeTag, deltaFixture.assertions.added_type_tags[0]);
   assert.equal(phaseOf(replica, 104), "applied");
 });

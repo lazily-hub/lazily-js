@@ -58,17 +58,12 @@ function loadFixture(name) {
   return fixture;
 }
 
-// agent-doc-state type_tag vocabulary (schemas/agent-doc-state.json § TypeTag).
-// Lazy so non-agent-doc test runs never touch the schema file.
-let agentDocTypeTags = null;
-function loadAgentDocVocabulary() {
-  if (agentDocTypeTags !== null) {
-    return agentDocTypeTags;
-  }
-  const path = schemaPath("agent-doc-state.json");
-  const schema = JSON.parse(readFileSync(path, "utf8"));
-  agentDocTypeTags = new Set(schema?.$defs?.TypeTag?.enum ?? []);
-  return agentDocTypeTags;
+function loadWorkflowVocabulary(fixture) {
+  const file = fixture.schema_version.startsWith("1.")
+    ? "agent-doc-state.json"
+    : "workflow-state.json";
+  const schema = JSON.parse(readFileSync(schemaPath(file), "utf8"));
+  return new Set(schema.$defs.TypeTag.enum);
 }
 
 function decodePayloadJson(bytes) {
@@ -191,7 +186,7 @@ function assertFixtureAssertions(message, fixture) {
             break;
           }
           case "all_type_tags_in_vocabulary": {
-            const vocab = loadAgentDocVocabulary();
+            const vocab = loadWorkflowVocabulary(fixture);
             actual = snap.nodes.map((n) => n.typeTag).every((t) => vocab.has(t));
             break;
           }
@@ -257,7 +252,7 @@ function assertFixtureAssertions(message, fixture) {
             break;
           }
           case "all_type_tags_in_vocabulary": {
-            const vocab = loadAgentDocVocabulary();
+            const vocab = loadWorkflowVocabulary(fixture);
             actual = delta.ops
               .filter((op) => op instanceof DeltaOpNodeAdd)
               .map((op) => op.typeTag)
@@ -819,10 +814,11 @@ test("conformance delta shared blob", () => {
   assertRoundTripJson(message, fixture);
 });
 
-test("conformance agent-doc snapshot", () => {
+test("conformance workflow snapshot", () => {
   const fixture = loadFixture("agent-doc/snapshot_agent_doc_state.json");
   const message = IpcMessage.fromWire(fixture.wire);
   const snap = message.snapshot;
+  assertFixtureAssertions(message, fixture);
 
   assert.equal(snap.epoch, 3);
   assert.equal(snap.nodes.length, 3);
@@ -830,7 +826,7 @@ test("conformance agent-doc snapshot", () => {
   assert.equal(snap.roots.length, 1);
   assert.deepEqual(
     snap.nodes.map((n) => n.typeTag),
-    ["agent_doc.document.baseline", "agent_doc.closeout.cycle", "agent_doc.queue.head"],
+    fixture.assertions.type_tags,
   );
   // every node carries its serde_json(struct) payload inline as bytes
   assert.ok(snap.nodes.every((n) => n.state instanceof NodeStatePayload));
@@ -838,17 +834,18 @@ test("conformance agent-doc snapshot", () => {
   assertRoundTripJson(message, fixture);
 });
 
-test("conformance agent-doc delta", () => {
+test("conformance workflow delta", () => {
   const fixture = loadFixture("agent-doc/delta_agent_doc_state.json");
   const message = IpcMessage.fromWire(fixture.wire);
   const delta = message.delta;
+  assertFixtureAssertions(message, fixture);
 
   assert.equal(delta.baseEpoch, 3);
   assert.equal(delta.epoch, 6);
   assert.equal(delta.ops.length, 4);
   assert.deepEqual(
     delta.ops.filter((op) => op instanceof DeltaOpNodeAdd).map((op) => op.typeTag),
-    ["agent_doc.transport.patch"],
+    fixture.assertions.added_type_tags,
   );
   assert.deepEqual(
     delta.ops.map((op) => op.constructor),
