@@ -41,7 +41,7 @@
       "export class Effect { constructor(id: number, ctx?: unknown); readonly id: number; dispose(): void; }"
     ],
     "EffectRun": [
-      "export type EffectRun = (cx: Compute) => (() => void) | null | undefined;"
+      "export type EffectRun = (cx: Compute) => (() => void) | null | undefined | void;"
     ],
     "InstrumentationSnapshot": [
       "export interface InstrumentationSnapshot { nodeAllocations: number; slotRecomputes: number; dependencyEdgesAdded: number; dependencyEdgesRemoved: number; effectQueuePushes: number; maxEffectQueueDepth: number; }"

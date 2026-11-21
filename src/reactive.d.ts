@@ -1,5 +1,5 @@
 export type ComputeFn<T> = (cx: Compute) => T;
-export type EffectRun = (cx: Compute) => (() => void) | null | undefined;
+export type EffectRun = (cx: Compute) => (() => void) | null | undefined | void;
 /**
  * The compute-time READ surface (#lzcellkernel): the subset of {@link Context}
  * that registers dependency tracking. Both the owning `Context` (an untracked
