@@ -38,9 +38,9 @@ jobs:
       # names the reviewed artifact, while the SHA check rejects a moved tag.
       - name: Fetch canonical lazily-spec conformance fixtures (#lzspecconf)
         run: |
-          git clone --depth 1 --branch v0.46.0 https://github.com/lazily-hub/lazily-spec.git ../lazily-spec
-          test "$(git -C ../lazily-spec rev-parse HEAD)" = "ca676a1a7173525066e90bca48b2ead230a9cd88" || {
-            echo "::error::lazily-spec v0.46.0 did not resolve to the pinned release commit"
+          git clone --depth 1 --branch v0.47.0 https://github.com/lazily-hub/lazily-spec.git ../lazily-spec
+          test "$(git -C ../lazily-spec rev-parse HEAD)" = "e3bd642ea955325a4f27b73c454fa5a2c9496b15" || {
+            echo "::error::lazily-spec v0.47.0 did not resolve to the pinned release commit"
             exit 1
           }
 

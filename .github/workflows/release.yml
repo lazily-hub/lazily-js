@@ -43,9 +43,9 @@ jobs:
       - uses: actions/checkout@v6
         with:
           repository: lazily-hub/lazily-spec
-          # lazily-spec v0.46.0; use the peeled commit so a moved tag cannot
+          # lazily-spec v0.47.0; use the peeled commit so a moved tag cannot
           # change the conformance corpus beneath an existing JS release tag.
-          ref: ca676a1a7173525066e90bca48b2ead230a9cd88
+          ref: e3bd642ea955325a4f27b73c454fa5a2c9496b15
           path: lazily-spec
 
       - uses: actions/setup-node@v6
