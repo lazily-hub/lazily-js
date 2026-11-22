@@ -208,6 +208,30 @@ function makeComputeCounter() {
   };
 }
 
+/**
+ * The `effect` op's `cleanup` field (`#lzeffectvoid`): which runs of the effect
+ * body return a cleanup. Returns a predicate over the 1-based run number (the
+ * run at creation is run 1). The no-cleanup form is lazily-js's idiomatic one --
+ * the body returns nothing (`undefined`) -- never a no-op closure, which would be
+ * observationally identical to a cleanup and test nothing.
+ *
+ * An unknown value is a hard runner failure, never a silent default: a fixture
+ * asking for a body shape this runner does not build must not replay as
+ * `every_run` and report green.
+ */
+function cleanupRunsFor(id, cleanup) {
+  switch (cleanup ?? "every_run") {
+    case "every_run":
+      return () => true;
+    case "none":
+      return () => false;
+    case "alternate":
+      return (run) => run % 2 === 1;
+    default:
+      throw new Error(`effect ${id}: unknown cleanup mode ${JSON.stringify(cleanup)}`);
+  }
+}
+
 // --------------------------------------------------------------------------
 // Models 1 and 3: the synchronous `Context`, and `ThreadSafeContext` -- the
 // same public surface, one of them behind an Atomics mutex.
@@ -296,8 +320,11 @@ function makeSyncLikeModel(name, makeContext) {
           });
         },
         computesOf: (id) => computes.of(id),
-        async effect(id, reads, scopeName) {
+        async effect(id, reads, scopeName, cleanup) {
+          const returnsCleanup = cleanupRunsFor(id, cleanup);
+          let run = 0;
           const body = (c) => {
+            run += 1;
             runLog.push(id);
             // Swallowed, never propagated: an effect that reads through a
             // disposed node must not turn the publish that scheduled it into a
@@ -310,6 +337,8 @@ function makeSyncLikeModel(name, makeContext) {
             } catch (err) {
               if (!(err instanceof DisposedNodeError)) throw err;
             }
+            // `none` / the even runs of `alternate`: return nothing.
+            if (!returnsCleanup(run)) return;
             return () => cleanupLog.push(id);
           };
           const handle = scopeName == null ? ctx.effect(body) : scopes.get(scopeName).effect(body);
@@ -449,14 +478,19 @@ export const asyncModel = {
         });
       },
       computesOf: (id) => computes.of(id),
-      async effect(id, reads, scopeName) {
+      async effect(id, reads, scopeName, cleanup) {
+        const returnsCleanup = cleanupRunsFor(id, cleanup);
+        let run = 0;
         const body = async (cc) => {
+          run += 1;
           runLog.push(id);
           try {
             for (const r of reads) await readDep(cc, r);
           } catch (err) {
             if (!(err instanceof DisposedNodeError)) throw err;
           }
+          // `none` / the even runs of `alternate`: resolve to nothing.
+          if (!returnsCleanup(run)) return;
           return () => cleanupLog.push(id);
         };
         const handle =

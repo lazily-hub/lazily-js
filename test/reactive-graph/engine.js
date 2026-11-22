@@ -71,6 +71,7 @@ export const FIXTURES = [
   "disposal_does_not_run_surviving_effects.json",
   "dispose_detaches_edges_both_directions.json",
   "dispose_signal_reverts_to_lazy.json",
+  "effect_cleanup_is_optional.json",
   "failed_compute_is_never_cached.json",
   // #lzmergefeed: the mergefeed/feedback fixtures landed on spec main (Step 3).
   // Five use the `merge_cell` op this runner does not model, and
@@ -278,7 +279,7 @@ async function replaySteps(model, steps, label, assertFn, divergences, tail) {
           await instance.batch(op.writes ?? []);
           break;
         case "effect":
-          await instance.effect(op.id, op.reads ?? [], op.scope ?? null);
+          await instance.effect(op.id, op.reads ?? [], op.scope ?? null, op.cleanup);
           break;
         case "read":
           try {

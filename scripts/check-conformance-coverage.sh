@@ -258,7 +258,8 @@ fi
 # (#lzreplayjs) plus one upstream fixture the floor had already drifted behind.
 # 150 -> 155: the four conformance/egress/ fixtures this binding now replays
 # (#lzegress) plus egress/effect_cas.json (#lzeffectcas); the run that
-# re-pinned it OPENED exactly 155, and 156 fails.) The older convention visible in this file's history -- "the
+# re-pinned it OPENED exactly 155, and 156 fails. 155 -> 156: lazily-spec
+# added reactive-graph/effect_cleanup_is_optional.json, #lzeffectvoid.) The older convention visible in this file's history -- "the
 # observed run went from 135 to 136, so raise the floor by one and keep the
 # margin it had" -- is the bug it replaces. It only ever widens the gap, and
 # the gap had reached 9. A floor 9 below reality tolerates 9 fixtures silently
@@ -269,7 +270,7 @@ fi
 # coverage OK: <n>/..." line, set this to that <n>, then prove it is exact by
 # temporarily setting it to <n>+1 and watching this guard fail. A floor you
 # never watched fail is a floor you have not verified.
-MIN_FIXTURES="${MIN_FIXTURES:-155}"
+MIN_FIXTURES="${MIN_FIXTURES:-156}"
 if [ "$total" -eq 0 ]; then
   echo "ERROR: the corpus at $SPEC_DIR listed ZERO fixtures." >&2
   echo "       Every check above is vacuously green over an empty population." >&2
