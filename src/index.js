@@ -2766,3 +2766,14 @@ export {
 } from "./stdlib.js";
 export * from "./latest-durable-projection.js";
 export * from "./durable-client.js";
+export {
+  DRAIN_BUDGET,
+  Edge,
+  EdgeKind,
+  EffectRun,
+  GraphEdit,
+  GraphIr,
+  GraphIrError,
+  GraphRuntime,
+  Policy,
+} from "./graph-ir.js";

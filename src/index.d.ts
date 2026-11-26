@@ -1097,3 +1097,15 @@ export type {
   TimeoutOperationValue,
   TimerObservation,
 } from "./stdlib.js";
+export {
+  DRAIN_BUDGET,
+  Edge,
+  EdgeKind,
+  EffectRun,
+  GraphEdit,
+  GraphIr,
+  GraphIrError,
+  GraphRuntime,
+  Policy,
+} from "./graph-ir.js";
+export type { EdgeKindName, JsonValue, PolicyName } from "./graph-ir.js";

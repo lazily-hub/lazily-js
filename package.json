@@ -32,6 +32,10 @@
       "types": "./src/index.d.ts",
       "default": "./src/index.js"
     },
+    "./graph-ir": {
+      "types": "./src/graph-ir.d.ts",
+      "default": "./src/graph-ir.js"
+    },
     "./transport": {
       "types": "./src/transport.d.ts",
       "default": "./src/transport.js"
