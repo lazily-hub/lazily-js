@@ -50,6 +50,26 @@ test("published View package entry point interprets the stable field-change fixt
   assert.deepEqual(view.layoutJson(), stable.layout);
 });
 
+test("published View package gives omitted event payloads null to effects", () => {
+  const view = View.install({
+    id: "counter",
+    root: "clear",
+    signals: { value: { initial: 1 } },
+    nodes: {
+      clear: {
+        role: "button",
+        effects: {
+          activate: { op: "set", args: ["value", { op: "call", args: ["event"] }] },
+        },
+      },
+    },
+  });
+  assert.deepEqual(view.dispatch("clear", "activate"), [
+    { op: "set", signal: "value", value: null },
+  ]);
+  assert.equal(view.signalsJson().value, null);
+});
+
 const requireRealtimeFixture = process.env.LAZILY_REQUIRE_REALTIME_VIEW_FIXTURE === "1";
 test(
   "realtime View shared TypeScript fixture",

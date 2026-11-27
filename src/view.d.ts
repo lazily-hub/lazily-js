@@ -14,5 +14,5 @@ export declare class View {
   expressionsJson(): Record<string, ViewScalar>;
   layoutJson(): ViewLayoutNode[];
   chartJson(): string[] | null;
-  dispatch(node: string, event: ViewEventType, value: ViewScalar): ViewEffect[];
+  dispatch(node: string, event: ViewEventType, value?: ViewScalar): ViewEffect[];
 }

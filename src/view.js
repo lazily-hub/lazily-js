@@ -423,7 +423,7 @@ export class View {
     return this.chart === null ? null : this.chart.activeLeaves();
   }
 
-  dispatch(node, event, value) {
+  dispatch(node, event, value = null) {
     if (!EVENTS.has(event)) fail(`unknown event \`${event}\``);
     if (!Object.hasOwn(this.nodes, node)) fail(`unknown node \`${node}\``);
     const effect = this.effects[node]?.[event];
