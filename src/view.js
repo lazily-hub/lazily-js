@@ -208,11 +208,11 @@ function checkTree(root, nodes) {
   if (done.size !== Object.keys(nodes).length) fail("a node is not reachable from root");
 }
 
-function evalArg(value, read, payload) {
-  return isObject(value) ? evalExpr(value, read, payload) : literal(value);
+function evalArg(value, read, payload, safeIntegers = false) {
+  return isObject(value) ? evalExpr(value, read, payload, safeIntegers) : literal(value);
 }
 
-function evalCall(args, read, payload) {
+function evalCall(args, read, payload, safeIntegers) {
   if (args.length === 0 || typeof args[0] !== "string") fail("call takes a name");
   const rest = args.slice(1);
   if (args[0] === "event") {
@@ -222,7 +222,7 @@ function evalCall(args, read, payload) {
   }
   if (args[0] === "not") {
     if (rest.length !== 1) fail("not takes one boolean");
-    const value = evalArg(rest[0], read, payload);
+    const value = evalArg(rest[0], read, payload, safeIntegers);
     if (typeof value !== "boolean") fail("not expects a boolean");
     return !value;
   }
@@ -230,44 +230,48 @@ function evalCall(args, read, payload) {
     if (rest.length < 2) fail("add takes two or more integers");
     let sum = 0;
     for (const arg of rest) {
-      const value = evalArg(arg, read, payload);
+      const value = evalArg(arg, read, payload, safeIntegers);
       if (typeof value !== "number") fail("add expects integers");
       sum += value;
+      if (safeIntegers && !Number.isSafeInteger(sum)) fail("add exceeds safe integer range");
     }
     return sum;
   }
   if (args[0] === "len") {
     if (rest.length !== 1) fail("len takes one string");
-    const value = evalArg(rest[0], read, payload);
+    const value = evalArg(rest[0], read, payload, safeIntegers);
     if (typeof value !== "string") fail("len expects a string");
     return [...value].length;
   }
   fail(`unknown call \`${args[0]}\``);
 }
 
-function evalExpr(expr, read, payload) {
+function evalExpr(expr, read, payload, safeIntegers) {
   const args = expr.args;
   if (expr.op === "lit") return literal(args[0]);
   if (expr.op === "ref") return read(args[0]);
-  if (expr.op === "call") return evalCall(args, read, payload);
+  if (expr.op === "call") return evalCall(args, read, payload, safeIntegers);
   if (expr.op === "if") {
-    const cond = evalArg(args[0], read, payload);
+    const cond = evalArg(args[0], read, payload, safeIntegers);
     if (typeof cond !== "boolean") fail("if condition must be a boolean");
-    return evalArg(args[cond ? 1 : 2], read, payload);
+    return evalArg(args[cond ? 1 : 2], read, payload, safeIntegers);
   }
   if (expr.op === "eq") {
-    return Object.is(evalArg(args[0], read, payload), evalArg(args[1], read, payload));
+    return Object.is(
+      evalArg(args[0], read, payload, safeIntegers),
+      evalArg(args[1], read, payload, safeIntegers),
+    );
   }
   if (expr.op === "concat") {
-    return args.map((arg) => stringify(evalArg(arg, read, payload))).join("");
+    return args.map((arg) => stringify(evalArg(arg, read, payload, safeIntegers))).join("");
   }
-  if (expr.op === "trim") return stringify(evalArg(args[0], read, payload)).trim();
+  if (expr.op === "trim") return stringify(evalArg(args[0], read, payload, safeIntegers)).trim();
   fail(`unknown expression op \`${expr.op}\``);
 }
 
 export class View {
   /** @param {ReturnType<typeof createContext>} ctx */
-  constructor(ctx, doc, values = new Map()) {
+  constructor(ctx, doc, values) {
     if (!isObject(doc)) fail("view must be a JSON object");
     allow(doc, ["id", "root", "signals", "nodes", "chart"], "view");
     const id = reqStr(doc, "id", "view");
@@ -350,7 +354,7 @@ export class View {
     this.payload = undefined;
     this.signals = Object.create(null);
     for (const [sid, initial] of initials) {
-      this.signals[sid] = ctx.source(values.has(sid) ? literal(values.get(sid)) : initial);
+      this.signals[sid] = ctx.source(values?.has(sid) ? literal(values.get(sid)) : initial);
     }
     const read = (sid) => {
       const source = this.signals[sid];
@@ -359,7 +363,7 @@ export class View {
     };
     for (const [key, expr] of exprDocs) {
       try {
-        evalExpr(expr, read, undefined);
+        evalExpr(expr, read, undefined, values !== undefined);
       } catch (error) {
         fail(`${key}: ${error.message}`);
       }
@@ -376,6 +380,7 @@ export class View {
             return source.get(cx);
           },
           undefined,
+          values !== undefined,
         ),
       );
     }

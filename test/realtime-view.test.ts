@@ -101,5 +101,14 @@ test(
         assert.equal(identities.get(id)?.generation, generation, `${label} ${id}`);
       }
     }
+    const badSum = structuredClone(fixture.revisions["new-identity"]);
+    badSum.revision++;
+    const definition = badSum.definition as { nodes: { message: { text: object } } };
+    definition.nodes.message.text = {
+      op: "call",
+      args: ["add", Number.MAX_SAFE_INTEGER, 2, -Number.MAX_SAFE_INTEGER],
+    };
+    assert.throws(() => receiver.replace(badSum), /safe integer/);
+    assert.equal(receiver.revision, badSum.revision - 1);
   },
 );
