@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { Delta, Snapshot } from "@lazily-hub/lazily-js";
 import { RealtimeView } from "@lazily-hub/lazily-js/realtime-view";
@@ -23,15 +26,23 @@ type Step = {
 };
 
 const stable = loadFixture("view", "field_change.json");
-const fixture = stable.realtime as
-  | undefined
-  | {
-      instance: string;
-      revisions: Record<string, ViewRevision>;
-      snapshots: Record<string, { Snapshot: Parameters<typeof Snapshot.fromWire>[0] }>;
-      deltas: Record<string, { Delta: Parameters<typeof Delta.fromWire>[0] }>;
-      steps: Step[];
-    };
+type RealtimeFixture = {
+  instance: string;
+  revisions: Record<string, ViewRevision>;
+  snapshots: Record<string, { Snapshot: Parameters<typeof Snapshot.fromWire>[0] }>;
+  deltas: Record<string, { Delta: Parameters<typeof Delta.fromWire>[0] }>;
+  steps: Step[];
+};
+
+const specRoot =
+  process.env.LAZILY_SPEC_DIR ?? fileURLToPath(new URL("../../lazily-spec", import.meta.url));
+const fixturePath = resolve(specRoot, "conformance-extensions/realtime-view/explorer.json");
+let fixture: RealtimeFixture | undefined;
+try {
+  fixture = JSON.parse(readFileSync(fixturePath, "utf8")) as RealtimeFixture;
+} catch (error) {
+  if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+}
 
 test("published View package entry point interprets the stable field-change fixture", () => {
   const view = View.install(stable.view);
@@ -46,7 +57,7 @@ test(
   () => {
     assert.ok(
       fixture,
-      "Pinned lazily-spec field_change.json must contain the realtime View fixture",
+      "Pinned lazily-spec must contain conformance-extensions/realtime-view/explorer.json",
     );
     const receiver = new RealtimeView(fixture.instance);
     const identities = new Map<string, { token: object; generation: number }>();

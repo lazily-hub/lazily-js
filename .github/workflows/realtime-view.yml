@@ -24,7 +24,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: lazily-hub/lazily-spec
-          ref: "c3cdd0f6bb261d64d0e0cccb94949ff91bd50dee"
+          ref: "6b3a686c1931a88cd5e6fb23c21618481ad0dc74"
           path: lazily-spec
       - uses: actions/setup-node@v4
         with:
