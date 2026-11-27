@@ -85,6 +85,21 @@ export class GraphView {
     return this.#nodes.size;
   }
 
+  /** An independent projection for validating an update before publishing it. */
+  fork() {
+    const candidate = new GraphView();
+    candidate.#nodes = new Map(
+      [...this.#nodes].map(([id, node]) => [
+        id,
+        { ...node, payload: node.payload === null ? null : [...node.payload] },
+      ]),
+    );
+    candidate.#edges = new Set(this.#edges);
+    candidate.#epoch = this.#epoch;
+    candidate.#initialized = this.#initialized;
+    return candidate;
+  }
+
   /** Apply a cold-read native {@link Snapshot}, replacing the whole graph image. */
   applySnapshot(snapshot) {
     this.#nodes.clear();

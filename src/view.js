@@ -267,7 +267,7 @@ function evalExpr(expr, read, payload) {
 
 export class View {
   /** @param {ReturnType<typeof createContext>} ctx */
-  constructor(ctx, doc) {
+  constructor(ctx, doc, values = new Map()) {
     if (!isObject(doc)) fail("view must be a JSON object");
     allow(doc, ["id", "root", "signals", "nodes", "chart"], "view");
     const id = reqStr(doc, "id", "view");
@@ -298,8 +298,8 @@ export class View {
     if (!isObject(nodesDoc) || Object.keys(nodesDoc).length === 0) {
       fail("view nodes must contain at least one node");
     }
-    const nodes = {};
-    const effects = {};
+    const nodes = Object.create(null);
+    const effects = Object.create(null);
     const exprDocs = [];
     for (const [nid, raw] of Object.entries(nodesDoc)) {
       if (nid.length === 0) fail("node id must be a non-empty string");
@@ -348,8 +348,10 @@ export class View {
     this.effects = effects;
     this.chart = chart;
     this.payload = undefined;
-    this.signals = {};
-    for (const [sid, initial] of initials) this.signals[sid] = ctx.source(initial);
+    this.signals = Object.create(null);
+    for (const [sid, initial] of initials) {
+      this.signals[sid] = ctx.source(values.has(sid) ? literal(values.get(sid)) : initial);
+    }
     const read = (sid) => {
       const source = this.signals[sid];
       if (source === undefined) fail(`unknown signal \`${sid}\``);
@@ -362,7 +364,7 @@ export class View {
         fail(`${key}: ${error.message}`);
       }
     }
-    this.exprs = {};
+    this.exprs = Object.create(null);
     for (const [key, expr] of exprDocs) {
       const signals = this.signals;
       this.exprs[key] = ctx.computed((cx) =>
@@ -385,14 +387,14 @@ export class View {
     });
   }
 
-  static install(doc) {
-    return new View(createContext(), doc);
+  static install(doc, values) {
+    return new View(createContext(), doc, values);
   }
 
   signalsJson() {
-    const out = {};
-    for (const [id, source] of Object.entries(this.signals)) out[id] = source.get();
-    return out;
+    return Object.fromEntries(
+      Object.entries(this.signals).map(([id, source]) => [id, source.get()]),
+    );
   }
 
   expressionsJson() {

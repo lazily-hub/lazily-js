@@ -16,6 +16,7 @@ export declare class GraphView {
   get epoch(): number;
   get isInitialized(): boolean;
   get nodeCount(): number;
+  fork(): GraphView;
   applySnapshot(snapshot: unknown): void;
   /**
    * Throws (before mutating) on QueuePush/QueuePop/QueueClose: the graph-state

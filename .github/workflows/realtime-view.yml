@@ -1,0 +1,35 @@
+name: Realtime View conformance
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  typescript:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: lazily-js
+    env:
+      LAZILY_REQUIRE_REALTIME_VIEW_FIXTURE: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: lazily-js
+      - uses: actions/checkout@v4
+        with:
+          repository: lazily-hub/lazily-spec
+          ref: "c3cdd0f6bb261d64d0e0cccb94949ff91bd50dee"
+          path: lazily-spec
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm ci
+      - run: npm run generate:protobuf
+      - run: npm run typecheck
+      - run: node --test test/realtime-view.test.ts
