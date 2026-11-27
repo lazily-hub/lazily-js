@@ -144,7 +144,10 @@ async function replay(FlavorCls, fixtureName) {
   assert.ok(fixture, `canonical collections fixture missing: ${fixtureName}`);
 
   const initial = fixture.initial;
-  assert.ok(initial, `${flavor.name}: fixture ${fixtureName} has no initial state`);
+  assert.ok(
+    initial !== null && typeof initial === "object" && !Array.isArray(initial),
+    `${flavor.name}: fixture ${fixtureName} has no initial state object`,
+  );
   const seed = initial.order ?? [];
   assert.ok(seed.length > 0, `${flavor.name}: fixture ${fixtureName} seeds no keys`);
   for (const key of seed) {

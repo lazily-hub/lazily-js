@@ -32,7 +32,11 @@ function replay(name) {
 }
 
 if (!fixtureExists("view")) {
-  test("view conformance", { skip: "conformance/view is absent from this spec checkout" }, () => {});
+  test(
+    "view conformance",
+    { skip: "conformance/view is absent from this spec checkout" },
+    () => {},
+  );
 } else {
   test("view fixture set", () => {
     const found = readdirSync(specPath("view"))

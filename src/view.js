@@ -173,7 +173,8 @@ function parseLayout(id, value) {
   allow(value, ["flow", "align", "grow"], `node \`${id}\` layout`);
   let flow = null;
   if (Object.hasOwn(value, "flow")) {
-    if (typeof value.flow !== "string" || !FLOWS.has(value.flow)) fail(`unknown flow \`${value.flow}\``);
+    if (typeof value.flow !== "string" || !FLOWS.has(value.flow))
+      fail(`unknown flow \`${value.flow}\``);
     flow = value.flow;
   }
   if (Object.hasOwn(value, "align")) {
@@ -318,7 +319,8 @@ export class View {
         }
         if (!signalIds.has(raw.bind)) fail(`bind names unknown signal \`${raw.bind}\``);
       }
-      if (Object.hasOwn(raw, "text")) exprDocs.push([`${nid}.text`, standingExpr(raw.text, signalIds)]);
+      if (Object.hasOwn(raw, "text"))
+        exprDocs.push([`${nid}.text`, standingExpr(raw.text, signalIds)]);
       if (Object.hasOwn(raw, "hidden")) {
         exprDocs.push([`${nid}.hidden`, standingFlag("hidden", raw.hidden, signalIds)]);
       }
@@ -364,11 +366,15 @@ export class View {
     for (const [key, expr] of exprDocs) {
       const signals = this.signals;
       this.exprs[key] = ctx.computed((cx) =>
-        evalExpr(expr, (sid) => {
-          const source = signals[sid];
-          if (source === undefined) fail(`unknown signal \`${sid}\``);
-          return source.get(cx);
-        }, undefined),
+        evalExpr(
+          expr,
+          (sid) => {
+            const source = signals[sid];
+            if (source === undefined) fail(`unknown signal \`${sid}\``);
+            return source.get(cx);
+          },
+          undefined,
+        ),
       );
     }
     const exprHandles = Object.values(this.exprs);
@@ -451,7 +457,11 @@ export class View {
     }
     if (op === "send") {
       if (!this.chart) fail("send requires a chart");
-      if (!Array.isArray(args) || (args.length !== 1 && args.length !== 2) || typeof args[0] !== "string") {
+      if (
+        !Array.isArray(args) ||
+        (args.length !== 1 && args.length !== 2) ||
+        typeof args[0] !== "string"
+      ) {
         fail("send takes an event name and an optional payload");
       }
       const record = { op: "send", event: args[0] };

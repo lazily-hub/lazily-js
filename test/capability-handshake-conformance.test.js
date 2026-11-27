@@ -5,7 +5,7 @@ import { existsSync, readFileSync } from "node:fs";
 import test from "node:test";
 
 import { SessionHandshake } from "../src/index.js";
-import { assertKey } from "./support/assert-key.js";
+import { assertKey, requireFlag } from "./support/assert-key.js";
 import { scenarios } from "./support/scenario.js";
 
 import { specPath } from "./spec-corpus.cjs";
@@ -36,7 +36,7 @@ test("SessionHandshake replays the canonical negotiated-state contract", () => {
     const expected = scenario.expected;
 
     assertKey(expected, "compatible", result.ok);
-    if (result.ok) {
+    if (requireFlag(result.ok, "handshake result.ok")) {
       assertKey(expected, "negotiated_max_frame_size", result.maxFrameSize);
       assertKey(expected, "negotiated_fragmentation_supported", result.fragmentationSupported);
     } else {

@@ -34,6 +34,7 @@ import {
   excuseKey,
   fnv1a64Hex,
   proseKey,
+  requireFlag,
   verifyProse,
 } from "./support/assert-key.js";
 import { scenarios } from "./support/scenario.js";
@@ -185,7 +186,7 @@ test("NodeId exact-representation bound is enforced by refusal, never rounding",
 
     const result = decodeScenario(scenario, expect, observedCodecs);
 
-    if (!result.ok) {
+    if (!requireFlag(result.ok, "decoder result.ok")) {
       // The refusal is correct only BECAUSE the fixture's own identifier is
       // outside the exact range, so `node_id_decimal` is threaded through the
       // comparison rather than compared to the derived `representable` flag. A

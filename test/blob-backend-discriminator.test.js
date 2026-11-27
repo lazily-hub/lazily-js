@@ -94,6 +94,7 @@ import {
   assertKeyWith,
   fnv1a64Hex,
   proseKey,
+  requireFlag,
   verifyProse,
 } from "./support/assert-key.js";
 import { scenarios } from "./support/scenario.js";
@@ -362,13 +363,14 @@ test("blob backend: an absent discriminator is shm, an unknown one is refused by
     const onWire = wireBackend(scenario);
     observedForms.add(scenario.backend_form);
     const result = decodeScenario(scenario, expect, observedCodecs);
+    const decodedOk = requireFlag(result.ok, "decoder result.ok");
 
     if (scenario.outcome === "reject") {
       observedOutcomes.add("reject");
       refused += 1;
-      assertKey(expect, "rejected", !result.ok, where);
+      assertKey(expect, "rejected", !decodedOk, where);
       assert.ok(
-        !result.ok,
+        !decodedOk,
         `${where}: a \`backend\` outside ${JSON.stringify(Object.values(BlobBackendKind))} was ` +
           "ACCEPTED. Normalizing it to `shm` routes a descriptor of an unknown kind into a " +
           "table this build really does resolve, which is the misroute resolve_wrong_backend " +
@@ -473,7 +475,7 @@ test("blob backend: an absent discriminator is shm, an unknown one is refused by
     // against the wrong half of the contract.
     assert.equal(scenario.outcome, "accept", `${where}: unknown outcome ${scenario.outcome}`);
     observedOutcomes.add("accept");
-    assert.ok(result.ok, `${where}: a conforming frame was refused — ${result.error}`);
+    assert.ok(decodedOk, `${where}: a conforming frame was refused — ${result.error}`);
     accepted += 1;
 
     const blob = decodedBlob(scenario, result.message);
